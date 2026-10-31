@@ -263,9 +263,11 @@ export const register: Register = on => {
   on('command.run', { command: 'todo' }, async ($, e) => {
     const [verb = '', ...rest] = e.args.trim().split(/\s+/)
     const arg = rest.join(' ')
+    // Every /todo is the person asking, so the pane seats at any width; one
+    // opened unasked at session start waits for a wide enough terminal.
+    const { isPlaced } = await $.ui.open({ id: PANE, title: 'Todos', focus: verb === '' || verb === 'list' ? true : undefined })
     if (verb === '' || verb === 'list') {
-      await $.ui.open({ id: PANE, title: 'Todos', focus: true })
-      return { text: 'Todo pane opened.' }
+      return { text: isPlaced ? 'Todo pane opened.' : 'Todo pane is waiting for room: widen the terminal or use fullscreen (/config → tui).' }
     }
     if (verb === 'add') {
       const n = await addTodo($, arg)
