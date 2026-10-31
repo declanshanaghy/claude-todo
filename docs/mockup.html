@@ -8,7 +8,7 @@
 :root{
   --bg:#0d1016; --term:#11141b; --panebg:#0f1219; --line:#262b36; --fg:#d6d9e0; --dim:#6b7383; --faint:#3a4150;
   --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757;
-  --chrome:#181c25; --chromefg:#aab1bf;
+  --chrome:#181c25; --chromefg:#aab1bf; --subtle:#8b93a3; --inv:#11141b;
   --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
@@ -37,10 +37,27 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .row{white-space:pre;display:flex;align-items:baseline;min-height:20px}
 .ind1{padding-left:2ch}.ind2{padding-left:4ch}.ind3{padding-left:6ch}.ind4{padding-left:8ch}
 .btn{cursor:pointer;padding:0 1px;border-radius:2px}
-.btn.f{background:var(--fg);color:var(--term)}
-.btn.f *{color:var(--term)!important}
-.act{color:var(--blue)}
-.act.danger{color:var(--red)}
+.btn.f:not(.chip){background:var(--fg);color:var(--term)}
+.btn.f:not(.chip) *{color:var(--term)!important}
+/* Action chips mirror hooks/pane.tsx chip(): a filled label whose fill is its tone
+   (primary = claude orange, danger = error red, default = subtle grey). The focus
+   style depends on the option picked in the "Focus style" switcher (html.fm-*). */
+.chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
+.chip{--tone:var(--subtle)}.chip.tone-primary{--tone:var(--orange)}.chip.tone-danger{--tone:var(--red)}
+.chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
+/* current: Claude Code inverts the focused element, so the fill becomes text color */
+.fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
+/* uniform / both: one neutral fill; only the focused chip turns orange + bold */
+.fm-uniform .chip .fill,.fm-both .chip .fill{background:var(--subtle);font-weight:400}
+.fm-uniform .chip.f .fill,.fm-both .chip.f .fill{background:var(--orange);font-weight:700}
+/* border / both: every chip reserves a transparent border so focus never shifts the row */
+.fm-border .chip,.fm-both .chip{border:2px solid transparent;border-radius:7px;padding:1px}
+.fm-border .chip.f,.fm-both .chip.f{border-color:var(--orange)}
+.focusbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px;font-size:13px;color:var(--chromefg)}
+.focusbar button{background:var(--chrome);color:var(--chromefg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+.focusbar button.on{background:var(--fg);color:var(--term);border-color:var(--fg);font-weight:600}
+.focusbar .note{color:var(--dim);font-size:12px}
+.focusbar code{font-family:var(--mono);font-size:12px;color:var(--fg)}
 .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
 .dim{color:var(--dim)}.faint{color:var(--faint)}.cy{color:var(--cyan)}.gr{color:var(--green)}.ye{color:var(--yellow)}.re{color:var(--red)}.ma{color:var(--magenta)}.bl{color:var(--blue)}.or{color:var(--orange)}
 .code{white-space:pre-wrap;word-break:break-all;background:#0a0c11;border-left:2px solid var(--faint);margin:1px 0 3px 8ch;padding:2px 8px;color:#b8bfcc;font-size:12px}
@@ -78,13 +95,14 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .status{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;padding:4px 2px 0;gap:10px}
 .toast{color:var(--green);transition:opacity .4s}
 .ctrlx{color:var(--yellow)}
-.embed body{padding:8px}.embed h1,.embed .sub,.embed .tabs{display:none}
+.embed body{padding:8px}.embed h1,.embed .sub,.embed .tabs,.embed .focusbar{display:none}
 @media (max-width:820px){.split{flex-direction:column}.chat{border-right:0;border-bottom:1px solid var(--line)}.pane{flex-basis:auto}.chatlog{max-height:340px}}
 </style>
 </head>
 <body>
 <h1>/todo pane: interactive mockup</h1>
 <div class="sub">The terminal below simulates Claude Code with the <code>todo</code> mod's right-hand pane. It supports only what the terminal mod API supports: a focus ring, Tab/arrows, Enter or click to press, Esc to leave. There are no hover effects and no single-letter hotkeys.</div>
+<div class="focusbar" id="focusbar"><b style="color:var(--fg)">Focus style:</b></div>
 <div class="tabs" id="tabs"></div>
 <div class="hint" id="hint"></div>
 
@@ -99,14 +117,14 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
         <div class="status"><span id="statusline"></span><span class="toast" id="toast"></span></div>
       </div>
     </div>
-    <div class="pane" id="pane">
+    <div class="pane" id="pane" tabindex="-1">
       <div class="panehead"><span id="panetitle">Todos</span><span id="panecap"></span></div>
       <div class="panebody" id="panebody"></div>
     </div>
   </div>
 </div>
 <div class="keys">
-  <span><kbd>ctrl+x</kbd> then <kbd>tab</kbd> or a click → pane takes focus</span>
+  <span><kbd>ctrl+x</kbd> / <kbd>⌘x</kbd>, release, then <kbd>tab</kbd> (or a click) → pane takes focus</span>
   <span><kbd>tab</kbd>/<kbd>shift+tab</kbd>/<kbd>↑↓←→</kbd> move focus</span>
   <span><kbd>enter</kbd> or a click → press</span>
   <span><kbd>esc</kbd> → back to the prompt</span>
@@ -120,6 +138,22 @@ const HASH = location.hash.match(/^#m(\d)(-embed)?/);
 const EMBED = !!(HASH && HASH[2]);
 const canFocus = () => !EMBED || document.hasFocus();
 if(EMBED) document.documentElement.classList.add('embed');
+// Focus-style options for action chips: ?focus=current|uniform|border|both (combines with #mN, e.g. ?focus=both#m5).
+const FOCUS_MODES = [
+  ['current','current','tone fills; focus = terminal inversion (what ships today)'],
+  ['uniform','uniform','same grey fill on every chip; focused chip turns orange + bold'],
+  ['border','border','tone fills; rounded orange border around the focused chip'],
+  ['both','both','uniform fills + the border on the focused chip'],
+];
+let focusMode = new URLSearchParams(location.search).get('focus');
+if(!FOCUS_MODES.some(m=>m[0]===focusMode)) focusMode = 'current';
+function setFocusMode(m, push){
+  focusMode = m;
+  FOCUS_MODES.forEach(([k])=>document.documentElement.classList.toggle('fm-'+k, k===m));
+  document.querySelectorAll('#focusbar button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
+  const note=document.getElementById('focusnote'); if(note) note.textContent = FOCUS_MODES.find(x=>x[0]===m)[2];
+  if(push){ const u=new URL(location.href); u.searchParams.set('focus', m); history.replaceState(null, '', u); }
+}
 const SPIN = ['◐','◓','◑','◒'];
 let spin = 0, uidN = 0;
 const uid = () => 'x' + (++uidN);
@@ -406,15 +440,17 @@ function press(fid){
 /* ---------- pane render ---------- */
 function glyph(st){ return ({pending:['○','dim'],drafting:['✎','bl'],planning:['◇','ma'],running:[SPIN[spin],'cy'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','gr'],queued:['◌','faint'],run:[SPIN[spin],'cy'],ok:['✓','gr']})[st] || ['?','dim']; }
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
+// Filled action chip, toned like hooks/pane.tsx: 'primary' | 'danger' | 'default'.
+function chipB(fid, label, tone='default'){ return B(fid, `<span class="fill">${esc(label)}</span>`, `chip tone-${tone}`); }
 function actRow(t){
-  const a = (k,l,d) => B(`act:${t.id}:${k}`, `[${l}]`, 'act'+(d?' danger':''));
-  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop',1)} ${a('keep','Keep running')}</div>`;
-  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete',1)} ${a('cancel','Cancel')}</div>`;
+  const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone);
+  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','danger')} ${a('keep','Keep running','primary')}</div>`;
+  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete','danger')} ${a('cancel','Cancel','primary')}</div>`;
   switch(t.status){
-    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete',1)}</div>`;
-    case 'running': return `<div class="row ind2">${a('pause','⏸ Pause')} ${a('stop','■ Stop',1)}</div>`;
-    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume')} ${a('stop','■ Stop',1)}</div>`;
-    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine prompt & restart')} ${a('restart','↻ Restart as-is')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume')} ${a('leave','Leave stopped')}</div>`;
+    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','primary')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
+    case 'running': return `<div class="row ind2">${a('pause','⏸ Pause')} ${a('stop','■ Stop','danger')}</div>`;
+    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','primary')} ${a('stop','■ Stop','danger')}</div>`;
+    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine prompt & restart','primary')} ${a('restart','↻ Restart as-is')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume')} ${a('leave','Leave stopped')}</div>`;
     case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';
@@ -426,7 +462,7 @@ function renderPane(){
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span><span class="cy">▶${c('running')}</span> <span class="ye">⏸${c('paused')}</span> <span class="re">■${c('stopped')}</span> <span class="gr">✓${c('done')}</span>`;
   document.getElementById('panecap').textContent = `cap ${CAP} agents`;
   let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div><div class="row"> </div>`;
-  if(S.view) h += `<div class="row">${B('back','[↩ Main conversation]','act')}</div><div class="row"> </div>`;
+  if(S.view) h += `<div class="row">${chipB('back','↩ Main conversation')}</div><div class="row"> </div>`;
   for(const t of S.todos){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
@@ -454,7 +490,7 @@ function renderPane(){
           h += `<div class="code"><span class="lbl">response </span>${c.state==='run'?'<span class="cy">running…</span>':c.state==='ok'?esc(c.out):'<span class="ye">interrupted</span>'}</div>`;
         }
       }
-      if(a.kind==='agent') h += `<div class="row ind3">${B('view:'+a.id,'[↗ Transcript]','act')}</div>`;
+      if(a.kind==='agent') h += `<div class="row ind3">${chipB('view:'+a.id,'↗ Transcript')}</div>`;
       else h += `<div class="row ind3 faint">(workflow agent · traced here, no transcript view)</div>`;
     }
   }
@@ -466,21 +502,23 @@ function renderPane(){
   if(S.area==='pane' && canFocus()){
     if(S.fid==='add') document.getElementById('addinp').focus();
     else if(S.fid && S.fid.startsWith('ren:')){ const el=document.getElementById('ren_'+S.fid.slice(4)); if(el && document.activeElement!==el){ el.focus(); el.select(); } }
-    else { document.activeElement?.blur?.(); }
+    else if(document.activeElement!==pane) pane.focus({preventScroll:true});
     body.querySelector(`[data-fid="${CSS.escape(S.fid)}"]`)?.scrollIntoView({block:'nearest'});
   }
 }
 function renderStatus(){
   const c = st => S.todos.filter(t=>t.status===st).length;
-  document.getElementById('statusline').innerHTML = `<span class="or">todo</span> ▶${c('running')} ⏸${c('paused')} ■${c('stopped')} ✓${c('done')} ○${c('pending')}${S.ctrlX?' · <span class="ctrlx">ctrl+x …</span>':''}`;
+  document.getElementById('statusline').innerHTML = `<span class="or">todo</span> ▶${c('running')} ⏸${c('paused')} ■${c('stopped')} ✓${c('done')} ○${c('pending')}${S.ctrlX?` · <span class="ctrlx">${S.ctrlX} … tab</span>`:''}`;
   document.getElementById('promptbox').classList.toggle('f', S.area==='prompt');
 }
 function render(){ renderPane(); renderChat(); renderStatus(); if(S.area==='prompt' && !S.view && canFocus()) document.getElementById('prompt').focus(); }
 
 /* ---------- input ---------- */
 document.addEventListener('keydown', e => {
-  if(e.ctrlKey && (e.key==='x'||e.key==='X')){ S.ctrlX=true; e.preventDefault(); renderStatus(); clearTimeout(S.cxT); S.cxT=setTimeout(()=>{S.ctrlX=false; renderStatus();},1500); return; }
-  if(e.key==='Tab' && S.ctrlX && S.area!=='pane'){ e.preventDefault(); S.ctrlX=false; focusPane(); return; }
+  // Leader chord: ctrl+x (terminal) or ⌘x (macOS habit). Arms for 1.5s; the next Tab moves keys into the pane.
+  if((e.ctrlKey||e.metaKey) && !e.altKey && (e.key==='x'||e.key==='X')){ S.ctrlX = e.metaKey ? '⌘x' : 'ctrl+x'; e.preventDefault(); renderStatus(); clearTimeout(S.cxT); S.cxT=setTimeout(()=>{S.ctrlX=false; renderStatus();},1500); return; }
+  // Tab never reaches the browser, armed or not, so focus can't escape to the address bar or another element.
+  if(e.key==='Tab'){ e.preventDefault(); if(S.ctrlX){ clearTimeout(S.cxT); S.ctrlX=false; if(S.area!=='pane'){ focusPane(); return; } renderStatus(); } }
   if(S.area==='dialog' && S.dialog){ dialogKey(e); return; }
   if(S.area==='pane'){
     const isInput = S.fid==='add' || S.fid?.startsWith('ren:');
@@ -506,13 +544,14 @@ document.addEventListener('keydown', e => {
   }
 });
 document.getElementById('panebody').addEventListener('mousedown', e => {
-  const el=e.target.closest('[data-fid]'); S.area='pane';
-  if(!el){ render(); return; }
+  const el=e.target.closest('[data-fid]');
+  if(!el){ e.preventDefault(); focusPane(); return; }
+  S.area='pane';
   const fid=el.dataset.fid; S.fid=fid;
   if(fid==='add'||fid.startsWith('ren:')){ render(); return; }
   e.preventDefault(); press(fid);
 });
-document.getElementById('pane').addEventListener('mousedown', e => { if(!e.target.closest('#panebody')){ S.area='pane'; render(); } });
+document.getElementById('pane').addEventListener('mousedown', e => { if(!e.target.closest('#panebody')){ e.preventDefault(); focusPane(); } });
 document.getElementById('prompt').addEventListener('focus', () => { if(S.area==='pane'){ S.area = S.dialog?'dialog':'prompt'; renderPane(); renderStatus(); } });
 
 /* ---------- ticker ---------- */
@@ -531,6 +570,10 @@ function loadScene(i){
   const ai=document.getElementById('addinp'); if(ai) ai.value='';
   SCENES[i].setup(); render();
 }
+const fbar=document.getElementById('focusbar');
+FOCUS_MODES.forEach(([k,label,desc])=>{ const b=document.createElement('button'); b.textContent=label; b.title=desc; b.dataset.mode=k; b.onmousedown=e=>e.preventDefault(); b.onclick=()=>{ setFocusMode(k,true); render(); }; fbar.appendChild(b); });
+fbar.insertAdjacentHTML('beforeend', `<span class="note" id="focusnote"></span><span class="note">· link one directly: <code>?focus=current|uniform|border|both</code> (works with <code>#m1</code>–<code>#m6</code>)</span>`);
+setFocusMode(focusMode, false);
 const tabs=document.getElementById('tabs');
 SCENES.forEach((s,i)=>{ const b=document.createElement('button'); b.textContent=s.name; b.onclick=()=>loadScene(i); tabs.appendChild(b); });
 const rb=document.createElement('button'); rb.textContent='↺ Reset scene'; rb.onclick=()=>loadScene(S.scene); tabs.appendChild(rb);
