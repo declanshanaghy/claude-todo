@@ -1,16 +1,37 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Detail, PaneUi, Todo } from '../types'
+import type { AgentNode, Call, Confirm, Detail, PaneUi, Todo } from '../types'
+import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos } from './db'
 import { drawDetail } from './detail'
-import { drawPane } from './pane'
+import { drawPane, focusOrder } from './pane'
 import { execPrompt, restartPrompt, resumePrompt } from './protocol'
 
 export const PANE = 'todo'
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const todos = atom({ plugin: 'todo', key: 'todos' } as const, [], { shape: 'todos-1' })
+//
+// Todos belong to a directory (the repo the session is in, else the home
+// directory), kept with their agents and tool calls in the SQLite file db.ts
+// drives. These values are this session's copy of that directory's rows for
+// drawing, refreshed on each write and whenever the file changes.
+const todos = atom({ plugin: 'todo', key: 'list' } as const, [], { shape: 'list-1' })
+// Where versions before 0.3 kept the session's todos; read once to migrate.
+const legacy = atom({ plugin: 'todo', key: 'todos' } as const, [], { shape: 'todos-1' })
+// The directory the list belongs to, the root it was resolved from, and the
+// list's rev and last call seq this copy stands at.
+const dir = atom({ plugin: 'todo', key: 'dir' } as const, '')
+const root = atom({ plugin: 'todo', key: 'root' } as const, '')
+const rev = atom({ plugin: 'todo', key: 'rev' } as const, -1)
+const seq = atom({ plugin: 'todo', key: 'seq' } as const, 0)
+const stamp = atom({ plugin: 'todo', key: 'stamp' } as const, '')
+const me = atom({ plugin: 'todo', key: 'me' } as const, '')
+// Why the database can't be used; the pane is read-only while it's set.
+const fault = atom({ plugin: 'todo', key: 'fault' } as const, '')
+// Whether this session's agents and calls from before 0.3 were written out.
+const persisted = atom({ plugin: 'todo', key: 'persisted' } as const, false)
+const db = atom({ plugin: 'todo', key: 'db' } as const, null as { bin: string; file: string } | null)
 const agents = atom({ plugin: 'todo', key: 'agents' } as const, [], { shape: 'agents-1' })
 const calls = atom({ plugin: 'todo', key: 'calls' } as const, [], { shape: 'calls-2' })
 const ui = atom(
@@ -21,6 +42,13 @@ const ui = atom(
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
 const spin = atom({ plugin: 'todo', key: 'spin' } as const, 0)
 const detail = atom({ plugin: 'todo', key: 'detail' } as const, null as Detail)
+// The key of the element the pane's focus ring is on, so the pane can draw
+// that chip's border; a person's moves arrive at ui.focus, the mod's own here.
+const ring = atom({ plugin: 'todo', key: 'ring' } as const, null as string | null)
+// How long a done todo stays in the tree, in ms (0 keeps it), and the todos
+// whose time is up: the tree leaves them out; the database keeps them.
+const ttl = atom({ plugin: 'todo', key: 'ttl' } as const, 0)
+const expired = atom({ plugin: 'todo', key: 'expired' } as const, [] as number[])
 
 const CALLS_PER_AGENT = 200
 const CALLS_TOTAL = 1500
@@ -28,23 +56,319 @@ const FIELD_MAX = 3000
 const RESPONSE_MAX = 6000
 const RESERVED = new Set(['tool', 'tool_use_id', 'agentId', 'consent', 'requestMeta'])
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'url', 'query', 'description', 'path', 'prompt']
+export const INFLIGHT = new Set<Todo['status']>(['drafting', 'planning', 'running', 'paused'])
+const SYNC_MS = 2000
+// Each write retries this often when other sessions keep moving the list.
+const TRIES = 5
+const CALLS_PAGE = 100
 
 type $ = EngineInterface
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const num = (m: RegExpExecArray | null) => (m ? Number(m[1]) : undefined)
 const firstLine = (s: string) => s.trim().split('\n')[0] ?? ''
+const norm = (s: string) => s.trim().toLowerCase()
+
+// Sets each field `patch` names; one it names as undefined is dropped, as an
+// optional field is absent rather than undefined.
+function assign<T extends object>(o: T, patch: { [K in keyof T]?: T[K] | undefined }): T {
+  const fields: [string, unknown][] = Object.entries({ ...o, ...patch })
+  return Object.fromEntries(fields.filter(([, v]) => v !== undefined)) as T
+}
+
+const str = (v: unknown) => (typeof v === 'string' ? v : '')
+// JSON.stringify answers undefined for undefined, a function or a symbol.
+const json = (v: unknown, space?: number): string | undefined => JSON.stringify(v, null, space)
+
+// ---------- the directory's rows ----------
+
+async function real($: $, path: string) {
+  try {
+    return (await $.fs.stat(path, { resolve: true })).realPath ?? path
+  } catch {
+    return path
+  }
+}
+
+// The repo `from` is in, its worktree its own; outside any repo, home.
+async function keyFor($: $, from: string) {
+  try {
+    const r = await $.process.run(['git', '-C', from, 'rev-parse', '--show-toplevel'])
+    if (r.exitCode === 0 && r.stdout.trim()) return await real($, r.stdout.trim())
+  } catch {
+    // not a repo, or no git
+  }
+  return real($, (await $.env.get('HOME')) ?? from)
+}
+
+const isTodo = (t: unknown): t is Todo =>
+  typeof t === 'object' && t !== null && typeof (t as Todo).n === 'number' && typeof (t as Todo).title === 'string'
+
+async function where($: $) {
+  const at = await read($, db)
+  if (!at) throw new DbError(await read($, fault))
+  return { at, d: await read($, dir), me: await read($, me) }
+}
+
+// A failure the person should see once, not a hook error on every tick.
+async function fail($: $, err: unknown) {
+  const why = err instanceof Error ? err.message : String(err)
+  if ((await read($, fault)) !== why) $.ui.toast(`todo: ${why}`)
+  await update($, fault, () => why)
+}
+
+// Reads the directory's todos and agents; the calls since the copy's last seq
+// (or, from scratch, the newest CALLS_TOTAL) are merged in.
+async function reload($: $, fresh = false) {
+  const { at, d } = await where($)
+  const snap = await snapshot($, at, d, CALLS_TOTAL)
+  // A write of this session's that landed after the read began stays.
+  if (fresh || snap.rev >= (await read($, rev))) {
+    await update($, todos, () => snap.todos.filter(isTodo))
+    await update($, rev, () => snap.rev)
+  }
+  await update($, agents, () => snap.agents)
+  let after = fresh ? Math.max(0, snap.floor - 1) : await read($, seq)
+  const got: Call[] = []
+  for (;;) {
+    const page = await callsAfter($, at, d, after, CALLS_PAGE)
+    for (const { seq: _, ...c } of page.rows) got.push(c)
+    if (page.last === null || page.rows.length < CALLS_PAGE) {
+      if (page.last !== null) after = page.last
+      break
+    }
+    after = page.last
+  }
+  await update($, seq, () => after)
+  const ids = new Set(snap.agents.map(a => a.agentId))
+  const byId = new Map(got.map(c => [c.id, c]))
+  await update($, calls, l =>
+    [...(fresh ? [] : l.filter(c => !byId.has(c.id))), ...got].filter(c => ids.has(c.agentId)).slice(-CALLS_TOTAL),
+  )
+  await syncStatus($)
+}
+
+// Every todo write is checked against the rev this copy stands at: when
+// another session moved the list since, the copy is re-read and `fn` runs
+// again. A todo this session puts in flight is stamped its owner.
+async function editTodos($: $, fn: (list: Todo[]) => Todo[]) {
+  if (await read($, fault)) {
+    $.ui.toast(`todo is read-only: ${await read($, fault)}`)
+    return false
+  }
+  try {
+    const { at, d, me: self } = await where($)
+    const now = await $.clock.now()
+    for (let i = 0; i < TRIES; i++) {
+      const before = await read($, todos)
+      const r = await read($, rev)
+      // A todo this session puts in flight is stamped its owner; one that turns
+      // done, the time, which its time in the tree counts from.
+      const stamp = (t: Todo): Todo =>
+        t.status === 'done'
+          ? t.doneAt === undefined ? { ...t, doneAt: now } : t
+          : t.doneAt === undefined ? t : assign(t, { doneAt: undefined })
+      const after = fn(before).map(t =>
+        before.includes(t) ? t : stamp(INFLIGHT.has(t.status) ? { ...t, owner: self } : t),
+      )
+      const put = after.filter(t => !before.includes(t))
+      const del = before.filter(t => !after.some(x => x.n === t.n)).map(t => t.n)
+      if (put.length === 0 && del.length === 0) return true
+      if (await writeTodos($, at, d, r, put, del)) {
+        await update($, todos, () => after)
+        await update($, rev, () => r + 1)
+        return true
+      }
+      await reload($)
+    }
+    $.ui.toast('todo: not saved, other sessions kept changing the list; try again')
+  } catch (err) {
+    await fail($, err)
+  }
+  return false
+}
+
+// Agents and calls are written through: each change to this session's copy
+// lands in the database, where a later session (or this one after a restart)
+// reads it back.
+async function editAgents($: $, fn: (list: AgentNode[]) => AgentNode[]) {
+  let before: AgentNode[] = []
+  let after: AgentNode[] = []
+  await update($, agents, l => ((before = l), (after = fn(l)), after))
+  const put = after.filter(a => !before.includes(a))
+  const del = before.filter(a => !after.some(x => x.agentId === a.agentId)).map(a => a.agentId)
+  if (put.length === 0 && del.length === 0) return
+  try {
+    const { at, d, me: self } = await where($)
+    await writeAgents($, at, d, self, put, del)
+  } catch (err) {
+    await fail($, err)
+  }
+}
+
+async function editCalls($: $, fn: (list: Call[]) => Call[]) {
+  let before: Call[] = []
+  let after: Call[] = []
+  await update($, calls, l => ((before = l), (after = fn(l)), after))
+  const put = after.filter(c => !before.includes(c))
+  if (put.length === 0) return
+  try {
+    const { at, d, me: self } = await where($)
+    for (const c of put) await writeCall($, at, d, self, c)
+  } catch (err) {
+    await fail($, err)
+  }
+}
+
+// Folds `incoming` into directory `d`'s list in one transaction with its
+// backup, once per `id`. Never-run todos whose title the list already has
+// (or an earlier incoming one) collapse into it; the rest keep their number
+// unless it's taken. Resolves the renumbering, or undefined when `id` was
+// imported before.
+async function importInto($: $, d: string, id: string, incoming: Todo[], own: (t: Todo) => Todo) {
+  const { at } = await where($)
+  const fresh = (t: Todo) => !t.hasRun && t.status === 'pending'
+  for (let i = 0; i < TRIES; i++) {
+    const snap = await snapshot($, at, d, 1)
+    const have = snap.todos.filter(isTodo)
+    const taken = new Set(have.map(t => t.n))
+    let top = Math.max(0, ...taken, ...incoming.map(t => t.n))
+    const put: Todo[] = []
+    const renum = new Map<number, number>()
+    for (const t of incoming) {
+      const twin = fresh(t) ? [...have, ...put].find(x => fresh(x) && norm(x.title) === norm(t.title)) : undefined
+      if (twin) {
+        if (twin.n !== t.n) renum.set(t.n, twin.n)
+        continue
+      }
+      const n = taken.has(t.n) ? ++top : t.n
+      taken.add(n)
+      if (n !== t.n) renum.set(t.n, n)
+      put.push(own({ ...t, n }))
+    }
+    const r = await importTodos($, at, { dir: d, rev: snap.rev, id, at: await $.clock.now(), backup: incoming, put })
+    if (r === 'ok') return renum
+    if (r === 'done') return undefined
+  }
+  throw new DbError(`import of ${id} kept colliding with other sessions' writes`)
+}
+
+// Moves the todos an earlier version kept in this session's state into the
+// directory's list (see importInto), then clears them; this session's links
+// follow any renumbering.
+async function migrate($: $) {
+  const old = (await read($, legacy)).filter(isTodo)
+  if (old.length === 0) return
+  const { d, me: self } = await where($)
+  const renum = await importInto($, d, `session:${self}`, old, t => (INFLIGHT.has(t.status) ? { ...t, owner: self } : t))
+  await update($, legacy, () => [])
+  if (!renum || renum.size === 0) return
+  const to = (n: number) => renum.get(n) ?? n
+  await update($, agents, l => l.map(a => ({ ...a, todoN: to(a.todoN) })))
+  await update($, ui, u => ({
+    ...u,
+    expanded: u.expanded.map(x => (/^t\d+$/.test(x) ? `t${to(Number(x.slice(1)))}` : x)),
+    justStopped: u.justStopped.map(to),
+    confirm: u.confirm && { ...u.confirm, n: to(u.confirm.n) },
+    renaming: u.renaming === null ? null : to(u.renaming),
+  }))
+  await update($, detail, x => (x?.kind === 'todo' ? { ...x, n: to(x.n) } : x))
+}
+
+// An unreleased build kept lists in $.store under `dir:<cwd>`: each goes to
+// the list its path now belongs to, and its key is deleted once every title is
+// there. Its other keys (backups, heartbeats) go with the last of them.
+async function migrateStore($: $) {
+  const { at } = await where($)
+  const keys = await $.store.keys()
+  let isLeft = false
+  for (const k of keys.filter(x => x.startsWith('dir:'))) {
+    const path = k.slice('dir:'.length)
+    const v = (await $.store.get(k)) as { todos?: unknown[] } | undefined
+    const incoming = (Array.isArray(v?.todos) ? v.todos : []).filter(isTodo)
+    const d = await keyFor($, path)
+    await importInto($, d, `store:${path}`, incoming, t => t)
+    const there = new Set((await snapshot($, at, d, 1)).todos.map(t => norm(t.title)))
+    if (incoming.every(t => there.has(norm(t.title)))) await $.store.delete(k)
+    else isLeft = true
+  }
+  if (isLeft) return
+  for (const k of keys) if (k.startsWith('backup:') || k.startsWith('alive:')) await $.store.delete(k)
+}
+
+// A session from before 0.3 kept its agents and calls in its own state: write
+// them out once, under the list they now belong to.
+async function persistTraces($: $) {
+  if (await read($, persisted)) return
+  const { at, d, me: self } = await where($)
+  await writeAgents($, at, d, self, await read($, agents), [])
+  for (const c of await read($, calls)) await writeCall($, at, d, self, c)
+  await update($, persisted, () => true)
+}
+
+// A backup is kept until a later start than the one that wrote it.
+async function pruneBackups($: $, bootAt: number) {
+  const { at } = await where($)
+  const old = (await backups($, at)).filter(b => b.at < bootAt).map(b => b.id)
+  await dropBackups($, at, old)
+}
+
+// Resolves the list for the session's root; a new one is read from scratch.
+async function settle($: $) {
+  const r = await $.session.root()
+  if (r === (await read($, root)) && (await read($, dir))) return false
+  const d = await keyFor($, r)
+  await update($, root, () => r)
+  if (d === (await read($, dir))) return false
+  await update($, dir, () => d)
+  await update($, rev, () => -1)
+  await update($, seq, () => 0)
+  return true
+}
+
+async function mtime($: $, path: string) {
+  try {
+    return String((await $.fs.stat(path)).mtimeMs)
+  } catch {
+    return ''
+  }
+}
+
+async function sync($: $) {
+  if (await read($, fault)) return
+  try {
+    if (await settle($)) {
+      await reload($, true)
+      return
+    }
+    const { at } = await where($)
+    const now = `${await mtime($, at.file)}:${await mtime($, `${at.file}-wal`)}`
+    if (now === (await read($, stamp))) return
+    await update($, stamp, () => now)
+    await reload($)
+  } catch (err) {
+    await fail($, err)
+  }
+}
 
 // ---------- state helpers ----------
 
 async function patchTodo($: $, n: number, fn: (t: Todo) => Todo) {
-  await update($, todos, list => list.map(t => (t.n === n ? fn(t) : t)))
+  await editTodos($, list => list.map(t => (t.n === n ? fn(t) : t)))
   await syncStatus($)
+}
+
+// In flight in another live session: its task ids aren't this session's.
+async function isForeign($: $, t: Todo) {
+  return INFLIGHT.has(t.status) && t.owner !== undefined && t.owner !== (await $.session.id())
 }
 
 async function syncStatus($: $) {
   const list = await read($, todos)
-  if (list.length === 0) return $.ui.status(undefined)
+  if (list.length === 0) {
+    $.ui.status(undefined)
+    return
+  }
   const c = (s: Todo['status']) => list.filter(t => t.status === s).length
   $.ui.status(`todo ▶${c('running')} ⏸${c('paused')} ■${c('stopped')} ✓${c('done')} ○${c('pending')}`)
 }
@@ -67,10 +391,15 @@ export async function toggle($: $, id: string) {
 }
 
 async function focus($: $, key: string) {
+  // The engine skips this plugin's own ui.focus hook for its own call, so the
+  // ring is noted here, and put back if the move is refused.
+  const was = await read($, ring)
+  await update($, ring, () => key)
   try {
-    await $.ui.focus({ requestId: PANE, key })
+    if ((await $.ui.focus({ requestId: PANE, key })).deny !== undefined) await update($, ring, () => was)
   } catch {
-    // The element may not be drawn yet; the ring stays where it is.
+    // A refusal comes back as `deny`; a throw is the host's own, and the note
+    // stands so the chip the mod asked for still lights.
   }
 }
 
@@ -78,26 +407,41 @@ export async function addTodo($: $, title: string) {
   const clean = title.trim()
   if (!clean) return undefined
   let n = 0
-  await update($, todos, list => {
+  const isSaved = await editTodos($, list => {
     n = Math.max(0, ...list.map(t => t.n)) + 1
     const t: Todo = { n, title: clean, status: 'pending', toolUseIds: [], hasRun: false }
     return [...list, t]
   })
   await syncStatus($)
+  // A refused write has already said why.
+  if (!isSaved) return null
   $.ui.toast(`＋ added #${n}`)
   return n
 }
 
 async function clearRun($: $, n: number) {
+  // Deleting an agent's row deletes its calls' rows with it.
   const gone = new Set((await read($, agents)).filter(a => a.todoN === n).map(a => a.agentId))
-  await update($, agents, l => l.filter(a => a.todoN !== n))
+  await editAgents($, l => l.filter(a => a.todoN !== n))
   await update($, calls, l => l.filter(c => !gone.has(c.agentId)))
 }
 
 // ---------- actions (pane buttons and /todo) ----------
 
+// A plugin's prompt can be dropped (a Stop standing after an interrupt, a
+// hook's refusal): the todo goes back to how `t` had it, and the drop says why.
+async function submit($: $, t: Todo, text: string) {
+  const r = await $.prompt.submit({ text })
+  if (r.drop === undefined) return undefined
+  await patchTodo($, t.n, x => assign(x, { status: t.status, taskId: t.taskId, runId: t.runId }))
+  $.ui.toast(`#${t.n} didn't start: ${r.drop}`)
+  return r.drop
+}
+
+const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
+
 export async function execTodo($: $, t: Todo, refine: boolean) {
-  if (!refine && !['pending', 'stopped', 'failed'].includes(t.status)) return `#${t.n} is ${t.status}.`
+  if (!refine && !RUNNABLE.has(t.status)) return `#${t.n} is ${t.status}.`
   if (refine) await clearRun($, t.n)
   await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
   await patchUi($, u => ({
@@ -105,28 +449,38 @@ export async function execTodo($: $, t: Todo, refine: boolean) {
     expanded: u.expanded.includes(`t${t.n}`) ? u.expanded : [...u.expanded, `t${t.n}`],
     justStopped: u.justStopped.filter(x => x !== t.n),
   }))
-  await $.prompt.submit({ text: execPrompt(t, await read($, cpuCap), refine) })
+  const drop = await submit($, t, execPrompt(t, await read($, cpuCap), refine))
+  if (drop !== undefined) return `#${t.n} didn't start: ${drop}`
   return `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`
 }
 
 export async function restartTodo($: $, t: Todo) {
   await clearRun($, t.n)
-  await patchTodo($, t.n, x => ({ ...x, status: 'drafting', taskId: undefined, runId: undefined }))
+  await patchTodo($, t.n, x => assign(x, { status: 'drafting', taskId: undefined, runId: undefined }))
   await patchUi($, u => ({ ...u, justStopped: u.justStopped.filter(x => x !== t.n) }))
-  await $.prompt.submit({ text: restartPrompt(t, await read($, cpuCap)) })
+  if ((await submit($, t, restartPrompt(t, await read($, cpuCap)))) !== undefined) return
   $.ui.toast(`↻ restarting #${t.n}`)
 }
 
+// Marks a todo's live agents `to`, and their unfinished calls interrupted.
+async function settleAgents($: $, n: number, to: 'paused' | 'stopped') {
+  const live = new Set(
+    (await read($, agents)).filter(a => a.todoN === n && (a.status === 'running' || a.status === 'paused')).map(a => a.agentId),
+  )
+  await editAgents($, l => l.map((a): AgentNode => (live.has(a.agentId) ? { ...a, status: to } : a)))
+  await editCalls($, l => l.map((c): Call => (live.has(c.agentId) && c.state === 'run' ? { ...c, state: 'interrupted' } : c)))
+}
+
 export async function haltTodo($: $, t: Todo, to: 'paused' | 'stopped') {
+  if (await isForeign($, t)) {
+    $.ui.toast(`#${t.n} is running in another session`)
+    return
+  }
   if (t.taskId) {
     const r = await $.tool.call({ tool: 'TaskStop', task_id: t.taskId })
     if (r.deny !== undefined) $.ui.toast(`TaskStop refused: ${r.deny}`)
   }
-  const live = new Set(
-    (await read($, agents)).filter(a => a.todoN === t.n && (a.status === 'running' || a.status === 'paused')).map(a => a.agentId),
-  )
-  await update($, agents, l => l.map((a): AgentNode => (live.has(a.agentId) ? { ...a, status: to } : a)))
-  await update($, calls, l => l.map((c): Call => (live.has(c.agentId) && c.state === 'run' ? { ...c, state: 'interrupted' } : c)))
+  await settleAgents($, t.n, to)
   await patchTodo($, t.n, x => ({ ...x, status: to }))
   if (to === 'stopped') {
     await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped, t.n] }))
@@ -138,20 +492,34 @@ export async function haltTodo($: $, t: Todo, to: 'paused' | 'stopped') {
 }
 
 export async function resumeTodo($: $, t: Todo) {
+  if (await isForeign($, t)) {
+    $.ui.toast(`#${t.n} is paused in another session`)
+    return
+  }
   // A resumed Workflow replays finished agents from its journal and spawns the
   // rest afresh, so the interrupted nodes are left marked as such.
   if (t.mode === 'workflow') {
-    await update($, agents, l => l.map((a): AgentNode => (a.todoN === t.n && a.status === 'paused' ? { ...a, status: 'stopped' } : a)))
+    await editAgents($, l => l.map((a): AgentNode => (a.todoN === t.n && a.status === 'paused' ? { ...a, status: 'stopped' } : a)))
   }
   await patchTodo($, t.n, x => ({ ...x, status: 'running' }))
   await patchUi($, u => ({ ...u, justStopped: u.justStopped.filter(x => x !== t.n) }))
-  await $.prompt.submit({ text: resumePrompt(t, t.taskId) })
+  if ((await submit($, t, resumePrompt(t, t.taskId))) !== undefined) return
   await focus($, `act:${t.n}:pause`)
   $.ui.toast(`▶ resuming #${t.n}`)
 }
 
+// Claims a todo another session put in flight. Its task there isn't stopped
+// (its ids are that session's): the todo is marked stopped here, to restart.
+export async function takeOver($: $, t: Todo) {
+  await settleAgents($, t.n, 'stopped')
+  await patchTodo($, t.n, x => assign(x, { status: 'stopped', taskId: undefined, runId: undefined, owner: undefined }))
+  await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped, t.n] }))
+  await focus($, `act:${t.n}:refine`)
+  $.ui.toast(`#${t.n} taken over`)
+}
+
 export async function deleteTodo($: $, t: Todo) {
-  await update($, todos, l => l.filter(x => x.n !== t.n))
+  await editTodos($, l => l.filter(x => x.n !== t.n))
   await patchUi($, u => ({ ...u, confirm: null }))
   await syncStatus($)
   await focus($, 'add')
@@ -165,13 +533,13 @@ export async function renameTodo($: $, n: number, title: string) {
   await focus($, `todo:${n}`)
 }
 
-export async function askConfirm($: $, n: number, kind: 'stop' | 'delete') {
+export async function askConfirm($: $, n: number, kind: Confirm) {
   await patchUi($, u => ({ ...u, confirm: { n, kind } }))
   // The ring starts on the safe choice.
   await focus($, `act:${n}:${kind === 'stop' ? 'keep' : 'cancel'}`)
 }
 
-export async function cancelConfirm($: $, n: number, kind: 'stop' | 'delete') {
+export async function cancelConfirm($: $, n: number, kind: Confirm) {
   await patchUi($, u => ({ ...u, confirm: null }))
   await focus($, `act:${n}:${kind}`)
 }
@@ -197,25 +565,46 @@ function argsOf(e: object): Record<string, unknown> {
 }
 
 function previewOf(a: Record<string, unknown>) {
-  for (const k of ARG_KEYS) if (typeof a[k] === 'string') return a[k] as string
-  return (Object.values(a).find(v => typeof v === 'string') as string | undefined) ?? ''
+  for (const k of ARG_KEYS) {
+    const v = a[k]
+    if (typeof v === 'string') return v
+  }
+  return Object.values(a).find((v): v is string => typeof v === 'string') ?? ''
 }
 
-function responseOf(ran: { deny?: string; text?: string; result?: unknown }) {
+function responseOf(ran: { deny?: string | undefined; text?: string | undefined; result?: unknown }) {
   if (ran.deny !== undefined) return `denied: ${ran.deny}`
   if (ran.text) return ran.text
   try {
-    return JSON.stringify(ran.result, null, 1) ?? ''
+    return json(ran.result, 1) ?? ''
   } catch {
     return String(ran.result)
   }
 }
 
-export const register: Register = on => {
+const DONE_TTL_MINUTES = 5
+const EXPIRE_MS = 5000
+
+// Done todos' time in the tree: the CLAUDE_TODO_DONE_TTL_MINUTES variable, else
+// the doneTtlMinutes option (/config), else 5 minutes; 0 keeps them.
+async function ttlMs($: $, option: unknown) {
+  const env = (await $.env.get('CLAUDE_TODO_DONE_TTL_MINUTES'))?.trim()
+  const minutes = env ? Number(env) : typeof option === 'number' ? option : DONE_TTL_MINUTES
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60_000 : DONE_TTL_MINUTES * 60_000
+}
+
+async function expire($: $) {
+  const keep = await read($, ttl)
+  const now = await $.clock.now()
+  const gone = keep === 0 ? [] : (await read($, todos)).filter(t => t.status === 'done' && t.doneAt !== undefined && now - t.doneAt >= keep).map(t => t.n)
+  if (JSON.stringify(gone) !== JSON.stringify(await read($, expired))) await update($, expired, () => gone)
+}
+
+export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
-      description: 'Per-session todos: /todo add <title> · /todo exec <n|title> · /todo show · /todo noshow',
+      description: 'Per-directory todos: /todo add <title> · /todo exec <n|title> · /todo show · /todo noshow',
     })
     await $.tool.register({
       name: 'update',
@@ -229,6 +618,8 @@ export const register: Register = on => {
           prompt: { type: 'string' },
           mode: { type: 'string', enum: ['agent', 'workflow'] },
           summary: { type: 'string', description: 'One line, for done/failed' },
+          branch: { type: 'string', description: "The todo's git branch" },
+          landed: { type: 'string', description: 'The commit hash it pushed to the base branch' },
         },
         required: ['n'],
       },
@@ -236,7 +627,7 @@ export const register: Register = on => {
     })
     await $.tool.register({
       name: 'list',
-      description: "List this session's todos (number, title, status, prompt, summary).",
+      description: "List this repo's todos, or the home directory's outside a repo (number, title, status, prompt, summary).",
       inputSchema: { type: 'object', properties: {} },
       isDeferred: false,
     })
@@ -255,6 +646,42 @@ export const register: Register = on => {
       }
     }
     await update($, cpuCap, () => cap)
+
+    // The database first: a session that can't reach it keeps its 0.2 todos
+    // where they are and shows them read-only.
+    const bootAt = await $.clock.now()
+    const self = await $.session.id()
+    await update($, me, () => self)
+    const found = await locate($)
+    if (typeof found === 'string') {
+      await update($, db, () => null)
+      await fail($, found)
+      const old = (await read($, legacy)).filter(isTodo)
+      if (old.length > 0) await update($, todos, () => old)
+    } else {
+      await update($, db, () => found)
+      await update($, fault, () => '')
+      try {
+        await settle($)
+        await migrateStore($)
+        await migrate($)
+        await persistTraces($)
+        await pruneBackups($, bootAt)
+        await reload($, true)
+        // Done before 0.3 kept the time: their time in the tree starts now.
+        if ((await read($, todos)).some(t => t.status === 'done' && t.doneAt === undefined)) {
+          await editTodos($, l => l.map(t => (t.status === 'done' && t.doneAt === undefined ? { ...t } : t)))
+        }
+      } catch (err) {
+        await fail($, err)
+      }
+    }
+    const keep = await ttlMs($, options['doneTtlMinutes'])
+    await update($, ttl, () => keep)
+    await expire($)
+    $.clock.every(EXPIRE_MS, () => void expire($).catch(() => undefined))
+    // A tick that fails (the module reloading under it) is tried again next tick.
+    $.clock.every(SYNC_MS, () => void sync($).catch(() => undefined))
 
     $.clock.every(500, () => {
       void (async () => {
@@ -282,22 +709,41 @@ export const register: Register = on => {
     // Every /todo is the person asking, so the pane seats at any width; one
     // opened unasked at session start waits for a wide enough terminal.
     if (asked || !(await read($, ui)).isHidden) {
-      const opened = await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', focus: asked ? true : undefined })
+      const opened = await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', ...(asked ? { focus: true } : {}) })
       if (asked) return { text: opened.isPlaced ? 'Todo pane shown.' : `Todo pane can't be placed: ${opened.reason}` }
     }
     if (verb === 'add') {
       const n = await addTodo($, arg)
-      return { text: n ? `Added #${n} ${arg.trim()}` : 'Usage: /todo add <title>' }
+      if (n === undefined) return { text: 'Usage: /todo add <title>' }
+      return { text: n === null ? 'Not added: the todo list could not be saved.' : `Added #${n} ${arg.trim()}` }
     }
     if (verb === 'exec') {
       const t = await findTodo($, arg)
-      return { text: t ? await execTodo($, t, false) : `No todo matches "${arg}".` }
+      if (!t) return { text: `No todo matches "${arg}".` }
+      if (!RUNNABLE.has(t.status)) return { text: `#${t.n} is ${t.status}.` }
+      // A command's own hook can't submit a prompt (it would wait on the turn
+      // the command holds), so the exec starts from a timer once it answered.
+      $.clock.after(0, () => {
+        void (async () => {
+          const now = (await read($, todos)).find(x => x.n === t.n)
+          if (now) await execTodo($, now, false)
+        })()
+      })
+      return { text: `Executing #${t.n} ${t.title}: answer the prompt question in the chat.` }
     }
     return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec <n|title>' }
   })
 
   on('tool.call', { tool: 'mcp__todo__update' as never }, async ($, e) => {
-    const a = argsOf(e) as { n?: number; status?: Todo['status']; prompt?: string; mode?: Todo['mode']; summary?: string }
+    const a = argsOf(e) as {
+      n?: number
+      status?: Todo['status']
+      prompt?: string
+      mode?: Todo['mode']
+      summary?: string
+      branch?: string
+      landed?: string
+    }
     const list = await read($, todos)
     const t = list.find(x => x.n === a.n)
     if (!t) return { result: `No todo #${a.n}.`, isError: true as const }
@@ -307,6 +753,8 @@ export const register: Register = on => {
       ...(a.prompt ? { prompt: a.prompt } : {}),
       ...(a.mode ? { mode: a.mode } : {}),
       ...(a.summary ? { summary: a.summary } : {}),
+      ...(a.branch ? { branch: a.branch } : {}),
+      ...(a.landed ? { landed: a.landed } : {}),
       hasRun: x.hasRun || a.status === 'running',
     }))
     if (a.status === 'done' || a.status === 'failed') $.ui.toast(`${a.status === 'done' ? '✓' : '✗'} #${t.n} ${a.status}`)
@@ -321,37 +769,37 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
-    const tool = String(e.tool)
+    const tool = e.tool
     if (tool.startsWith('mcp__todo__')) return next(e)
     const a = argsOf(e)
 
     // Main loop: link the Agent/Workflow call that launches a todo.
     if (e.agentId === undefined) {
       let n: number | undefined
-      if (tool === 'Agent') n = num(/\[todo:(\d+)\]/.exec(String(a.description ?? '')))
+      if (tool === 'Agent') n = num(/\[todo:(\d+)\]/.exec(str(a['description'])))
       if (tool === 'Workflow') {
-        n = num(/name\s*:\s*['"`]todo-(\d+)-/.exec(String(a.script ?? '')))
-        if (n === undefined && typeof a.resumeFromRunId === 'string') {
-          n = (await read($, todos)).find(t => t.runId === a.resumeFromRunId)?.n
+        n = num(/name\s*:\s*['"`]todo-(\d+)-/.exec(str(a['script'])))
+        const from = a['resumeFromRunId']
+        if (n === undefined && typeof from === 'string') {
+          n = (await read($, todos)).find(t => t.runId === from)?.n
         }
       }
       if (n === undefined) return next(e)
-      const id = e.tool_use_id ?? ''
+      const id = e.tool_use_id
       await patchTodo($, n, t => ({ ...t, toolUseIds: [...t.toolUseIds, id], hasRun: true }))
       const ran = await next(e)
       if (ran.deny === undefined && !ran.isError) {
         const r = (ran.result ?? {}) as { agentId?: string; taskId?: string; runId?: string; scriptPath?: string }
         await patchTodo($, n, t =>
           tool === 'Agent'
-            ? { ...t, mode: 'agent', status: 'running', taskId: r.agentId ?? t.taskId }
-            : {
-                ...t,
+            ? assign(t, { mode: 'agent', status: 'running', taskId: r.agentId ?? t.taskId })
+            : assign(t, {
                 mode: 'workflow',
                 status: 'running',
                 taskId: r.taskId ?? t.taskId,
                 runId: r.runId ?? t.runId,
                 scriptPath: r.scriptPath ?? t.scriptPath,
-              },
+              }),
         )
       }
       return ran
@@ -361,22 +809,24 @@ export const register: Register = on => {
     const node = (await read($, agents)).find(x => x.agentId === e.agentId)
     if (!node) return next(e)
     const startedAt = await $.clock.now()
+    const filePath = a['file_path']
     const call: Call = {
-      id: e.tool_use_id ?? `${e.agentId}:${startedAt}`,
+      id: e.tool_use_id,
       agentId: node.agentId,
       tool,
       arg: cut(previewOf(a).replace(/\s+/g, ' '), 120),
       fields: Object.entries(a).map(([k, v]) => ({
         k,
-        v: cut(typeof v === 'string' ? v : (JSON.stringify(v, null, 2) ?? String(v)), FIELD_MAX),
+        v: cut(typeof v === 'string' ? v : (json(v, 2) ?? String(v)), FIELD_MAX),
       })),
-      filePath: typeof a.file_path === 'string' ? a.file_path : undefined,
+      ...(typeof filePath === 'string' ? { filePath } : {}),
       state: 'run',
       startedAt,
     }
-    await update($, calls, l => {
+    await editCalls($, l => {
       const mine = l.filter(c => c.agentId === node.agentId)
-      const drop = mine.length >= CALLS_PER_AGENT ? new Set([mine[0]!.id]) : new Set<string>()
+      const oldest = mine[0]
+      const drop = new Set(mine.length >= CALLS_PER_AGENT && oldest ? [oldest.id] : [])
       return [...l.filter(c => !drop.has(c.id)), call].slice(-CALLS_TOTAL)
     })
     const ran = await next(e)
@@ -389,9 +839,9 @@ export const register: Register = on => {
           ? 'err'
           : 'ok'
     const response = cut(responseOf(ran), RESPONSE_MAX)
-    await update($, calls, l => l.map(c => (c.id === call.id ? { ...c, state, ms, response } : c)))
+    await editCalls($, l => l.map(c => (c.id === call.id ? { ...c, state, ms, response } : c)))
     return ran
-  }).catch(($, e, next) => next(e))
+  }).catch((_, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     const ran = await next(e)
@@ -403,43 +853,65 @@ export const register: Register = on => {
     if (n === undefined) return ran
     const label = (e.description || e.name || e.subagentType || 'agent').replace(/^\[todo:\d+\]\s*/, '')
     const m = /^w(\d+)\s*:\s*(.*)$/.exec(label)
-    const name = (m ? m[2]! : label).trim()
+    const name = (m?.[2] ?? label).trim()
     const node: AgentNode = {
       agentId: ran.agentId,
       todoN: n,
-      parentAgentId: e.parentAgentId,
+      ...(e.parentAgentId !== undefined ? { parentAgentId: e.parentAgentId } : {}),
       name: name.replace(/\s*@wt$/, ''),
-      wave: m ? Number(m[1]) : undefined,
+      ...(m ? { wave: Number(m[1]) } : {}),
       kind: e.workflow ? 'workflow' : 'agent',
-      isWorktree: /@wt$/.test(name),
+      isWorktree: name.endsWith('@wt'),
       status: 'running',
       startedAt: await $.clock.now(),
     }
-    await update($, agents, l => {
+    await editAgents($, l => {
       const old = l.find(a => a.agentId === node.agentId)
       const next_: AgentNode = old ? { ...old, status: 'running' } : node
       return [...l.filter(a => a.agentId !== node.agentId), next_]
     })
     return ran
-  }).catch(($, e, next) => next(e))
+  }).catch((_, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
     if (id !== undefined) {
       const node = (await read($, agents)).find(a => a.agentId === id)
-      if (node && node.status === 'running' && !e.isAborted) {
+      if (node?.status === 'running' && !e.isAborted) {
         const failed = 'reason' in e && e.reason === 'refusal'
-        await update($, agents, l => l.map((a): AgentNode => (a.agentId === id ? { ...a, status: failed ? 'failed' : 'done' } : a)))
+        await editAgents($, l => l.map((a): AgentNode => (a.agentId === id ? { ...a, status: failed ? 'failed' : 'done' } : a)))
         // A lone background Agent's end is the todo's end; the model's later
         // mcp__todo__update may still replace the summary.
         const t = (await read($, todos)).find(x => x.n === node.todoN)
-        if (t && t.mode === 'agent' && t.taskId === id && t.status === 'running') {
-          await patchTodo($, t.n, x => ({ ...x, status: failed ? 'failed' : 'done', summary: cut(firstLine(e.answer ?? ''), 80) }))
+        if (t?.mode === 'agent' && t.taskId === id && t.status === 'running') {
+          await patchTodo($, t.n, x => ({ ...x, status: failed ? 'failed' : 'done', summary: cut(firstLine(e.answer), 80) }))
         }
       }
     }
     return next(e)
-  }).catch(($, e, next) => next(e))
+  }).catch((_, e, next) => next(e))
+
+  on('ui.focus', async ($, e, next) => {
+    const r = await next(e)
+    if (r.deny === undefined && e.component === 'Pane' && e.requestId === PANE) {
+      await update($, ring, () => (e.plugin === 'todo' ? (e.element ?? null) : null))
+    }
+    return r
+  }).catch((_, e, next) => next(e))
+
+  // In the tree an arrow moves the ring, as Tab does: once the tree is taller
+  // than the pane the engine would scroll instead, and the ring could never
+  // reach what's below. A trackpad swipe or the wheel still scrolls, and the
+  // engine keeps the ring's element in view. The detail dialog scrolls as ever.
+  on('ui.scroll', async ($, e, next) => {
+    const isArrow = e.origin.kind === 'person' && e.pointer === undefined && Math.abs(e.by) === 1
+    if (!isArrow || e.component !== 'Pane' || e.requestId !== PANE || (await read($, detail))) return next(e)
+    const keys = focusOrder()
+    const at = keys.indexOf((await read($, ring)) ?? '')
+    const to = at === -1 ? keys[e.by > 0 ? 0 : keys.length - 1] : keys[Math.min(keys.length - 1, Math.max(0, at + e.by))]
+    if (to !== undefined && to !== keys[at]) await focus($, to)
+    return { deny: 'the arrow moved the focus ring' }
+  }).catch((_, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const d = await read($, detail)
@@ -449,8 +921,13 @@ export const register: Register = on => {
       if (!e.props.isFocused) $.clock.after(0, () => void update($, detail, () => null))
       return drawDetail($, e, { detail: d, list: await read($, todos), nodes: await read($, agents), all: await read($, calls) })
     }
+    const gone = new Set(await read($, expired))
     return drawPane($, e, {
-      list: await read($, todos),
+      me: await read($, me),
+      fault: await read($, fault),
+      // The ring shows only while the pane holds the keys.
+      ring: e.props.isFocused ? await read($, ring) : null,
+      list: (await read($, todos)).filter(t => !gone.has(t.n)),
       nodes: await read($, agents),
       all: await read($, calls),
       u: await read($, ui),

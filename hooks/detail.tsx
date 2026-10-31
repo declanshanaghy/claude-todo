@@ -19,6 +19,10 @@ const PROSE = new Set(['prompt', 'description', 'query', 'question', 'message', 
 const LANG: Record<string, string> = { command: 'bash', script: 'javascript' }
 const FILE_BODY = new Set(['content', 'old_string', 'new_string'])
 
+// An optional prop, given only when it has a value.
+const opt = <K extends string>(k: K, v: string | undefined): Partial<Record<K, string>> =>
+  v === undefined ? {} : ({ [k]: v } as Record<K, string>)
+
 function editDiff(oldS: string, newS: string) {
   const o = oldS.split('\n')
   const n = newS.split('\n')
@@ -40,18 +44,20 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
   const width = e.props.bodyColumns
   const heading = (label: string) => (
     <Box marginTop={1}>
-      <Text bold color="claude">
+      <Text weight="semibold" color="claude">
         {label}
       </Text>
     </Box>
   )
-  const footer = <Box marginTop={1}><Text dimColor>esc closes · ↑↓ PgUp PgDn scroll</Text></Box>
+  const footer = <Box marginTop={1}><Text dimColor>esc closes · ↑↓ or a swipe scrolls</Text></Box>
 
   // One call: a rule naming it, then its input and response.
   const callBlock = (c: Call, i: number, count: number) => {
     const [g, gc] = callGlyph(c.state, 0)
     const byKey = Object.fromEntries(c.fields.map(x => [x.k, x.v]))
-    const isEdit = c.tool === 'Edit' && byKey.old_string !== undefined && byKey.new_string !== undefined
+    const oldS = byKey['old_string']
+    const newS = byKey['new_string']
+    const isEdit = c.tool === 'Edit' && oldS !== undefined && newS !== undefined
     const fields = c.fields.filter(x => !(isEdit && (x.k === 'old_string' || x.k === 'new_string')))
     const response = c.response ?? ''
     const json = pretty(response)
@@ -59,7 +65,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
       <Box flexDirection="column" marginTop={1}>
         <Text wrap="truncate-end">
           <Text dimColor>── {i + 1}/{count} </Text>
-          <Text color={gc}>{g}</Text> <Text bold>{c.tool}</Text>
+          <Text color={gc}>{g}</Text> <Text weight="semibold">{c.tool}</Text>
           <Text dimColor>
             {'  '}
             {c.state === 'run' ? 'running' : c.state}
@@ -88,11 +94,11 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
           return (
             <Box flexDirection="column">
               <Text dimColor>{x.k}</Text>
-              <Code source={x.v} language={LANG[x.k]} path={FILE_BODY.has(x.k) ? c.filePath : undefined} />
+              <Code source={x.v} {...opt('language', LANG[x.k])} {...opt('path', FILE_BODY.has(x.k) ? c.filePath : undefined)} />
             </Box>
           )
         })}
-        {isEdit ? <Code source={editDiff(byKey.old_string!, byKey.new_string!)} format="diff" path={c.filePath} /> : ''}
+        {isEdit ? <Code source={editDiff(oldS, newS)} format="diff" {...opt('path', c.filePath)} /> : ''}
         <Text dimColor>⎿ response</Text>
         {c.state === 'run' ? (
           <Text dimColor>Running…</Text>
@@ -101,7 +107,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
         ) : json ? (
           <Code source={json} language="json" />
         ) : (
-          <Code source={response} path={c.tool === 'Read' ? c.filePath : undefined} />
+          <Code source={response} {...opt('path', c.tool === 'Read' ? c.filePath : undefined)} />
         )}
       </Box>
     )
@@ -116,7 +122,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
     return (
       <Box flexDirection="column" width={width} paddingX={1} borderStyle="round" borderColor="claude">
         <Text wrap="truncate-end">
-          <Text color={gc}>{g}</Text> <Text bold>{a.name}</Text>
+          <Text color={gc}>{g}</Text> <Text weight="semibold">{a.name}</Text>
           {a.isWorktree ? <Text color="warning"> ⎇ worktree</Text> : ''}
         </Text>
         <Text dimColor wrap="truncate-end">
@@ -148,7 +154,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
     return (
       <Box flexDirection="column" width={width} paddingX={1} borderStyle="round" borderColor="claude">
         <Text>
-          <Text color={gc}>{g}</Text> <Text bold>#{t.n} {t.title}</Text>
+          <Text color={gc}>{g}</Text> <Text weight="semibold">#{t.n} {t.title}</Text>
         </Text>
         <Text dimColor>
           {t.status} · {t.mode === 'workflow' ? 'Workflow' : t.mode === 'agent' ? 'single Agent' : 'not launched yet'}
@@ -160,10 +166,12 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, { detail,
         {t.summary ? heading('Summary') : ''}
         {t.summary ? <Text wrap="wrap">{t.summary}</Text> : ''}
 
-        {t.taskId || t.runId ? heading('Run') : ''}
+        {t.taskId || t.runId || t.branch ? heading('Run') : ''}
         {kv('task', t.taskId)}
         {kv('workflow run', t.runId)}
         {kv('script', t.scriptPath)}
+        {kv('branch', t.branch)}
+        {kv('landed', t.landed)}
 
         {mine.length > 0 ? heading(`Agents (${mine.length})`) : ''}
         {mine.map(a => {

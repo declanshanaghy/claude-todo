@@ -2,6 +2,7 @@ import type { Color, EngineInterface, RenderInput } from 'claude-code'
 
 import type { AgentNode, Call, PaneUi, Todo } from '../types'
 import {
+  INFLIGHT,
   addTodo,
   askConfirm,
   cancelConfirm,
@@ -14,11 +15,18 @@ import {
   restartTodo,
   resumeTodo,
   setTodoStatus,
+  takeOver,
   toggle,
 } from './register'
 
 // What the render hook in register.tsx read from $.state for this draw.
 export type PaneData = {
+  // This session's id, to tell its in-flight todos from another session's.
+  me: string
+  // Why the database can't be used, when it can't.
+  fault: string
+  // The key of the element the focus ring is on, while the pane has the keys.
+  ring: string | null
   list: Todo[]
   nodes: AgentNode[]
   all: Call[]
@@ -38,7 +46,7 @@ export function todoGlyph(s: Todo['status'], f: number): [string, Color] {
     case 'pending': return ['○', 'inactive']
     case 'drafting': return ['✎', 'suggestion']
     case 'planning': return ['◇', 'planMode']
-    case 'running': return [SPIN[f % SPIN.length]!, 'claude']
+    case 'running': return [SPIN[f % SPIN.length] ?? '·', 'claude']
     case 'paused': return ['⏸', 'warning']
     case 'stopped': return ['■', 'error']
     case 'done': return ['⏺', 'success']
@@ -62,22 +70,57 @@ export function callGlyph(s: Call['state'], f: number): [string, Color] {
 type Tone = 'primary' | 'danger' | 'default'
 const TONE: Record<Tone, Color> = { primary: 'claude', danger: 'error', default: 'subtle' }
 
+// The focusable elements' keys in the order the last drawing placed them, for
+// the arrow keys to walk (see the ui.scroll hook in register.tsx). Read from
+// the finished tree, as an element is often built before its place is known.
+let drawnOrder: string[] = []
+export const focusOrder = () => drawnOrder
+
+function ringKeys(node: unknown, out: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const n of node) ringKeys(n, out)
+  } else if (typeof node === 'object' && node !== null) {
+    const el = node as { key?: unknown; props?: { key?: unknown; children?: unknown }; children?: unknown }
+    const key = el.key ?? el.props?.key
+    if (typeof key === 'string' && key.startsWith('ring:')) out.push(key.slice('ring:'.length))
+    ringKeys(el.children ?? el.props?.children, out)
+  }
+  return out
+}
+
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, cap, f }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
 
+  // Every focusable item lights the same way: while the ring is on it, a
+  // rounded border in Claude's color, as the ring's inversion alone is hard to
+  // see. The others keep a blank cell on each side in its place, so a moving
+  // ring never shifts anything.
+  const lit = (key: string, node: JSX.Element) =>
+    ring === key ? (
+      <Box key={`ring:${key}`} borderStyle="round" borderColor="claude">
+        {node}
+      </Box>
+    ) : (
+      <Box key={`ring:${key}`} padding={1}>
+        {node}
+      </Box>
+    )
+
   // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
-  // Text child carries the fill; the focus ring inverts it.
-  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'default') => (
-    <Button key={key} label={label} plain onPress={() => void onPress()}>
-      <Text bold backgroundColor={TONE[tone]} color="inverseText">
-        {` ${label} `}
-      </Text>
-    </Button>
-  )
+  // Text child carries the fill.
+  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'default') =>
+    lit(
+      key,
+      <Button key={key} label={label} plain onPress={() => void onPress()}>
+        <Text weight="semibold" backgroundColor={TONE[tone]} color="inverseText">
+          {` ${label} `}
+        </Text>
+      </Button>,
+    )
 
   const open = new Set(u.expanded)
   const view = e.props.view as { agentId?: string } | undefined
@@ -95,6 +138,25 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
         <Box gap={1}>
           {btn('stopyes', '■ Stop', () => haltTodo($, t, 'stopped'), 'danger')}
           {btn('keep', 'Keep running', () => cancelConfirm($, t.n, 'stop'), 'primary')}
+        </Box>,
+      ]
+    }
+    if (c === 'takeover') {
+      return [
+        <Text color="error">Take over #{t.n}? It's marked stopped here; its run in the other session isn't stopped.</Text>,
+        <Box gap={1}>
+          {btn('takeyes', '⇄ Take over', () => takeOver($, t), 'danger')}
+          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'), 'primary')}
+        </Box>,
+      ]
+    }
+    // In flight in another session: its task ids aren't this one's to pause.
+    if (INFLIGHT.has(t.status) && t.owner !== undefined && t.owner !== me) {
+      return [
+        <Box gap={1}>
+          <Text dimColor>{t.status} in another session</Text>
+          {btn('takeover', '⇄ Take over', () => askConfirm($, t.n, 'takeover'))}
+          {details}
         </Box>,
       ]
     }
@@ -186,18 +248,23 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
       const n = all.filter(c => c.agentId === a.agentId).length
       // A subtask is one line; its tool calls are browsed in the dialog.
       out.push(
-        <Box paddingLeft={2}>
-          <Box flexGrow={1} flexShrink={1} overflow="hidden">
-            <Button key={`ag:${a.agentId}`} plain onPress={() => void openDetail($, { kind: 'agent', agentId: a.agentId })}>
-              <Text wrap="truncate-end">
-                <Text color={gc}>{g}</Text> <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
-                {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
-              </Text>
-            </Button>
-          </Box>
-          <Box flexShrink={0}>
-            <Text dimColor> {n} calls</Text>
-          </Box>
+        <Box paddingLeft={2} flexDirection="column">
+          {lit(
+            `ag:${a.agentId}`,
+            <Box>
+              <Box flexGrow={1} flexShrink={1} overflow="hidden">
+                <Button key={`ag:${a.agentId}`} plain onPress={() => void openDetail($, { kind: 'agent', agentId: a.agentId })}>
+                  <Text wrap="truncate-end">
+                    <Text color={gc}>{g}</Text> <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
+                    {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
+                  </Text>
+                </Button>
+              </Box>
+              <Box flexShrink={0}>
+                <Text dimColor> {n} calls</Text>
+              </Box>
+            </Box>,
+          )}
         </Box>,
       )
       return out
@@ -217,23 +284,29 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
       )
     const head =
       u.renaming === t.n && Input ? (
-        <Box>
-          <Text color={gc}>{g}</Text>
-          <Text> #{t.n} </Text>
-          <Input key={`ren:${t.n}`} value={t.title} submitLabel="rename" autoFocus onSubmit={v => void renameTodo($, t.n, v)} />
-        </Box>
+        lit(
+          `ren:${t.n}`,
+          <Box>
+            <Text color={gc}>{g}</Text>
+            <Text> #{t.n} </Text>
+            <Input key={`ren:${t.n}`} value={t.title} submitLabel="rename" autoFocus onSubmit={v => void renameTodo($, t.n, v)} />
+          </Box>,
+        )
       ) : (
-        <Box>
-          <Box flexGrow={1} flexShrink={1} overflow="hidden">
-            <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
-              <Text wrap="truncate-end">
-                <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-                <Text color={gc}>{g}</Text> <Text bold>#{t.n}</Text> {t.title}
-              </Text>
-            </Button>
-          </Box>
-          <Box flexShrink={0}>{right}</Box>
-        </Box>
+        lit(
+          `todo:${t.n}`,
+          <Box>
+            <Box flexGrow={1} flexShrink={1} overflow="hidden">
+              <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
+                <Text wrap="truncate-end">
+                  <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                  <Text color={gc}>{g}</Text> <Text weight="semibold">#{t.n}</Text> {t.title}
+                </Text>
+              </Button>
+            </Box>
+            <Box flexShrink={0}>{right}</Box>
+          </Box>,
+        )
       )
     if (!isOpen) return [head]
     return [
@@ -245,7 +318,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
     ]
   }
 
-  return (
+  const tree = (
     <Box
       flexDirection="column"
       width={e.props.bodyColumns}
@@ -254,7 +327,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
       <Box>
         <Box flexGrow={1}>
           <Text>
-            <Text bold>Todos </Text>
+            <Text weight="semibold">Todos </Text>
             <Text dimColor>{list.length} · </Text>
             <Text color="claude">▶{count('running')}</Text> <Text color="warning">⏸{count('paused')}</Text>{' '}
             <Text color="error">■{count('stopped')}</Text> <Text color="success">✓{count('done')}</Text>
@@ -262,11 +335,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
         </Box>
         <Text dimColor>cap {cap} agents</Text>
       </Box>
-      {Input ? (
-        <Box>
-          <Text color="claude">＋ </Text>
-          <Input key="add" placeholder="add todo…" submitLabel="add" value="" autoFocus onSubmit={v => void addTodo($, v)} />
-        </Box>
+      {fault ? <Text color="error">⚠ {fault}</Text> : ''}
+      {Input && !fault ? (
+        lit(
+          'add',
+          <Box>
+            <Text color="claude">＋ </Text>
+            <Input key="add" placeholder="add todo…" submitLabel="add" value="" autoFocus onSubmit={v => void addTodo($, v)} />
+          </Box>,
+        )
       ) : (
         <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
       )}
@@ -276,4 +353,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { list, nodes, all, u, ca
       {list.flatMap(todoRows)}
     </Box>
   )
+  drawnOrder = ringKeys(tree)
+  return tree
 }

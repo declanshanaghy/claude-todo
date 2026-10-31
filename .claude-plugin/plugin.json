@@ -1,11 +1,20 @@
 {
   "name": "todo",
-  "version": "0.2.0",
-  "description": "Per-session todo backlog: add titles, exec them into subagents or Workflow trees, and drive everything from a right-hand pane",
+  "version": "0.3.0",
+  "description": "Per-directory todo backlog: add titles, exec them into subagents or Workflow trees, and drive everything from a right-hand pane",
   "types": "./types/index.d.ts",
   "author": {
     "name": "Declan Shanaghy"
   },
   "license": "MIT",
-  "repository": "https://github.com/declanshanaghy/claude-todo"
+  "repository": "https://github.com/declanshanaghy/claude-todo",
+  "userConfig": {
+    "doneTtlMinutes": {
+      "type": "number",
+      "title": "Done todo lifetime (minutes)",
+      "description": "How long a done todo stays in the pane's tree before it's hidden; 0 keeps them. The CLAUDE_TODO_DONE_TTL_MINUTES environment variable overrides it.",
+      "default": 5,
+      "min": 0
+    }
+  }
 }

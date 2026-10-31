@@ -5,7 +5,7 @@
     {
       "name": "todo",
       "source": "./",
-      "description": "Per-session todo backlog with a command-and-control pane for subagents and Workflow trees"
+      "description": "Per-directory todo backlog with a command-and-control pane for subagents and Workflow trees"
     }
   ]
 }
