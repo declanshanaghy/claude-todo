@@ -1,0 +1,11 @@
+{
+  "name": "claude-todo",
+  "owner": { "name": "declanshanaghy" },
+  "plugins": [
+    {
+      "name": "todo",
+      "source": "./",
+      "description": "Per-session todo backlog with a command-and-control pane for subagents and Workflow trees"
+    }
+  ]
+}

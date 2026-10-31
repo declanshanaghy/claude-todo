@@ -1,0 +1,11 @@
+{
+  "name": "todo",
+  "version": "0.1.0",
+  "description": "Per-session todo backlog: add titles, exec them into subagents or Workflow trees, and drive everything from a right-hand pane",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Declan Shanaghy"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/declanshanaghy/claude-todo"
+}
