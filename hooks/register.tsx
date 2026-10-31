@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, PaneUi, Todo } from '../types'
+import type { AgentNode, Call, Detail, PaneUi, Todo } from '../types'
+import { drawDetail } from './detail'
 import { drawPane } from './pane'
 import { execPrompt, restartPrompt, resumePrompt } from './protocol'
 
@@ -11,18 +12,20 @@ export const PANE = 'todo'
 // version stored, which outlives a reload.
 const todos = atom({ plugin: 'todo', key: 'todos' } as const, [], { shape: 'todos-1' })
 const agents = atom({ plugin: 'todo', key: 'agents' } as const, [], { shape: 'agents-1' })
-const calls = atom({ plugin: 'todo', key: 'calls' } as const, [], { shape: 'calls-1' })
+const calls = atom({ plugin: 'todo', key: 'calls' } as const, [], { shape: 'calls-2' })
 const ui = atom(
   { plugin: 'todo', key: 'ui' } as const,
-  { expanded: [], confirm: null, renaming: null, justStopped: [] },
-  { shape: 'ui-1' },
+  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false },
+  { shape: 'ui-2' },
 )
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
 const spin = atom({ plugin: 'todo', key: 'spin' } as const, 0)
+const detail = atom({ plugin: 'todo', key: 'detail' } as const, null as Detail)
 
 const CALLS_PER_AGENT = 200
-const CALLS_TOTAL = 4000
-const PREVIEW = 400
+const CALLS_TOTAL = 1500
+const FIELD_MAX = 3000
+const RESPONSE_MAX = 6000
 const RESERVED = new Set(['tool', 'tool_use_id', 'agentId', 'consent', 'requestMeta'])
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'url', 'query', 'description', 'path', 'prompt']
 
@@ -44,6 +47,12 @@ async function syncStatus($: $) {
   if (list.length === 0) return $.ui.status(undefined)
   const c = (s: Todo['status']) => list.filter(t => t.status === s).length
   $.ui.status(`todo ▶${c('running')} ⏸${c('paused')} ■${c('stopped')} ✓${c('done')} ○${c('pending')}`)
+}
+
+// The view-only detail dialog replaces the tree in the same pane, which
+// already holds the keys; Escape hands them back and the render closes it.
+export async function openDetail($: $, d: Detail) {
+  await update($, detail, () => d)
 }
 
 export async function patchUi($: $, fn: (u: PaneUi) => PaneUi) {
@@ -206,7 +215,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
-      description: 'Per-session todos: /todo add <title> · /todo exec <n|title> · /todo opens the pane',
+      description: 'Per-session todos: /todo add <title> · /todo exec <n|title> · /todo show · /todo noshow',
     })
     await $.tool.register({
       name: 'update',
@@ -250,24 +259,31 @@ export const register: Register = on => {
     $.clock.every(500, () => {
       void (async () => {
         const list = await read($, todos)
-        if (list.some(t => t.status === 'running')) await update($, spin, s => (s + 1) % 4)
+        if (list.some(t => t.status === 'running')) await update($, spin, s => (s + 1) % 12)
       })()
     })
 
     const ran = await next(e)
     await syncStatus($)
-    void $.ui.open({ id: PANE, title: 'Todos' })
+    if (!(await read($, ui)).isHidden) void $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent' })
     return ran
   })
 
   on('command.run', { command: 'todo' }, async ($, e) => {
     const [verb = '', ...rest] = e.args.trim().split(/\s+/)
     const arg = rest.join(' ')
+    if (verb === 'noshow') {
+      await patchUi($, u => ({ ...u, isHidden: true }))
+      await $.ui.close({ id: PANE })
+      return { text: 'Todo pane hidden; /todo show brings it back.' }
+    }
+    const asked = verb === '' || verb === 'list' || verb === 'show'
+    if (asked) await patchUi($, u => ({ ...u, isHidden: false }))
     // Every /todo is the person asking, so the pane seats at any width; one
     // opened unasked at session start waits for a wide enough terminal.
-    const { isPlaced } = await $.ui.open({ id: PANE, title: 'Todos', focus: verb === '' || verb === 'list' ? true : undefined })
-    if (verb === '' || verb === 'list') {
-      return { text: isPlaced ? 'Todo pane opened.' : 'Todo pane is waiting for room: widen the terminal or use fullscreen (/config → tui).' }
+    if (asked || !(await read($, ui)).isHidden) {
+      const opened = await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', focus: asked ? true : undefined })
+      if (asked) return { text: opened.isPlaced ? 'Todo pane shown.' : `Todo pane can't be placed: ${opened.reason}` }
     }
     if (verb === 'add') {
       const n = await addTodo($, arg)
@@ -277,14 +293,14 @@ export const register: Register = on => {
       const t = await findTodo($, arg)
       return { text: t ? await execTodo($, t, false) : `No todo matches "${arg}".` }
     }
-    return { text: 'Usage: /todo · /todo add <title> · /todo exec <n|title>' }
+    return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec <n|title>' }
   })
 
   on('tool.call', { tool: 'mcp__todo__update' as never }, async ($, e) => {
     const a = argsOf(e) as { n?: number; status?: Todo['status']; prompt?: string; mode?: Todo['mode']; summary?: string }
     const list = await read($, todos)
     const t = list.find(x => x.n === a.n)
-    if (!t) return { result: { ok: false, error: `No todo #${a.n}` } }
+    if (!t) return { result: `No todo #${a.n}.`, isError: true as const }
     await patchTodo($, t.n, x => ({
       ...x,
       ...(a.status ? { status: a.status } : {}),
@@ -294,12 +310,14 @@ export const register: Register = on => {
       hasRun: x.hasRun || a.status === 'running',
     }))
     if (a.status === 'done' || a.status === 'failed') $.ui.toast(`${a.status === 'done' ? '✓' : '✗'} #${t.n} ${a.status}`)
-    return { result: { ok: true } }
+    const now = (await read($, todos)).find(x => x.n === t.n)
+    return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
   })
 
   on('tool.call', { tool: 'mcp__todo__list' as never }, async $ => {
     const list = await read($, todos)
-    return { result: list.map(({ n, title, status, prompt, summary, mode }) => ({ n, title, status, prompt, summary, mode })) }
+    // An MCP-style tool answers text (or content blocks), never a bare object.
+    return { result: JSON.stringify(list.map(({ n, title, status, prompt, summary, mode }) => ({ n, title, status, prompt, summary, mode }))) }
   })
 
   on('tool.call', async ($, e, next) => {
@@ -348,7 +366,11 @@ export const register: Register = on => {
       agentId: node.agentId,
       tool,
       arg: cut(previewOf(a).replace(/\s+/g, ' '), 120),
-      input: cut(JSON.stringify(a, null, 1), PREVIEW),
+      fields: Object.entries(a).map(([k, v]) => ({
+        k,
+        v: cut(typeof v === 'string' ? v : (JSON.stringify(v, null, 2) ?? String(v)), FIELD_MAX),
+      })),
+      filePath: typeof a.file_path === 'string' ? a.file_path : undefined,
       state: 'run',
       startedAt,
     }
@@ -366,7 +388,7 @@ export const register: Register = on => {
         : ran.deny !== undefined || ran.isError
           ? 'err'
           : 'ok'
-    const response = cut(responseOf(ran), PREVIEW)
+    const response = cut(responseOf(ran), RESPONSE_MAX)
     await update($, calls, l => l.map(c => (c.id === call.id ? { ...c, state, ms, response } : c)))
     return ran
   }).catch(($, e, next) => next(e))
@@ -419,14 +441,21 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) =>
-    drawPane($, e, {
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const d = await read($, detail)
+    if (d) {
+      // Escape (or a click elsewhere) takes the keys from the pane: close the
+      // dialog then, from a timer, since a render never writes state.
+      if (!e.props.isFocused) $.clock.after(0, () => void update($, detail, () => null))
+      return drawDetail($, e, { detail: d, list: await read($, todos), nodes: await read($, agents), all: await read($, calls) })
+    }
+    return drawPane($, e, {
       list: await read($, todos),
       nodes: await read($, agents),
       all: await read($, calls),
       u: await read($, ui),
       cap: await read($, cpuCap),
       f: await read($, spin),
-    }),
-  )
+    })
+  })
 }

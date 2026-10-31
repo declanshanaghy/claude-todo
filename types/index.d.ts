@@ -41,7 +41,9 @@ export type Call = {
   agentId: string
   tool: string
   arg: string
-  input: string
+  // Each argument, stringified and capped, for the detail dialog.
+  fields: { k: string; v: string }[]
+  filePath?: string
   response?: string
   state: 'run' | 'ok' | 'err' | 'interrupted'
   ms?: number
@@ -53,7 +55,12 @@ export type PaneUi = {
   confirm: { n: number; kind: 'stop' | 'delete' } | null
   renaming: number | null
   justStopped: number[]
+  // /todo noshow: keep the pane closed until /todo show.
+  isHidden: boolean
 }
+
+// What the view-only detail dialog shows.
+export type Detail = { kind: 'agent'; agentId: string } | { kind: 'todo'; n: number } | null
 
 declare module 'claude-code' {
   interface PluginState {
@@ -64,6 +71,7 @@ declare module 'claude-code' {
       ui: Shaped<PaneUi>
       cpuCap: number
       spin: number
+      detail: Detail
     }
   }
 }

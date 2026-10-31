@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 const PANE = {
@@ -16,14 +16,15 @@ const PANE = {
 } as const
 
 // Each hook stands for the engine beneath the plugin.
-function engine(on: On, submitted: string[]) {
+function engine(on: On, submitted: string[], panes = { opens: [] as string[], closes: [] as string[] }, ownClock = true) {
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__todo__${e.name}` } }))
   on('process.run', () => ({
     value: { exitCode: 0, stdout: '10\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
-  on('clock.every', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  if (ownClock) on('clock.every', () => ({ value: undefined }))
+  on('ui.open', (_, e) => (panes.opens.push(e.id), { value: { isPlaced: true } }))
+  on('ui.close', (_, e) => (panes.closes.push(e.id), { value: undefined }))
   on('ui.focus', () => ({}) as never)
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
@@ -32,7 +33,7 @@ function engine(on: On, submitted: string[]) {
     return { text: e.text }
   })
   let t = 1000
-  on('clock.now', () => ({ value: (t += 250) }))
+  if (ownClock) on('clock.now', () => ({ value: (t += 250) }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
 }
 
@@ -94,11 +95,16 @@ test('M3: a tagged Agent links its spawn and its tool calls show under it', asyn
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'ag:ag1' })
-  await ui.press({ key: 'call:c1' })
   expect(await ui.find({ type: 'Button', key: 'act:1:pause' })).toBeDefined()
-  expect(await ui.find({ type: 'Button', key: 'view:ag1' })).toBeDefined()
+  // The tree keeps the subtask to one line: no tool call rows, no code.
+  expect(await ui.find({ type: 'Button', key: 'call:c1' })).toBeUndefined()
+  expect(await ui.find({ type: 'Code' })).toBeUndefined()
+
+  // Pressing the subtask turns the pane into the view-only call browser.
+  await ui.press({ key: 'ag:ag1' })
+  expect(await ui.find({ type: 'Code', text: /ls \*\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Code', text: /a\.md/ })).toBeDefined()
+  expect(await ui.findAll({ type: 'Button' })).toHaveLength(0)
   await ui.unmount()
 })
 
@@ -163,4 +169,44 @@ test('M4: Pause stops the task, Resume asks Claude to continue it', async ($, on
   expect(submitted.at(-1)).toContain('resumeFromRunId: "wf_abc"')
   expect(await ui.find({ type: 'Button', key: 'act:1:pause' })).toBeDefined()
   await ui.unmount()
+})
+
+test('show / noshow: noshow keeps the pane closed until show', async ($, on) => {
+  const opens: string[] = []
+  const closes: string[] = []
+  engine(on, [], { opens, closes })
+  await start($)
+  opens.length = 0
+  expect((await todo($, 'noshow')).text).toContain('hidden')
+  expect(closes).toEqual(['todo'])
+  await todo($, 'add Quiet one')
+  expect(opens).toHaveLength(0)
+  expect((await todo($, 'show')).text).toBe('Todo pane shown.')
+  expect(opens).toEqual(['todo'])
+  await todo($, 'add Loud one')
+  expect(opens).toEqual(['todo', 'todo'])
+})
+
+test('M3: Esc (the pane losing the keys) closes the call browser', async ($, on) => {
+  engine(on, [], undefined, false)
+  const clock = mock.clock(on, { now: 1000 })
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag1' } as never }))
+  on('agent.spawn', () => ({ model: 'm', agentId: 'ag1' }))
+  await start($)
+  await todo($, 'add Count md files')
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:1] Count', prompt: 'count', subagent_type: 'general-purpose' } as never)
+  await $.agent.spawn({ prompt: 'count', description: '[todo:1] Count', tool_use_id: 'tu1' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'ag:ag1' })
+  expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
+  await ui.unmount()
+
+  const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
+  await clock.advance(1)
+  await blurred.unmount()
+  const back = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await back.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
+  await back.unmount()
 })
