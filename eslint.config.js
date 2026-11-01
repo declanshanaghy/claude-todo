@@ -2,7 +2,8 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   // The engine writes .claude-plugin/types; docs holds the static mockup.
-  { ignores: ['.claude-plugin/', 'node_modules/', 'docs/'] },
+  // .claude/ holds the todos' agent worktrees: other branches' work in progress.
+  { ignores: ['.claude-plugin/', '.claude/', 'node_modules/', 'docs/'] },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
   {
