@@ -114,6 +114,8 @@ stateDiagram-v2
 
 Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would.
 
+`node scripts/state-check.mjs` model-checks this diagram against the moves the code makes (`hooks/transitions.json`) with TLA+'s TLC; [state-validation.md](state-validation.md) has why that tool, how to run it, and what it found.
+
 | State | Mark | Meaning | Who moves it on |
 |---|---|---|---|
 | prompting | ◔ | Added (or renamed); its drafter is writing prompt drafts, so nothing may start it yet | The drafter's drafts or its end; the sync tick if it's gone |
