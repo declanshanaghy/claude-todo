@@ -98,9 +98,9 @@ export const statusToast = (n: number, s: TodoStatus) => `${MARK[s].symbol} #${n
 export const DIVIDER: Color = 'subtle'
 
 // A chip's tone: the status its action moves the todo into, `danger` for one
-// that destroys it (Delete), `details` for ☰ Details, `edit` for ✎ Rename, or
+// that destroys it (Delete), `details` for ☰ Details (a todo's or a subtask's), `edit` for ✎ Rename, or
 // `stay` for any other chip that changes no status (↺ Reset, ✓ Leave, ↩
-// Keep/Cancel/Back, ↗ Full transcript).
+// Keep/Cancel/Back).
 export type Tone = TodoStatus | 'danger' | 'details' | 'edit' | 'stay'
 
 // Grey and dim mean disabled, so an enabled chip never wears them: these are
@@ -189,7 +189,6 @@ export const CHIP: Readonly<Record<string, { symbol: string; does: string }>> = 
   Cancel: { symbol: '↩', does: 'leave it as it is' },
   Back: { symbol: '↩', does: 'back to the list' },
   Leave: { symbol: '✓', does: 'fold it away as it is' },
-  'Full transcript': { symbol: '↗', does: "open every turn and call of the subtask" },
 }
 
 export const CHIP_SYMBOL: Readonly<Record<string, string>> = Object.fromEntries(Object.entries(CHIP).map(([w, c]) => [w, c.symbol]))

@@ -415,7 +415,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const callsOf = (agentId: string) => all.filter(c => c.agentId === agentId).length
 
   // Level 3: a subtask's newest turns and calls, one line each, and the way
-  // into the full call browser. Escape there puts the ring back on its row.
+  // into the full call browser, its ☰ Details. Escape there puts the ring back on its row.
   const recent = (a: AgentNode) => {
     const entries = timeline(a.agentId, all, turns)
     const shown = entries.slice(-TAIL)
@@ -451,14 +451,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     }
     rows.push(
       <Box>
+        {/* The subtask's ☰ Details, in the same symbol, word and tone as a todo's. */}
         {chip(
           `full:${a.agentId}`,
-          'Full transcript',
+          'Details',
           () => openDetail($, { kind: 'agent', agentId: a.agentId }, `ag:${a.agentId}`),
-          'stay',
+          'details',
           false,
           // Level 3's indent: the tree's padding and three levels of 2.
-          tipAt(PAD_X + 6 + 1, 'Full transcript'),
+          tipAt(PAD_X + 6 + 1, 'Details'),
         )}
       </Box>,
     )

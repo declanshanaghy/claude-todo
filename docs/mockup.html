@@ -58,7 +58,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
    the mark color of the status the action moves the todo into (tone-<status>, the
    same colors as MARK below), danger = Delete's rose, details = its own cyan (Details
    moves no status), edit = Rename's lime, stay = a magenta (Reset, Leave,
-   Keep/Cancel/Back, Full transcript). Every color is raw hex, its own hue 30° apart
+   Keep/Cancel/Back); a subtask's ☰ Details wears details like a todo's. Every color is raw hex, its own hue 30° apart
    round the wheel (stopped a pure red), with pending's grey the one exception, which
    no chip fills with. --tf is each tone's focused twin, the same hue halfway to white:
    a chip under the ring or the pointer brightens to it rather than going black.
@@ -322,7 +322,7 @@ const SCENES = [
   setup(){ S.todos=[T(1,'Fix kitty tab titles','pending'), T(2,'Migrate statusline to theme lib','prompting',{expanded:true})]; later(2500, ()=>{ const t=S.todos.find(x=>x.n===2); if(t?.status==='prompting'){ t.status='pending'; t.drafts=3; render(); } }); S.chat=[['user','/todo add Fix kitty tab titles'],['sys','todo: added #1 Fix kitty tab titles'],['user','/todo add Migrate statusline to theme lib'],['sys','todo: added #2 Migrate statusline to theme lib']]; focusPane('add'); }},
  {name:'2 · Launch task', hint:'#1 is expanded and the ring is on <b>▶ Exec</b>. Press <kbd>enter</kbd>. Claude drafts 3 prompts in an AskUserQuestion dialog. Draft <b>1 or 2</b> is classified <b>multi-step</b> (questions → execution tree → approval → Workflow). Draft <b>3</b> is <b>simple</b> and starts a single background Agent. <b>4</b> lets you type your own.',
   setup(){ const t1=T(1,'Fix kitty tab titles','pending',{expanded:true,drafts:3}); S.todos=[t1, T(2,'Migrate statusline to theme lib','pending')]; S.chat=[['sys','todo: 2 pending']]; focusPane('act:t1:exec'); }},
- {name:'3 · Drill down', hint:'Every todo is <b>one line</b>: its header is the splitter, <code>▸ ◐ #N title ──── status</code>, and pressing it is the only way to open it. <b>Level 1</b> (#2, #3 open): the prompt in 2 lines, the action chips, and a <b>▸ N subtasks</b> line. <b>Level 2</b> (#2): press that line for one row per subtask, grouped by wave. <b>Level 3</b> (explore-statusline, where the ring starts): press a subtask for its last 6 turns and calls, one line each, plus <b>↗ Full transcript</b> for the call browser. Closing a level closes everything under it. #1 shows a collapsed todo.',
+ {name:'3 · Drill down', hint:'Every todo is <b>one line</b>: its header is the splitter, <code>▸ ◐ #N title ──── status</code>, and pressing it is the only way to open it. <b>Level 1</b> (#2, #3 open): the prompt in 2 lines, the action chips, and a <b>▸ N subtasks</b> line. <b>Level 2</b> (#2): press that line for one row per subtask, grouped by wave. <b>Level 3</b> (explore-statusline, where the ring starts): press a subtask for its last 6 turns and calls, one line each, plus <b>☰ Details</b> for the call browser. Closing a level closes everything under it. #1 shows a collapsed todo.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,12);
     const t3=T(3,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t3,'countmd','agent'); t3.prompt='Count markdown files under ~/.claude and total size.'; advance(t3,3);
     t2.subsOpen=true; t2.agents[0].expanded=true; S.todos=[T(1,'Fix kitty tab titles','pending'), t2, t3];
@@ -564,7 +564,7 @@ function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area
 // Details (its own cyan, as it moves no status), 'edit' for Rename, or 'stay'.
 // A chip draws only its symbol (CHIP there); the word is its label, its hover label, and with
 // `does` the todo's hint line while the ring is on it.
-const CHIP={Exec:['▶','run it, picking or writing its prompt first'],Auto:['⚡','run it on its first draft, asking nothing'],Fire:['🔥','auto-run the lowest-numbered pending todo'],Rename:['✎','give the todo a new title'],Refine:['✨','rework its prompt in the chat, then run it'],Restart:['↻','run it again from a fresh start'],Resume:['⏵','pick its run up where it left off'],Pause:['⏸','halt it, keeping its run to resume'],Stop:['■','execution halts; the todo is kept'],Delete:['✕','remove the todo for good'],Takeover:['⇄',"it's marked stopped here; its run in the other session isn't stopped"],Details:['☰','browse its prompt, subtasks and calls'],Reset:['↺','take it back from the chat'],Keep:['↩','leave it as it is'],Cancel:['↩','leave it as it is'],Back:['↩','back to the list'],Leave:['✓','fold it away as it is'],'Full transcript':['↗','open every turn and call of the subtask']};
+const CHIP={Exec:['▶','run it, picking or writing its prompt first'],Auto:['⚡','run it on its first draft, asking nothing'],Fire:['🔥','auto-run the lowest-numbered pending todo'],Rename:['✎','give the todo a new title'],Refine:['✨','rework its prompt in the chat, then run it'],Restart:['↻','run it again from a fresh start'],Resume:['⏵','pick its run up where it left off'],Pause:['⏸','halt it, keeping its run to resume'],Stop:['■','execution halts; the todo is kept'],Delete:['✕','remove the todo for good'],Takeover:['⇄',"it's marked stopped here; its run in the other session isn't stopped"],Details:['☰','browse its prompt, subtasks and calls'],Reset:['↺','take it back from the chat'],Keep:['↩','leave it as it is'],Cancel:['↩','leave it as it is'],Back:['↩','back to the list'],Leave:['✓','fold it away as it is']};
 const SYM=Object.fromEntries(Object.entries(CHIP).map(([w,[sym]])=>[w,sym]));
 const sentence = l => { const d=CHIP[l][1]; return d[0].toUpperCase()+d.slice(1)+'.'; };
 // The word each drawn act: chip carries, by its fid, for the hint line.
@@ -710,7 +710,7 @@ function renderPane(){
         const cc = c.state==='run'?'dim':c.state==='ok'?'gr':'ye';
         h += `<div class="row ind6 turnrow"><span class="${cc}">⏺&nbsp;</span><span class="grow"><b>${esc(c.tool)}</b> <span class="dim">${esc(c.arg)}</span></span>&nbsp;<span class="dim">${c.state==='run'?'…':esc(c.dur||'')}</span></div>`;
       }
-      h += `<div class="row ind6">${chipB('browse:'+a.id,'Full transcript')}</div>`;
+      h += `<div class="row ind6">${chipB('browse:'+a.id,'Details','details')}</div>`;
     }
   });
   if(!S.todos.length) top += `<div class="row dim">No todos yet. Type a title above.</div>`;

@@ -257,7 +257,7 @@ const agentAt = (db: Db, id: string) => {
   return a.body as AgentNode
 }
 // From an open todo #n down the drill-down: its subtasks, the subtask's last
-// turns and calls, then its ↗ Full transcript into the call browser.
+// turns and calls, then its ☰ Details into the call browser.
 const transcript = async (ui: { press: (q: { key: string }) => Promise<unknown> }, n: number, agentId: string) => {
   await ui.press({ key: `subs:${n}` })
   await ui.press({ key: `ag:${agentId}` })
@@ -455,7 +455,7 @@ test('M3: a tagged Agent links its spawn and its tool calls show under it', asyn
   expect(await ui.find({ type: 'Text', text: / ⏺ Bash ls \*\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Code' })).toBeUndefined()
 
-  // ↗ Full transcript turns the pane into the view-only call browser.
+  // A subtask's ☰ Details turns the pane into the view-only call browser.
   await ui.press({ key: 'full:ag1' })
   expect(await ui.find({ type: 'Code', text: /ls \*\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Code', text: /a\.md/ })).toBeDefined()
@@ -3297,7 +3297,7 @@ test('level 2 is one row per subtask, grouped under its wave; level 3 its last 6
   expect(textParts({ children: [read] }).find(p => p.text.includes('⏺'))?.props).toMatchObject({ color: 'success' })
   expect((await ui.findAll({ type: 'Text', text: ' 1.5s' })).length).toBe(4)
   expect(await ui.find({ type: 'Text', text: ' …' })).toBeDefined()
-  expect((await ui.find({ type: 'Button', key: 'full:ag1' }))?.props['label']).toBe('Full transcript')
+  expect((await ui.find({ type: 'Button', key: 'full:ag1' }))?.props['label']).toBe('Details')
   await ui.unmount()
 })
 
@@ -3435,6 +3435,36 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
   await check(6, { takeyes: 'stopped', cancel: 'stay' })
   await ui.press({ key: 'act:1:delete' })
   await check(1, { deleteyes: 'danger', cancel: 'stay' })
+  await ui.unmount()
+})
+
+test("a subtask's Details chip is the todo's ☰ Details: the same symbol, word and cyan details tone, brighter under the ring", async ($, on) => {
+  const db = seeded([running(1, 'Runs')], [agentNode('ag1', 1)], [callRow('c1', 'ag1')])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'subs:1' })
+  await ui.press({ key: 'ag:ag1' })
+  const look = async (key: string) => {
+    const chip = await ui.find({ type: 'Button', key })
+    const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown>; children?: unknown[] } => typeof c === 'object' && c !== null && 'props' in c)
+    const isLit = text?.props['inverse'] === true
+    return { label: chip?.props['label'], drawn: text?.children?.join(''), color: isLit ? text.props['color'] : text?.props['backgroundColor'], isLit, dim: text?.props['dimColor'] }
+  }
+  const todo = await look('act:1:details')
+  const sub = await look('full:ag1')
+  expect(sub).toEqual({ label: 'Details', drawn: ` ${CHIP['Details']?.symbol ?? ''} `, color: toneColor('details'), isLit: false, dim: todo.dim })
+  expect(CHIP['Details']?.symbol).toBe('☰')
+  expect({ ...sub, color: todo.color }).toEqual(todo)
+  expect(GREYS).not.toContain(sub.color)
+  expect(sub.dim).not.toBe(true)
+  // Under the ring it brightens to the details tone's focus twin, and keeps its size.
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'full:ag1', origin: { kind: 'person' } })
+  expect(await look('full:ag1')).toMatchObject({ drawn: ' ☰ ', color: toneFocus('details'), isLit: true })
+  expect(await isLit(ui, 'full:ag1')).toBe(true)
+  // The old ↗ symbol is gone: Details is the one word for a subtask's browser.
+  expect(CHIP['Full transcript']).toBeUndefined()
   await ui.unmount()
 })
 
@@ -4108,7 +4138,7 @@ test('Escape on the dialog closes it and puts the ring back on the subtask row i
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'subs:1' })
   await ui.press({ key: 'ag:ag1' })
-  // The ring is on ↗ Full transcript when it's pressed; Escape puts it back on
+  // The ring is on the subtask's ☰ Details when it's pressed; Escape puts it back on
   // the subtask's row, the line the browser came from.
   await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'full:ag1', origin: { kind: 'person' } })
   await ui.press({ key: 'full:ag1' })
