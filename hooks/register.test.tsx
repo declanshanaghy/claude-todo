@@ -838,6 +838,53 @@ test('open: a placed pane counts in its header and clears the status line; an un
   expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
 })
 
+// The session title as drawn: the one Text in the prompt bar's border color,
+// and the header row's texts in order, to see where it sits.
+type Found = { type?: string; text?: string; props?: Record<string, unknown>; children?: unknown[] }
+const titleOf = async (ui: Drawing & { drawn: () => Promise<unknown> }) => {
+  const header = ((await ui.drawn()) as Found).children?.[0] as Found | undefined
+  const texts: Found[] = []
+  const walk = (n: unknown) => {
+    if (typeof n !== 'object' || n === null) return
+    const f = n as Found
+    if (f.type === 'Text') texts.push(f)
+    else for (const c of f.children ?? []) walk(c)
+  }
+  walk(header)
+  const t = texts.find(x => x.props?.['color'] === 'promptBorder')
+  // A Text's whole text, its nested Texts' included.
+  const all = (x: unknown): string =>
+    typeof x === 'string' || typeof x === 'number' ? String(x) : ((x as Found | null)?.children ?? []).map(all).join('')
+  return t === undefined ? undefined : { text: all(t), isLast: texts.at(-1) === t, first: texts[0] && all(texts[0]) }
+}
+
+test('the header shows the session title at its right in the prompt bar color, following each change', async ($, on) => {
+  engine(on, [])
+  // The settings hooks beneath: none at start, one names the session on a prompt.
+  on('classic.SessionStart', () => ({}))
+  on('classic.UserPromptSubmit', (_, e) => (e.prompt === 'name it' ? { sessionTitle: 'Named by a hook' } : {}))
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // No title: none drawn.
+  expect(await titleOf(ui)).toBeUndefined()
+
+  await $.classic.SessionStart({ source: 'resume', session_title: 'Fix the pane' })
+  // In the prompt bar's border color, at the header's right end, Todos at its left.
+  expect(await titleOf(ui)).toEqual({ text: 'Fix the pane', isLast: true, first: 'Todos 0 · ▶0 ⏸0 ■0 ✓0 ○0' })
+  expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeDefined()
+
+  // A rename reaches the next prompt's event; a hook's title wins over it.
+  await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'Renamed' })
+  expect((await titleOf(ui))?.text).toBe('Renamed')
+  await $.classic.UserPromptSubmit({ prompt: 'name it', session_title: 'Renamed' })
+  expect((await titleOf(ui))?.text).toBe('Named by a hook')
+
+  // A fresh session with no title clears it.
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(await titleOf(ui)).toBeUndefined()
+  await ui.unmount()
+})
+
 test('noshow hands the counts to the status line, and show takes them back', async ($, on) => {
   const { statuses } = engine(on, [], undefined, false)
   const clock = mock.clock(on, { now: 1000 })

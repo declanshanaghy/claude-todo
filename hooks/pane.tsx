@@ -36,6 +36,8 @@ export type PaneData = {
   f: number
   // What to draw above each todo.
   dividers: Dividers
+  // The session's title, drawn at the header's right; '' draws none.
+  sessionTitle: string
 }
 
 // Layout follows docs/mockup.html (scene M3); glyphs and colors follow Claude
@@ -134,7 +136,7 @@ export function ringBox({ Box }: Pick<ElementTable, 'Box'>, ring: string | null,
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f, dividers }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f, dividers, sessionTitle }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -404,7 +406,21 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
             ))}
           </Text>
         </Box>
-        <Text dimColor>cap {cap} agents</Text>
+        <Box flexShrink={0}>
+          <Text dimColor>cap {cap} agents</Text>
+        </Box>
+        {/* The engine's frame takes only a plain tab label, drawn while more
+            than one pane is open, so the title rides the header's right end in
+            the prompt bar's border color, cut short before it wraps. */}
+        {sessionTitle ? (
+          <Box flexShrink={1} overflow="hidden" marginLeft={1}>
+            <Text color="promptBorder" wrap="truncate-end">
+              {sessionTitle}
+            </Text>
+          </Box>
+        ) : (
+          ''
+        )}
       </Box>
       {fault ? <Text color="error">⚠ {fault}</Text> : ''}
       {Input && !fault ? (

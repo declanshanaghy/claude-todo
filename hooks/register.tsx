@@ -69,6 +69,10 @@ const ttl = atom({ plugin: 'todo', key: 'ttl' } as const, 0)
 const expired = atom({ plugin: 'todo', key: 'expired' } as const, [] as number[])
 // What the pane draws above each todo (see dividers below).
 const dividers = atom({ plugin: 'todo', key: 'dividers' } as const, 'titled' as Dividers)
+// The session's title, as the prompt bar shows it; '' while it has none. The
+// engine offers no getter, so the classic SessionStart and UserPromptSubmit
+// events, which carry it, keep it current.
+const sessionTitle = atom({ plugin: 'todo', key: 'sessionTitle' } as const, '')
 
 const CALLS_PER_AGENT = 200
 const CALLS_TOTAL = 1500
@@ -789,7 +793,27 @@ async function expire($: $) {
   if (JSON.stringify(gone) !== JSON.stringify(await read($, expired))) await update($, expired, () => gone)
 }
 
+// What a classic event says the title is now: a hook's new title wins over
+// the one the event arrived with; neither means the session has none.
+async function noteTitle($: $, now: string | undefined) {
+  const t = (now ?? '').trim()
+  if ((await read($, sessionTitle)) !== t) await update($, sessionTitle, () => t)
+}
+
 export const register: Register = (on, options) => {
+  // The pane's header draws the session's title, so it follows each change:
+  // set at start (a resume brings its old one), and on every prompt, where a
+  // rename or a hook's sessionTitle shows up.
+  on('classic.SessionStart', async ($, e, next) => {
+    const r = await next(e)
+    await noteTitle($, r.sessionTitle ?? e.session_title)
+    return r
+  }).catch((_, e, next) => next(e))
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    const r = await next(e)
+    await noteTitle($, r.sessionTitle ?? e.session_title)
+    return r
+  }).catch((_, e, next) => next(e))
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
@@ -1196,6 +1220,7 @@ export const register: Register = (on, options) => {
       cap: await read($, cpuCap),
       f: await read($, spin),
       dividers: await read($, dividers),
+      sessionTitle: await read($, sessionTitle),
     })
   })
 }

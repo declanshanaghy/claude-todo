@@ -150,6 +150,8 @@ declare module 'claude-code' {
       expired: number[]
       // What the pane draws above each todo.
       dividers: Dividers
+      // The session's title as the prompt bar shows it; '' for none.
+      sessionTitle: string
     }
   }
 }
