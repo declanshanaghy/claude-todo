@@ -212,7 +212,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'planning':
         return [
           <Box gap={1}>
-            <Text dimColor>{t.status === 'drafting' ? 'answer the prompt question in the chat…' : 'planning in the chat…'}</Text>
+            <Text dimColor>{t.status === 'planning' ? 'planning in the chat…' : t.hasRun ? 'continuing in the chat…' : 'answer the prompt question in the chat…'}</Text>
             {btn('reset', 'Reset', () => setTodoStatus($, t.n, t.hasRun ? 'stopped' : 'pending'))}
           </Box>,
         ]
@@ -243,7 +243,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
             {details}
           </Box>,
           <Box gap={1}>
-            {t.taskId && btn('resume', '▶ Resume', () => resumeTodo($, t), 'resume')}
+            {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', '▶ Resume', () => resumeTodo($, t), 'resume')}
             {fresh &&
               btn('leave', 'Leave', async () => {
                 await patchUi($, x => ({

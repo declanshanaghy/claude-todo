@@ -1,4 +1,4 @@
-import type { Todo } from '../types'
+import type { Kept, Todo } from '../types'
 
 // The texts the mod submits as prompts. The model does the asking, planning
 // and launching; the mod only tracks and controls what it launched.
@@ -41,7 +41,7 @@ const RUN_STEPS = (t: Todo, cap: number) => `Base branch: before launching, run 
       - the last wave is one "w<K>:merge@wt" agent in its own worktree: it merges every returned branch into its branch, resolving conflicts between writers by keeping both intents, then validates and lands per the git rules; it is the only agent that pushes
       - the script returns a one-line summary that says whether the work landed
    d. Call mcp__todo__update {n: ${t.n}, status: "running"}.
-6. When the background task's completion notification arrives, call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. status is "done" only if the work landed (or there's no remote and it's committed); otherwise "failed", with a summary saying why and where the work is. Once it landed, remove its worktree (git worktree remove) and delete its local branch; a failed todo keeps both.
+6. When the background task's completion notification arrives, call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. status is "done" only if the work landed (or there's no remote and it's committed); otherwise "failed", with a summary saying why and where the work is. Once it landed, remove its worktree (git worktree remove) and delete its local branch; a failed todo keeps both. A notification that says it was stopped (by the user or by Claude) means status "stopped", with a summary of where its work is; never leave the todo "running".
 If the user dismisses a question at any point, call mcp__todo__update {n: ${t.n}, status: "${t.hasRun ? 'stopped' : 'pending'}"} and stop.
 
 ${GIT_RULES}
@@ -65,13 +65,32 @@ Prompt: ${t.prompt ?? t.title}
 ${RUN_STEPS(t, cap)}`
 }
 
-export function resumePrompt(t: Todo, agentId?: string): string {
-  const how =
-    t.mode === 'workflow' && t.runId
-      ? `Call Workflow with {scriptPath: ${JSON.stringify(t.scriptPath ?? '')}, resumeFromRunId: ${JSON.stringify(t.runId)}} so finished agents come back from cache.`
-      : `Send the stopped background agent ${JSON.stringify(agentId ?? t.taskId ?? '')} a SendMessage: "Continue the task where you stopped."`
-  return `[todo] Resume todo #${t.n} "${t.title}". ${how} It carries on in the worktree it had, under the git rules below.
-Then call mcp__todo__update {n: ${t.n}, status: "running"}, and on its completion notification mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}: "done" only if the work landed, else "failed" saying why and where the work is. Once it landed, remove its worktree and delete its local branch.
+// What a resume knows that a fresh agent would not: the work the todo's agents
+// kept, and what they did, newest last.
+export type ResumeContext = { kept: Kept[]; digest: string; canWake: boolean }
+
+export function resumePrompt(t: Todo, ctx: ResumeContext): string {
+  const kept = ctx.kept.length
+    ? ctx.kept.map(k => `   - ${k.name}: ${k.path} (branch ${k.branch})`).join('\n')
+    : '   - none found: no worktree of its agents is left'
+  const wake =
+    !ctx.canWake
+      ? `1. Its agent can't be woken (stopped by the user, or its session is gone): go straight to 2.`
+      : t.mode === 'workflow' && t.runId
+        ? `1. Call Workflow with {scriptPath: ${JSON.stringify(t.scriptPath ?? '')}, resumeFromRunId: ${JSON.stringify(t.runId)}} so finished agents come back from cache.${ctx.kept.length ? ' First edit the script so its merge agent also merges the kept branches above that no finished agent returned (an interrupted writer re-runs in a new worktree, so its partial commits would otherwise be left out).' : ''} If that call is refused or fails (the run belongs to another session or an earlier process), go to 2.`
+        : `1. Send the stopped background agent ${JSON.stringify(t.taskId ?? '')} a SendMessage: "Continue the task where you stopped." It carries on in the worktree it had. If the message is refused (e.g. it was stopped by the user and won't be resumed) or the agent is unknown, go to 2.`
+  return `[todo] Resume todo #${t.n} "${t.title}".
+Its prompt: ${t.prompt ?? t.title}
+Work it kept (git worktrees of its agents):
+${kept}
+What its agents did before it stopped, newest last:
+${ctx.digest || '   (nothing recorded)'}
+
+Base branch: run git branch --show-current in the main checkout; that branch is <base>.
+${wake}
+2. Fallback: launch Agent with run_in_background: true and a description starting "[todo:${t.n}] " (no isolation: it works in a kept worktree). Its prompt: the todo's prompt above, then that it resumes work an earlier agent left, the kept worktrees and the record above, and these steps: cd into the first kept worktree (if it's gone or none was kept, git worktree add a new one, from that branch if it still exists, else off origin/<base>); read git log origin/<base>..HEAD, git status and git diff to see what's done; merge any other kept branches into it, keeping both sides' intent; then finish the task and land it under the git rules below.
+3. Call mcp__todo__update {n: ${t.n}, status: "running"} only once the agent or run is actually going again. If neither 1 nor 2 started anything, call mcp__todo__update {n: ${t.n}, status: "${t.status}", summary: "resume failed: <why>"} and stop.
+4. On its completion notification call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}: "done" only if the work landed; "stopped" if it was stopped; else "failed" saying why and where the work is. Once it landed, remove its worktree and every kept worktree above, and delete their local branches.
 
 ${GIT_RULES}
 

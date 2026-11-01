@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 121 of 124 cases (97.6%)** are covered by `claude plugin test .`.
+**Coverage: 127 of 130 cases (97.7%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -70,6 +70,12 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
+| P20 | An agent stopped by the person (an aborted turn) leaves its todo stopped and its agent marked unwakeable; ▶ Resume skips the message and starts a fresh agent in the kept worktree (found by agent id in `git worktree list`, others' left out), briefed with the prompt and the recorded calls; a newly linked agent clears the mark | an agent stopped by the person leaves Resume offered, which starts a fresh agent on the worktree and record it kept |
+| P21 | Resuming a wakeable lone Agent messages it first and spells out the fallback; with nothing kept it says so; a failed resume restores the old status | a paused lone Agent is woken first, with the fallback spelled out if the wake is refused |
+| P22 | A Workflow resume has its merge agent take the kept branches of interrupted writers, and falls back when the run is another session's | a Workflow resume merges the branches its interrupted writers kept, and falls back when the run is another session's |
+| P23 | A taken-over todo keeps ▶ Resume, which goes straight to a fresh agent on the kept worktree | a taken-over todo keeps Resume, which goes straight to a fresh agent |
+| P24 | Resume leaves the todo in the chat's hands (drafting, ring on its row) until Claude reports it running | M4: Pause stops the task, Resume asks Claude to continue it; Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring |
+| E9 | The run protocol has a stopped notification end as status stopped, never left running | the run protocol never leaves a stopped todo running |
 | P1 | Pause calls TaskStop and writes the todo and its agents paused and their running calls interrupted | Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring |
 | P2 | Resume of a lone Agent submits a SendMessage to it and writes the todo running | Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring |
 | P3 | Resume of a Workflow submits a re-run with `resumeFromRunId` | M4: Pause stops the task, Resume asks Claude to continue it |

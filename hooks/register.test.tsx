@@ -46,6 +46,8 @@ type Where = {
   hasSqlite?: boolean
   // Why the engine drops a submitted prompt, when it does.
   drop?: string
+  // What `git worktree list --porcelain` answers.
+  worktrees?: string
   toasts?: string[]
   // The environment beyond HOME.
   env?: Record<string, string>
@@ -171,6 +173,7 @@ function engine(
   on('tool.register', (_, e) => ({ value: { tool: `mcp__todo__${e.name}` } }))
   on('process.run', (_, e) => {
     const [bin = '', ...args] = e.argv
+    if (bin === 'git' && args.includes('worktree')) return { value: ok(where.worktrees ?? '') }
     if (bin === 'git') {
       const top = (where.repo ?? (() => '/proj'))(args[1] ?? '')
       return { value: top === null ? { ...err('fatal: not a git repository'), exitCode: 128 } : ok(`${top}\n`) }
@@ -407,6 +410,9 @@ test('M4: Pause stops the task, Resume asks Claude to continue it', async ($, on
   expect(stopped).toEqual(['task9'])
   await ui.press({ key: 'act:1:resume' })
   expect(submitted.at(-1)).toContain('resumeFromRunId: "wf_abc"')
+  // In the chat's hands until Claude reports the run is going again.
+  expect(await ui.find({ type: 'Button', key: 'act:1:reset' })).toBeDefined()
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'running' } as never)
   expect(await ui.find({ type: 'Button', key: 'act:1:pause' })).toBeDefined()
   await ui.unmount()
 })
@@ -1059,8 +1065,10 @@ test('Pause, Resume and Stop of a lone Agent write the todo, its agent and its o
 
   await ui.press({ key: 'act:1:resume' })
   expect(submitted.at(-1)).toContain('Send the stopped background agent "ag1" a SendMessage')
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect(await isLit(ui, 'todo:1')).toBe(true)
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'running' } as never)
   expect(todoAt(db, 1).status).toBe('running')
-  expect(await isLit(ui, 'act:1:pause')).toBe(true)
 
   await ui.press({ key: 'act:1:stop' })
   expect(await isLit(ui, 'act:1:keep')).toBe(true)
@@ -1108,7 +1116,7 @@ test("resuming a Workflow marks its interrupted agents stopped, as the run respa
   expect(submitted.at(-1)).toContain('{scriptPath: "/tmp/s.js", resumeFromRunId: "wf_abc"}')
   expect(agentAt(db, 'ag1').status).toBe('done')
   expect(agentAt(db, 'ag2').status).toBe('stopped')
-  expect(todoAt(db, 1).status).toBe('running')
+  expect(todoAt(db, 1).status).toBe('drafting')
   await ui.unmount()
 })
 
@@ -1987,5 +1995,113 @@ test("a result's image block is spooled beside the database and made a PNG thumb
   const png = sips?.at(-1) ?? ''
   expect(png).toMatch(/^\/Users\/me\/\.claude\/plugins\/data\/todo\/thumbs\/[0-9a-f]+\.png$/)
   expect(await ui.find({ type: 'Image', key: 'img:s1:0' })).toMatchObject({ props: { source: { file: png, format: 'png' } } })
+  await ui.unmount()
+})
+
+// ---------- resuming what can't be woken ----------
+
+const porcelain = (...wts: [string, string][]) =>
+  ['worktree /proj\nHEAD aaa\nbranch refs/heads/main', ...wts.map(([p, b]) => `worktree ${p}\nHEAD bbb\nbranch refs/heads/${b}`)].join('\n\n') + '\n'
+
+test('an agent stopped by the person leaves Resume offered, which starts a fresh agent on the worktree and record it kept', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded(
+    [aTodo(1, 'Count md files', { status: 'running', hasRun: true, mode: 'agent', prompt: 'count them', taskId: 'ag1', owner: 's1' })],
+    [agentNode('ag1', 1, { status: 'running', name: 'Count' })],
+    [callRow('c1', 'ag1', { tool: 'Bash', arg: 'ls *.md', state: 'ok', startedAt: 2 })],
+  )
+  engine(on, submitted, undefined, true, { db, worktrees: porcelain(['/proj/.claude/worktrees/agent-ag1', 'worktree-agent-ag1'], ['/proj/.claude/worktrees/agent-zz', 'worktree-agent-zz']) })
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag2' } }))
+  await start($)
+  await $.turn.complete({ agentId: 'ag1', isAborted: true, answer: '' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', isAgentGone: true, taskId: 'ag1' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:resume' })
+  const text = submitted.at(-1) ?? ''
+  // No message to an agent that won't take one: straight to the fallback.
+  expect(text).not.toContain('a SendMessage')
+  expect(text).toContain("can't be woken")
+  expect(text).toContain('description starting "[todo:1] " (no isolation')
+  // Only this todo's worktree, with its branch.
+  expect(text).toContain('- Count: /proj/.claude/worktrees/agent-ag1 (branch worktree-agent-ag1)')
+  expect(text).not.toContain('agent-zz')
+  // The record of what it did, and the prompt it was given.
+  expect(text).toContain('Bash ls *.md → ok')
+  expect(text).toContain('Its prompt: count them')
+  // Nothing claims it runs until Claude says so; a failed resume puts it back.
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect(text).toContain('status: "stopped", summary: "resume failed: <why>"')
+  await ui.unmount()
+
+  // The fresh agent links to the todo and clears the flag.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu9', description: '[todo:1] Count md files (resumed)', prompt: 'p', subagent_type: 'general-purpose' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'running', taskId: 'ag2' })
+  expect(todoAt(db, 1).isAgentGone).toBeUndefined()
+})
+
+test('a paused lone Agent is woken first, with the fallback spelled out if the wake is refused', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([aTodo(1, 'Count', { status: 'paused', hasRun: true, mode: 'agent', taskId: 'ag1', owner: 's1' })], [agentNode('ag1', 1, { status: 'paused' })])
+  engine(on, submitted, undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:resume' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toContain('Send the stopped background agent "ag1" a SendMessage')
+  expect(text).toContain('If the message is refused')
+  expect(text).toContain('2. Fallback')
+  expect(text).toContain('none found: no worktree of its agents is left')
+  expect(text).toContain('status: "paused", summary: "resume failed: <why>"')
+  await ui.unmount()
+})
+
+test('a Workflow resume merges the branches its interrupted writers kept, and falls back when the run is another session\'s', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded(
+    [aTodo(1, 'Split', { status: 'paused', hasRun: true, mode: 'workflow', taskId: 'task9', runId: 'wf_abc', scriptPath: '/tmp/s.js', owner: 's1' })],
+    [agentNode('w1', 1, { kind: 'workflow', status: 'paused', name: 'fix', isWorktree: true })],
+  )
+  engine(on, submitted, undefined, true, { db, worktrees: porcelain(['/proj/.claude/worktrees/agent-w1', 'worktree-agent-w1']) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:resume' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toContain('{scriptPath: "/tmp/s.js", resumeFromRunId: "wf_abc"}')
+  expect(text).toContain('its merge agent also merges the kept branches above')
+  expect(text).toContain('- fix: /proj/.claude/worktrees/agent-w1 (branch worktree-agent-w1)')
+  expect(text).toContain('the run belongs to another session or an earlier process), go to 2')
+  await ui.unmount()
+})
+
+test('a taken-over todo keeps Resume, which goes straight to a fresh agent', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([aTodo(1, 'Busy', { status: 'running', hasRun: true, mode: 'agent', owner: 'other', taskId: 'x', branch: 'worktree-agent-x' })])
+  engine(on, submitted, undefined, true, { db, id: 's2', worktrees: porcelain(['/proj/.claude/worktrees/agent-x', 'worktree-agent-x']) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:takeover' })
+  await ui.press({ key: 'act:1:takeyes' })
+  expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', isAgentGone: true })
+  await ui.press({ key: 'act:1:resume' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toContain("can't be woken")
+  expect(text).toContain('/proj/.claude/worktrees/agent-x (branch worktree-agent-x)')
+  await ui.unmount()
+})
+
+test('the run protocol never leaves a stopped todo running', async ($, on) => {
+  const submitted: string[] = []
+  engine(on, submitted)
+  await start($)
+  await todo($, 'add Anything')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:exec' })
+  expect(submitted.at(-1)).toContain('A notification that says it was stopped (by the user or by Claude) means status "stopped"')
   await ui.unmount()
 })

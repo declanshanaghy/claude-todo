@@ -30,7 +30,13 @@ export type Todo = {
   // The session that put it in flight; another session shows it, and can take
   // it over.
   owner?: string
+  // Its agent can't be woken again (stopped by the person, or taken over from
+  // another session): ▶ Resume starts a fresh agent on the work it kept.
+  isAgentGone?: boolean
 }
+
+// A worktree a todo's agent left behind, found by its agent id in git.
+export type Kept = { agentId: string; name: string; path: string; branch: string }
 
 export type AgentNode = {
   agentId: string
