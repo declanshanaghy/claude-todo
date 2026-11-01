@@ -162,11 +162,13 @@ export function timeline(agentId: string, all: readonly Call[], turns: readonly 
 }
 
 // Where the ring goes when the chip it was on is no longer drawn (a todo's
-// chip is left out while it can't act): to that todo's header. 🔥 Fire is a
-// header control, never left out, only dimmed, so it needs no new home.
-// Undefined while the ring is drawn, or when nothing fits.
-export function rehome(ring: string | null, drawn: readonly string[]) {
+// chip is left out while it can't act): to that todo's header. Under the none
+// view no todo is drawn, so it goes to the view toggle that cycles to it.
+// 🔥 Fire is a header control, never left out, only dimmed, so it needs no
+// new home. Undefined while the ring is drawn, or when nothing fits.
+export function rehome(ring: string | null, drawn: readonly string[], isNone = false) {
   if (ring === null || drawn.includes(ring)) return undefined
+  if (isNone) return drawn.includes('view:all') ? 'view:all' : undefined
   const n = /^act:(\d+):/.exec(ring)?.[1]
   const to = n !== undefined ? `todo:${n}` : undefined
   return to !== undefined && drawn.includes(to) ? to : undefined
@@ -185,9 +187,11 @@ export function ringTodo(ring: string | null, nodes: readonly AgentNode[]) {
 // The todos the view shows, in the order the list draws them: by number, done
 // last. A todo the person is in the middle of stays whatever its status: one
 // just stopped (asking what next) or the one the ring is on, so Pause or Stop
-// never takes the row out from under the ring.
+// never takes the row out from under the ring. The none view (every status
+// off) shows no todo at all, not even those.
 export function inView(list: readonly Todo[], view: readonly string[], keep: ReadonlySet<number>) {
   const on = new Set(view)
+  if (on.size === 0) return []
   return list
     .filter(t => on.has(viewOf(t.status)) || keep.has(t.n))
     .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || a.n - b.n)
@@ -534,6 +538,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const shown = inView(list, view, keep)
   const hidden = list.length - shown.length
   const isAll = SUMMARY.every(v => view.includes(v))
+  // The cycle's next view names the toggle: all → none → default → all.
+  const cycle = isAll ? 'none' : view.length === 0 ? 'default' : 'all'
 
   const tree = (
     <Box
@@ -553,14 +559,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
               <Text dimColor>{list.length}</Text>
             </Text>
           </Box>
-          {/* One toggle per view, each its mark and count; then all, which
-              reads default while every view is lit. The counts are the whole
-              list's, whatever the view shows. */}
+          {/* One toggle per view, each its mark and count; then the cycle,
+              named for the view a press makes: all, none while every view is
+              lit, default while none is. The counts are the whole list's,
+              whatever the view shows. */}
           {tally(list).map(m => lit(`view:${m.status}`, viewToggle(els, m, view.includes(m.status), () => toggleView($, m.status))))}
           {lit(
             'view:all',
-            <Button key="view:all" label={isAll ? 'default' : 'all'} plain dimColor onPress={() => void toggleView($, 'all')}>
-              <Text dimColor>{isAll ? 'default' : 'all'}</Text>
+            <Button key="view:all" label={cycle} plain dimColor onPress={() => void toggleView($, 'all')}>
+              <Text dimColor>{cycle}</Text>
             </Button>,
           )}
         </Box>

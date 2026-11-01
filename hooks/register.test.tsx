@@ -1467,7 +1467,7 @@ test('the default view shows running (drafting and planning too), pending and fa
   await ui.unmount()
 })
 
-test('each status toggle shows or hides its todos, done sorts last, and all flips to default and back', async ($, on) => {
+test('each status toggle shows or hides its todos, done sorts last, and the last toggle cycles default, all, none', async ($, on) => {
   engine(on, [], undefined, true, { db: viewed() })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1478,13 +1478,18 @@ test('each status toggle shows or hides its todos, done sorts last, and all flip
   // Running off hides drafting and planning with it.
   await ui.press({ key: 'view:running' })
   expect(await rowsDrawn(ui)).toEqual([2, 5, 1])
-  // All lights every view, and reads default while they all are.
+  // All lights every view, and reads none (its next press) while they all are.
   await ui.press({ key: 'view:all' })
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8, 1])
   expect((await headerMarks(ui)).every(m => m.isLit)).toBe(true)
-  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('default')
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('none')
   expect(await ui.find({ type: 'Text', text: /hidden by the view/ })).toBeUndefined()
-  // Pressed then, it puts the default view back.
+  // Pressed then, it turns every view off: the none view, which reads default.
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([])
+  expect((await headerMarks(ui)).some(m => m.isLit)).toBe(false)
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('default')
+  // Pressed from none, it puts the default view back.
   await ui.press({ key: 'view:all' })
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
   expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
@@ -1543,6 +1548,66 @@ test('a todo in hand stays in the default view: paused under the ring, or just s
   expect(await rowsDrawn(ui)).toEqual([])
   expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('2 hidden by the view')
   await ui.unmount()
+})
+
+test('the none view hides every todo, the ones in hand too, counts them in its footer, and hands the ring to the toggle', async ($, on) => {
+  const db = seeded([running(1, 'Under the ring'), running(2, 'Halt me'), aTodo(3, 'Finished', { status: 'done', hasRun: true, doneAt: 1 })])
+  engine(on, [], undefined, false, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:2' })
+  await ui.press({ key: 'act:2:stop' })
+  await ui.press({ key: 'act:2:stopyes' })
+  await clock.settle()
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'todo:1', origin: { kind: 'person' } })
+  expect(await isLit(ui, 'todo:1')).toBe(true)
+  // Default, then all, then none.
+  expect(await rowsDrawn(ui)).toEqual([1, 2])
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([1, 2, 3])
+  await ui.press({ key: 'view:all' })
+  await clock.settle()
+  // Neither the todo under the ring nor the one just stopped stays.
+  expect(await rowsDrawn(ui)).toEqual([])
+  expect((await headerMarks(ui)).some(m => m.isLit)).toBe(false)
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('default')
+  // The empty tree: one line saying so, then the footer under its double rule,
+  // with no blank line and no border anywhere.
+  expect(await ui.find({ type: 'Text', text: 'Nothing in this view.' })).toBeDefined()
+  expect(await dividers(ui)).toEqual(['div2:hidden'])
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('3 hidden by the view')
+  const tree = (await ui.drawn()) as Found
+  const rows = (tree.children ?? []).filter((c): c is Found => typeof c === 'object' && c !== null)
+  expect(rows.filter(r => r.type === 'Text' && textsIn(r).join('').trim() === '')).toEqual([])
+  expect(boxesIn(tree).filter(b => ['borderStyle', 'paddingY', 'marginY', 'paddingTop', 'marginTop'].some(k => b.props?.[k] !== undefined))).toEqual([])
+  // The ring's todo left the tree, so the ring is on the toggle that hid it.
+  expect(await isLit(ui, 'view:all')).toBe(true)
+  // Pressed again, the default view is back, the stopped todo with it.
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([1, 2])
+  await ui.unmount()
+})
+
+test('from the none view, lighting one status shows just that status, and none outlasts a reload', async ($, on) => {
+  engine(on, [], undefined, true, { db: viewed() })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'view:all' })
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([])
+  await ui.unmount()
+  await start($)
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(again)).toEqual([])
+  expect((await again.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('default')
+  await again.press({ key: 'view:failed' })
+  expect(await rowsDrawn(again)).toEqual([5])
+  expect((await headerMarks(again)).filter(m => m.isLit).map(m => m.view)).toEqual(['failed'])
+  expect((await again.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
+  expect((await again.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('7 hidden by the view')
+  await again.unmount()
 })
 
 // ---------- conformance: docs/architecture.md, "Buttons by state" ----------
@@ -2889,9 +2954,8 @@ test('the double rule is above the hidden footer only while the view hides somet
   await ui.press({ key: 'view:all' })
   expect(await dividers(ui)).toEqual(['div2:1', 'div:2'])
   expect(await ui.find({ type: 'Text', text: /hidden by the view/ })).toBeUndefined()
-  // Everything hidden: no todo rules, but the footer keeps its double.
+  // Everything hidden (the none view): no todo rules, but the footer keeps its double.
   await ui.press({ key: 'view:all' })
-  for (const v of ['running', 'pending', 'failed']) await ui.press({ key: `view:${v}` })
   expect(await dividers(ui)).toEqual(['div2:hidden'])
   await ui.unmount()
 })

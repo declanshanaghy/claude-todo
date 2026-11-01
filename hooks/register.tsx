@@ -617,16 +617,19 @@ export async function toggle($: $, id: string) {
   }))
 }
 
-// A header toggle shows or hides one view's todos. `all` lights every view;
-// pressed while they all are (it reads `default` then), it puts the default
-// view back. Kept in SUMMARY's order, so the stored view reads the same way.
+// A header toggle shows or hides one view's todos. The last one cycles
+// default → all → none → default, reading what a press makes it: `all`
+// lights every view; pressed while they all are (it reads `none` then), it
+// turns every view off; pressed then (it reads `default`), it puts the
+// default view back. From any other view it reads `all`. Kept in SUMMARY's
+// order, so the stored view reads the same way.
 // A view stored before prompting had its own toggle shows prompting todos
 // wherever it showed pending ones, as they were pending then.
 export const viewIn = (u: PaneUi): readonly View[] =>
   u.views ?? (u.view ? SUMMARY.filter(v => u.view?.includes(v === 'prompting' ? 'pending' : v)) : DEFAULT_VIEW)
 
 export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
-  if (v === 'all') return [...(view.length === SUMMARY.length ? DEFAULT_VIEW : SUMMARY)]
+  if (v === 'all') return view.length === SUMMARY.length ? [] : [...(view.length === 0 ? DEFAULT_VIEW : SUMMARY)]
   const on = new Set(view)
   if (on.has(v)) on.delete(v)
   else on.add(v)
@@ -1877,6 +1880,7 @@ export const register: Register = (on, options) => {
     const gone = new Set(await read($, expired))
     // The ring shows only while the pane holds the keys.
     const at = e.props.isFocused ? await read($, ring) : null
+    const u = await read($, ui)
     const tree = drawPane($, e, {
       queued: (await read($, queued)).map(q => q.n),
       me: await read($, me),
@@ -1885,15 +1889,16 @@ export const register: Register = (on, options) => {
       list: (await read($, todos)).filter(t => !gone.has(t.n)),
       nodes: await read($, agents),
       all: await read($, calls),
-      u: await read($, ui),
+      u,
       cap: await read($, cpuCap),
       f: await read($, spin),
       turns: await read($, turns),
     })
     // The chip the ring was on is gone (it can't act now): move the ring to
-    // its todo's header, from a timer, since a render never writes state. Once
-    // per vanished key, so a refused move can't loop.
-    const to = rehome(at, focusOrder())
+    // its todo's header, or to the view toggle when the none view hid its
+    // todo, from a timer, since a render never writes state. Once per
+    // vanished key, so a refused move can't loop.
+    const to = rehome(at, focusOrder(), viewIn(u).length === 0)
     if (to === undefined) rehomed = null
     else if (at !== rehomed) {
       rehomed = at
