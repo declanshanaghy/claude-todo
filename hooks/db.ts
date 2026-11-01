@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { AgentNode, Call, Todo } from '../types'
+import type { AgentNode, Call, Todo, Turn } from '../types'
 
 // The backlog's one home: a SQLite file shared by every session and every copy
 // of the mod, driven through the sqlite3 CLI. A run is one process, so no
@@ -19,12 +19,15 @@ export type Op =
   | { kind: 'todos'; dir: string; rev: number; put: Todo[]; del: number[] }
   | { kind: 'agents'; dir: string; session: string; put: AgentNode[]; del: string[] }
   | { kind: 'call'; dir: string; session: string; put: Call }
+  // An agent's turn text shares the calls table (and so its paging, window and
+  // cascade), its body marked `kind: 'turn'`.
+  | { kind: 'turn'; dir: string; session: string; put: Turn }
   | { kind: 'import'; dir: string; rev: number; id: string; at: number; backup: Todo[]; put: Todo[] }
   | { kind: 'backups' }
   | { kind: 'drop'; ids: string[] }
 
 export type Snapshot = { rev: number; todos: Todo[]; agents: AgentNode[]; floor: number; top: number }
-export type Page = { rows: (Call & { seq: number })[]; last: number | null }
+export type Page = { rows: ((Call | Turn) & { seq: number })[]; last: number | null }
 export type Backup = { id: string; dir: string; at: number }
 
 export class DbError extends Error {}
@@ -90,7 +93,8 @@ ${op.put.map(a => `INSERT OR REPLACE INTO agents VALUES (${q(a.agentId)}, ${q(op
       }COMMIT;
 `
     }
-    case 'call': {
+    case 'call':
+    case 'turn': {
       const c = op.put
       return `INSERT OR REPLACE INTO calls VALUES (${q(c.id)}, ${q(op.dir)}, ${q(c.agentId)}, ${q(op.session)}, (SELECT coalesce(max(seq), 0) + 1 FROM calls), ${body(c)});
 `
@@ -179,6 +183,10 @@ export async function writeAgents($: $, at: Where, dir: string, session: string,
 
 export async function writeCall($: $, at: Where, dir: string, session: string, put: Call) {
   await must($, at, { kind: 'call', dir, session, put })
+}
+
+export async function writeTurn($: $, at: Where, dir: string, session: string, put: Turn) {
+  await must($, at, { kind: 'turn', dir, session, put })
 }
 
 // 'done': this source was imported before; 'moved': the list changed since `rev`.

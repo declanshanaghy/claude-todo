@@ -56,6 +56,30 @@ export type Call = {
   state: 'run' | 'ok' | 'err' | 'interrupted'
   ms?: number
   startedAt: number
+  // The pictures its result carried, by reference: never their bytes.
+  images?: ImageRef[]
+}
+
+// A picture a call's result carried: the file it was read from, or the sidecar
+// its base64 was spooled to (`spooled`), loaded only when the dialog draws it.
+export type ImageRef = {
+  name: string
+  path: string
+  // Its size in bytes, when known.
+  bytes?: number
+  // `image/png`, `image/jpeg`, …
+  mediaType: string
+  spooled?: boolean
+}
+
+// What an agent wrote between its tool calls: one model step's visible text.
+// Kept in the calls table beside the calls, told apart by `kind`.
+export type Turn = {
+  kind: 'turn'
+  id: string
+  agentId: string
+  text: string
+  startedAt: number
 }
 
 export type Confirm = 'stop' | 'delete' | 'takeover'
@@ -99,6 +123,13 @@ declare module 'claude-code' {
       db: { bin: string; file: string } | null
       agents: Shaped<AgentNode[]>
       calls: Shaped<Call[]>
+      turns: Shaped<Turn[]>
+      // The call browser's unfolded blocks, how many windows of older entries
+      // it shows, and its thumbnails: an image's path to the PNG drawn for it
+      // ('mem' held in memory, '' when it can't be drawn).
+      unfolded: string[]
+      earlier: number
+      thumbs: Record<string, string>
       ui: Shaped<PaneUi>
       cpuCap: number
       spin: number

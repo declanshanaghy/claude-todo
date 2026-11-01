@@ -1,4 +1,4 @@
-import type { Color, EngineInterface, RenderInput } from 'claude-code'
+import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-code'
 
 import type { AgentNode, Call, Dividers, PaneUi, Todo } from '../types'
 import {
@@ -121,6 +121,22 @@ export function dividerParts(n: number, title: string, width: number) {
   return { lead, num, text: text ? ` ${text} ` : ' ', tail: '─'.repeat(Math.max(0, width - used)) }
 }
 
+// Every focusable item lights the same way: while the ring is on it, a
+// rounded border in Claude's color, as the ring's inversion alone is hard to
+// see. The others keep a blank cell on each side in its place, so a moving
+// ring never shifts anything. The call browser's fold toggles use it too.
+export function ringBox({ Box }: Pick<ElementTable, 'Box'>, ring: string | null, key: string, node: JSX.Element) {
+  return ring === key ? (
+    <Box key={`ring:${key}`} borderStyle="round" borderColor="claude">
+      {node}
+    </Box>
+  ) : (
+    <Box key={`ring:${key}`} padding={1}>
+      {node}
+    </Box>
+  )
+}
+
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
 export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f, dividers }: PaneData) {
@@ -128,20 +144,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
 
-  // Every focusable item lights the same way: while the ring is on it, a
-  // rounded border in Claude's color, as the ring's inversion alone is hard to
-  // see. The others keep a blank cell on each side in its place, so a moving
-  // ring never shifts anything.
-  const lit = (key: string, node: JSX.Element) =>
-    ring === key ? (
-      <Box key={`ring:${key}`} borderStyle="round" borderColor="claude">
-        {node}
-      </Box>
-    ) : (
-      <Box key={`ring:${key}`} padding={1}>
-        {node}
-      </Box>
-    )
+  const lit = (key: string, node: JSX.Element) => ringBox(els, ring, key, node)
 
   // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
   // Text child carries the fill.

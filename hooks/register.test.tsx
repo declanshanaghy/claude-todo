@@ -50,6 +50,8 @@ type Where = {
   env?: Record<string, string>
   // A file's mtime, for the sync loop's gate; undefined answers as missing.
   mtime?: (path: string) => number | undefined
+  // A file's size in bytes, for a picture a Read names; undefined answers as missing.
+  size?: (path: string) => number | undefined
   // How `mkdir -p` goes.
   mkdir?: 'ok' | 'fail' | 'throw'
   // Why the pane can't be placed, when it can't.
@@ -104,7 +106,9 @@ function sqlite(db: Db, op: Op) {
       }
       return ok()
     }
-    case 'call': {
+    // A turn shares the calls table, its body marked kind: 'turn'.
+    case 'call':
+    case 'turn': {
       const c = op.put
       db.calls[c.id] = { dir: op.dir, agentId: c.agentId, session: op.session, seq: top() + 1, body: c }
       return ok()
@@ -143,6 +147,9 @@ function engine(
   const folders: string[] = []
   // What the status line said, in order.
   const statuses: (string | undefined)[] = []
+  // Every other process's argv, and each file written, by path.
+  const runs: string[][] = []
+  const written: Record<string, string> = {}
   on('store.get', (_, e) => ({ value: store[e.key] }))
   on('store.set', (_, e) => ((store[e.key] = JSON.parse(JSON.stringify(e.value))), { value: undefined }))
   on('store.delete', (_, e) => (Reflect.deleteProperty(store, e.key), { value: undefined }))
@@ -153,8 +160,11 @@ function engine(
   on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/me' : where.env?.[e.name] }))
   on('fs.stat', (_, e) => {
     const ms = where.mtime?.(e.path)
+    const size = where.size?.(e.path)
+    if (size !== undefined) return { value: { kind: 'file', size, mtimeMs: ms ?? 0, isLink: false } } as never
     return (ms === undefined ? { value: undefined } : { value: { kind: 'file', size: 0, mtimeMs: ms, isLink: false } }) as never
   })
+  on('fs.write', (_, e) => ((written[e.path] = e.text), { value: undefined }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__todo__${e.name}` } }))
   on('process.run', (_, e) => {
@@ -177,6 +187,7 @@ function engine(
       if (where.mkdir === 'throw') throw new Error('EACCES')
       return { value: where.mkdir === 'fail' ? err('mkdir: Permission denied\n') : ok() }
     }
+    runs.push([...e.argv])
     return { value: ok('10\n') }
   })
   if (ownClock) on('clock.every', () => ({ value: undefined }))
@@ -198,7 +209,7 @@ function engine(
   if (ownClock) on('clock.now', () => ({ value: (t += 250) }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  return { store, db, ops, files, folders, statuses }
+  return { store, db, ops, files, folders, statuses, runs, written }
 }
 
 type TestBody = Extract<Parameters<typeof test>[1], (...args: never[]) => unknown>
@@ -1611,5 +1622,229 @@ test('action chips are one word under 10 letters, and Resume, Restart, Refine an
     const word = label.replace(/^\W+\s*/u, '')
     expect(word).toMatch(/^\p{L}{1,9}$/u)
   }
+  await ui.unmount()
+})
+
+// ---------- the call browser: turns, markdown, folds, images ----------
+
+// A lone Agent for todo #1, spawned as ag1, whose calls the test answers.
+// `hooks` registers the test's own answers, before the first call on $.
+async function launched($: T$, on: On, hooks: () => void, where: Where = {}, ownClock = true) {
+  const e = engine(on, [], undefined, ownClock, where)
+  hooks()
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag1' } }))
+  on('agent.spawn', () => ({ model: 'm', agentId: 'ag1' }))
+  await start($)
+  await todo($, 'add Count md files')
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:1] Count md files', prompt: 'count', subagent_type: 'general-purpose' } as never)
+  await $.agent.spawn({ prompt: 'count', description: '[todo:1] Count md files', tool_use_id: 'tu1' } as never)
+  return e
+}
+// The model's answer to each step, by turn and index: the test's own
+// turn.step hook, the bottom of the chain.
+function steps(on: On, say: Record<string, string>) {
+  // A stream hook is an async generator, even one with nothing to wait on.
+  // eslint-disable-next-line @typescript-eslint/require-await
+  on('turn.step', async function* (_, e) {
+    const answer = say[`${e.turnId}:${e.index}`] ?? ''
+    if (answer) yield { kind: 'text', index: 0, text: answer }
+    return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason: answer ? 'end_turn' : 'tool_use', usage: null }
+  })
+}
+async function step($: T$, turnId: string, index: number, agentId?: string) {
+  const stream = $.turn.step({ turnId, index, model: 'm', messageCount: 1, ...(agentId ? { agentId } : {}) })
+  for (;;) {
+    const r = await stream.next()
+    if (r.done) return r.value
+  }
+}
+const browse = async ($: T$, surface: 'terminal' | 'desktop' = 'terminal', agentId = 'ag1') => {
+  const ui = await $.ui.mount({ ...PANE, surface })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: `ag:${agentId}` })
+  return ui
+}
+const lines = (n: number, word = 'line') => Array.from({ length: n }, (_, i) => `${word} ${i + 1}`).join('\n')
+
+test("an agent's turns are kept beside its calls and read in time order", async ($, on) => {
+  steps(on, { 'tA:0': 'Counting the **markdown** files first.', 'tA:1': 'Found two:\n\n- a.md\n- b.md', 'tM:0': 'main loop' })
+  const { db } = await launched($, on, () =>
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'a.md\nb.md', stderr: '' }, text: 'a.md\nb.md' })),
+  )
+  expect((await step($, 'tA', 0, 'ag1')).answer).toBe('Counting the **markdown** files first.')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'c1', command: 'ls *.md', agentId: 'ag1' } as never)
+  await step($, 'tA', 1, 'ag1')
+  // The main loop's steps and a step with no text are not kept.
+  await step($, 'tM', 0)
+  await step($, 'tA', 2, 'ag1')
+
+  const kept = Object.values(db.calls).sort((a, b) => a.seq - b.seq).map(r => r.body as { kind?: string })
+  expect(kept.map(r => r.kind ?? 'call')).toEqual(['turn', 'call', 'turn'])
+  expect(kept[0]).toEqual({ kind: 'turn', id: 'turn:tA:0', agentId: 'ag1', text: 'Counting the **markdown** files first.', startedAt: expect.any(Number) })
+
+  const ui = await browse($)
+  const all = (await ui.findAll({})).map(x => `${x.type}:${x.text}`)
+  const at = (re: RegExp) => all.findIndex(x => re.test(x))
+  expect(at(/^Markdown:Counting/)).toBeGreaterThan(-1)
+  expect(at(/^Markdown:Counting/)).toBeLessThan(at(/^Code:ls \*\.md/))
+  expect(at(/^Code:ls \*\.md/)).toBeLessThan(at(/^Markdown:Found two/))
+  expect(await ui.find({ type: 'Text', text: /1 tool calls · 2 turns/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a restarted session reads the turns it kept back, in place among the calls', async ($, on) => {
+  const db = seeded([running(1, 'Count md files')], [agentNode('ag1', 1)], [callRow('c1', 'ag1', { startedAt: 5 })])
+  db.calls['turn:t:0'] = { dir: '/proj', agentId: 'ag1', session: 'gone', seq: 2, body: { kind: 'turn', id: 'turn:t:0', agentId: 'ag1', text: 'Looking first.', startedAt: 3 } }
+  engine(on, [], undefined, true, { id: 's2', db })
+  await start($)
+  const ui = await browse($)
+  const all = (await ui.findAll({})).map(x => `${x.type}:${x.text}`)
+  expect(all.indexOf('Markdown:Looking first.')).toBeGreaterThan(-1)
+  expect(all.indexOf('Markdown:Looking first.')).toBeLessThan(all.findIndex(x => x.startsWith('Code:ls')))
+  await ui.unmount()
+})
+
+test('a response that reads as markdown is drawn as Markdown; shell output and file bodies stay code', async ($, on) => {
+  const md = '# Report\n\n| file | lines |\n|---|---|\n| a.md | 3 |'
+  const db = seeded(
+    [running(1, 'Count md files')],
+    [agentNode('ag1', 1)],
+    [
+      callRow('c1', 'ag1', { tool: 'WebFetch', fields: [{ k: 'url', v: 'https://x.dev' }], response: md }),
+      callRow('c2', 'ag1', { tool: 'Read', filePath: '/proj/README.md', fields: [{ k: 'file_path', v: '/proj/README.md' }], response: '# Title\n\nbody', startedAt: 2 }),
+      callRow('c3', 'ag1', { response: 'a.md\nb.md', startedAt: 3 }),
+    ],
+  )
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await browse($)
+  expect(await ui.find({ type: 'Markdown', text: /# Report/ })).toBeDefined()
+  expect(await ui.find({ type: 'Code', text: /# Title/ })).toMatchObject({ props: { path: '/proj/README.md' } })
+  expect(await ui.find({ type: 'Code', text: /a\.md\nb\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a long output folds to a preview, and its toggle unfolds and folds it, lighting the ring', async ($, on) => {
+  const db = seeded([running(1, 'Count md files')], [agentNode('ag1', 1)], [callRow('c1', 'ag1', { response: lines(30) })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await browse($)
+  const out = async () => (await ui.find({ type: 'Code', text: /line 1\n/ }))?.text ?? ''
+  expect(await out()).toContain('line 6')
+  expect(await out()).not.toContain('line 7')
+  expect(await ui.find({ type: 'Button', key: 'fold:c1:out' })).toMatchObject({ props: { label: '… +24 lines' } })
+  expect(await ui.find({ type: 'Text', text: /tab, then enter, unfolds/ })).toBeDefined()
+
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'fold:c1:out', origin: { kind: 'person' } })
+  expect(await isLit(ui, 'fold:c1:out')).toBe(true)
+  await ui.press({ key: 'fold:c1:out' })
+  expect(await out()).toContain('line 30')
+  expect(await ui.find({ type: 'Button', key: 'fold:c1:out' })).toMatchObject({ props: { label: '▴ fold' } })
+  await ui.press({ key: 'fold:c1:out' })
+  expect(await out()).not.toContain('line 7')
+  await ui.unmount()
+})
+
+const codeSize = async (ui: { findAll: (q: { type: string }) => Promise<{ text: string }[]> }) =>
+  (await ui.findAll({ type: 'Code' })).reduce((n, x) => n + x.text.length, 0)
+
+test('hundreds of calls draw the newest window, older ones a toggle away', async ($, on) => {
+  const many = Array.from({ length: 300 }, (_, i) => callRow(`c${i}`, 'ag1', { response: lines(40, `out${i}`), startedAt: i + 1 }))
+  engine(on, [], undefined, true, { db: seeded([running(1, 'Count md files')], [agentNode('ag1', 1)], many) })
+  await start($)
+  const ui = await browse($)
+  expect(await ui.find({ type: 'Code', text: /out299 1\n/ })).toBeDefined()
+  expect(await ui.find({ type: 'Code', text: /out259 1\n/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'fold:earlier' })).toMatchObject({ props: { label: '▴ 260 earlier entries' } })
+  await ui.press({ key: 'fold:earlier' })
+  expect(await ui.find({ type: 'Code', text: /out220 1\n/ })).toBeDefined()
+  expect(await codeSize(ui)).toBeLessThan(100000)
+  await ui.unmount()
+})
+
+test('calls too big to draw together stop short of the drawing limit, saying so', async ($, on) => {
+  const huge = Array.from({ length: 60 }, (_, i) =>
+    callRow(`w${i}`, 'ag1', { tool: 'Write', fields: Array.from({ length: 8 }, (_, k) => ({ k: `content${k}`, v: 'x'.repeat(3000) })), startedAt: i + 1 }),
+  )
+  engine(on, [], undefined, true, { db: seeded([running(1, 'Count md files')], [agentNode('ag1', 1)], huge) })
+  await start($)
+  const ui = await browse($)
+  expect(await ui.find({ type: 'Text', text: /earlier entries past what one drawing holds/ })).toBeDefined()
+  expect(await codeSize(ui)).toBeLessThan(100000)
+  expect(await codeSize(ui)).toBeGreaterThan(50000)
+  await ui.unmount()
+})
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
+test('a Read of a picture keeps a reference, not its bytes, and draws it as a thumbnail', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const { db, runs } = await launched(
+    $,
+    on,
+    () => on('tool.call', { tool: 'Read' }, () => ({ result: { type: 'image', file: { base64: PNG, type: 'image/png', originalSize: 2048 } } })),
+    { size: p => (p === '/proj/shot.png' ? 2048 : undefined) },
+    false,
+  )
+  await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: '/proj/shot.png', agentId: 'ag1' } as never)
+  // A picture the host won't open (here a path under /home, which macOS
+  // mounts from the network) keeps its alt text rather than blanking the dialog.
+  await $.tool.call({ tool: 'Read', tool_use_id: 'r2', file_path: '/home/u/far.png', agentId: 'ag1' } as never)
+
+  expect(callAt(db, 'r1').images).toEqual([{ name: 'shot.png', path: '/proj/shot.png', bytes: 2048, mediaType: 'image/png' }])
+  expect(JSON.stringify(db.calls)).not.toContain(PNG)
+  const ui = await browse($)
+  await clock.advance(1)
+  expect(await ui.find({ type: 'Image', key: 'img:r1:0' })).toMatchObject({
+    props: { source: { file: '/proj/shot.png', format: 'png' }, columns: 24, rows: 8, alt: 'shot.png · 2 KB' },
+  })
+  expect(await ui.find({ type: 'Image', key: 'img:r2:0' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /▣ far\.png/ })).toBeDefined()
+  // A PNG on disk is drawn as it is: nothing is converted.
+  expect(runs.some(r => r[0] === 'sips' || r[0] === 'sh')).toBe(false)
+  await ui.unmount()
+})
+
+test('a surface without Image shows the picture as its alt text', async ($, on) => {
+  const shot = callRow('r1', 'ag1', {
+    tool: 'Read', filePath: '/proj/shot.png', response: '', images: [{ name: 'shot.png', path: '/proj/shot.png', bytes: 2048, mediaType: 'image/png' }],
+  })
+  engine(on, [], undefined, true, { db: seeded([running(1, 'Count md files')], [agentNode('ag1', 1)], [shot]) })
+  await start($)
+  const ui = await browse($, 'desktop')
+  expect(await ui.find({ type: 'Image' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '▣ shot.png · 2 KB' })).toBeDefined()
+  await ui.unmount()
+})
+
+test("a result's image block is spooled beside the database and made a PNG thumbnail only when drawn", async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const { db, runs, written } = await launched(
+    $,
+    on,
+    () => on('tool.call', { tool: 'mcp__web__shot' as never }, () => ({ result: { content: [{ type: 'image', data: PNG, mimeType: 'image/jpeg' }] } })),
+    // Image refuses a path under /home, which macOS mounts from the network.
+    { env: { CLAUDE_CONFIG_DIR: '/Users/me/.claude' }, size: p => (p.includes('/thumbs/') ? 900 : undefined) },
+    false,
+  )
+  await $.tool.call({ tool: 'mcp__web__shot', tool_use_id: 's1', agentId: 'ag1' } as never)
+
+  const spool = '/Users/me/.claude/plugins/data/todo/images/s1-0.b64'
+  expect(written[spool]).toBe(PNG)
+  expect(callAt(db, 's1')).toMatchObject({ images: [{ name: 'mcp__web__shot image 1.jpg', path: spool, mediaType: 'image/jpeg', spooled: true }] })
+  expect(callAt(db, 's1').response).toContain('[image image/jpeg]')
+  expect(JSON.stringify(db.calls)).not.toContain(PNG)
+  expect(runs.some(r => r[0] === 'sips')).toBe(false)
+
+  const ui = await browse($)
+  // Until its PNG is made the alt text stands in.
+  expect(await ui.find({ type: 'Text', text: /▣ mcp__web__shot image 1\.jpg/ })).toBeDefined()
+  await clock.advance(1)
+  expect(runs.find(r => r[0] === 'sh')?.[4]).toBe(spool)
+  const sips = runs.find(r => r[0] === 'sips')
+  expect(sips?.slice(0, 5)).toEqual(['sips', '-s', 'format', 'png', '-Z'])
+  const png = sips?.at(-1) ?? ''
+  expect(png).toMatch(/^\/Users\/me\/\.claude\/plugins\/data\/todo\/thumbs\/[0-9a-f]+\.png$/)
+  expect(await ui.find({ type: 'Image', key: 'img:s1:0' })).toMatchObject({ props: { source: { file: png, format: 'png' } } })
   await ui.unmount()
 })

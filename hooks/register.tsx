@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, Dividers, PaneUi, Todo } from '../types'
-import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos } from './db'
+import type { AgentNode, Call, Confirm, Detail, Dividers, ImageRef, PaneUi, Todo, Turn } from '../types'
+import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
+import { imageRefs, splitImages, thumbnail } from './images'
 import { drawPane, focusOrder } from './pane'
 import { execPrompt, restartPrompt, resumePrompt } from './protocol'
 
@@ -36,6 +37,14 @@ const persisted = atom({ plugin: 'todo', key: 'persisted' } as const, false)
 const db = atom({ plugin: 'todo', key: 'db' } as const, null as { bin: string; file: string } | null)
 const agents = atom({ plugin: 'todo', key: 'agents' } as const, [], { shape: 'agents-1' })
 const calls = atom({ plugin: 'todo', key: 'calls' } as const, [], { shape: 'calls-2' })
+// What each todo agent wrote between its calls, kept beside them.
+const turns = atom({ plugin: 'todo', key: 'turns' } as const, [], { shape: 'turns-1' })
+// The call browser's unfolded blocks and how many windows of older entries it
+// shows; both reset when it opens. `thumbs` maps an image's path to the PNG
+// made for it ('' when none can be).
+const unfolded = atom({ plugin: 'todo', key: 'unfolded' } as const, [] as string[])
+const earlier = atom({ plugin: 'todo', key: 'earlier' } as const, 0)
+const thumbs = atom({ plugin: 'todo', key: 'thumbs' } as const, {} as Record<string, string>)
 const ui = atom(
   { plugin: 'todo', key: 'ui' } as const,
   { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false },
@@ -58,6 +67,7 @@ const CALLS_PER_AGENT = 200
 const CALLS_TOTAL = 1500
 const FIELD_MAX = 3000
 const RESPONSE_MAX = 6000
+const TURN_MAX = 8000
 const RESERVED = new Set(['tool', 'tool_use_id', 'agentId', 'consent', 'requestMeta'])
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'url', 'query', 'description', 'path', 'prompt']
 export const INFLIGHT = new Set<Todo['status']>(['drafting', 'planning', 'running', 'paused'])
@@ -145,9 +155,14 @@ async function reload($: $, fresh = false) {
   await update($, agents, () => snap.agents)
   let after = fresh ? Math.max(0, snap.floor - 1) : await read($, seq)
   const got: Call[] = []
+  const said: Turn[] = []
   for (;;) {
     const page = await callsAfter($, at, d, after, CALLS_PAGE)
-    for (const { seq: _, ...c } of page.rows) got.push(c)
+    for (const { seq: _, ...c } of page.rows) {
+      // A turn's body carries `kind`; a call's has none.
+      if ('kind' in c) said.push(c)
+      else got.push(c)
+    }
     if (page.last === null || page.rows.length < CALLS_PAGE) {
       if (page.last !== null) after = page.last
       break
@@ -159,6 +174,10 @@ async function reload($: $, fresh = false) {
   const byId = new Map(got.map(c => [c.id, c]))
   await update($, calls, l =>
     [...(fresh ? [] : l.filter(c => !byId.has(c.id))), ...got].filter(c => ids.has(c.agentId)).slice(-CALLS_TOTAL),
+  )
+  const saidIds = new Set(said.map(x => x.id))
+  await update($, turns, l =>
+    [...(fresh ? [] : l.filter(x => !saidIds.has(x.id))), ...said].filter(x => ids.has(x.agentId)).slice(-CALLS_TOTAL),
   )
   await syncStatus($)
 }
@@ -233,6 +252,20 @@ async function editCalls($: $, fn: (list: Call[]) => Call[]) {
     for (const c of put) await writeCall($, at, d, self, c)
   } catch (err) {
     await warn($, err)
+  }
+}
+
+async function addTurn($: $, x: Turn) {
+  await update($, turns, l => {
+    const mine = l.filter(y => y.agentId === x.agentId)
+    const oldest = mine.length >= CALLS_PER_AGENT ? mine[0]?.id : undefined
+    return [...l.filter(y => y.id !== oldest && y.id !== x.id), x].slice(-CALLS_TOTAL)
+  })
+  try {
+    const { at, d, me: self } = await where($)
+    await writeTurn($, at, d, self, x)
+  } catch (err) {
+    await fail($, err)
   }
 }
 
@@ -392,7 +425,38 @@ async function syncStatus($: $) {
 // The view-only detail dialog replaces the tree in the same pane, which
 // already holds the keys; Escape hands them back and the render closes it.
 export async function openDetail($: $, d: Detail) {
+  await update($, unfolded, () => [])
+  await update($, earlier, () => 0)
   await update($, detail, () => d)
+}
+
+// A fold toggle in the call browser: one block unfolds or folds again.
+export async function unfold($: $, id: string) {
+  await update($, unfolded, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
+}
+
+// The call browser's "earlier" toggle: one more window of older entries.
+export async function showEarlier($: $) {
+  await update($, earlier, n => n + 1)
+}
+
+// Images the call browser wants drawn and has no PNG for yet: each is made
+// once, off the render, and the drawing follows the thumbs atom.
+const making = new Set<string>()
+function makeThumbs($: $, want: ImageRef[]) {
+  const todo = want.filter(im => !making.has(im.path))
+  if (todo.length === 0) return
+  for (const im of todo) making.add(im.path)
+  $.clock.after(0, () => {
+    void (async () => {
+      const at = await read($, db)
+      for (const im of todo) {
+        const png = at ? await thumbnail($, im, at.file.slice(0, at.file.lastIndexOf('/'))) : ''
+        await update($, thumbs, t => ({ ...t, [im.path]: png }))
+        making.delete(im.path)
+      }
+    })()
+  })
 }
 
 export async function patchUi($: $, fn: (u: PaneUi) => PaneUi) {
@@ -440,6 +504,7 @@ async function clearRun($: $, n: number) {
   const gone = new Set((await read($, agents)).filter(a => a.todoN === n).map(a => a.agentId))
   await editAgents($, l => l.filter(a => a.todoN !== n))
   await update($, calls, l => l.filter(c => !gone.has(c.agentId)))
+  await update($, turns, l => l.filter(x => !gone.has(x.agentId)))
 }
 
 // ---------- actions (pane buttons and /todo) ----------
@@ -588,13 +653,13 @@ function previewOf(a: Record<string, unknown>) {
   return Object.values(a).find((v): v is string => typeof v === 'string') ?? ''
 }
 
-function responseOf(ran: { deny?: string | undefined; text?: string | undefined; result?: unknown }) {
+function responseOf(ran: { deny?: string | undefined; text?: string | undefined }, rest: unknown) {
   if (ran.deny !== undefined) return `denied: ${ran.deny}`
   if (ran.text) return ran.text
   try {
-    return json(ran.result, 1) ?? ''
+    return json(rest, 1) ?? ''
   } catch {
-    return String(ran.result)
+    return String(rest)
   }
 }
 
@@ -866,8 +931,17 @@ export const register: Register = (on, options) => {
         : ran.deny !== undefined || ran.isError
           ? 'err'
           : 'ok'
-    const response = cut(responseOf(ran), RESPONSE_MAX)
-    await editCalls($, l => l.map(c => (c.id === call.id ? { ...c, state, ms, response } : c)))
+    const { blocks, rest } = splitImages(ran.result)
+    const response = cut(responseOf(ran, rest), RESPONSE_MAX)
+    const at = await read($, db)
+    const images = await imageRefs($, {
+      id: call.id,
+      tool,
+      ...(typeof filePath === 'string' ? { filePath } : {}),
+      blocks,
+      ...(at ? { folder: at.file.slice(0, at.file.lastIndexOf('/')) } : {}),
+    })
+    await editCalls($, l => l.map(c => (c.id === call.id ? { ...c, state, ms, response, ...(images.length ? { images } : {}) } : c)))
     return ran
   }).catch((_, e, next) => next(e))
 
@@ -900,6 +974,25 @@ export const register: Register = (on, options) => {
     })
     return ran
   }).catch((_, e, next) => next(e))
+
+  // A todo agent's visible text, one model step at a time, stamped when the
+  // step began: its tool calls start after it, so time orders the two.
+  on('turn.step', async function* ($, e, next) {
+    const id = e.agentId
+    const node = id === undefined ? undefined : (await read($, agents)).find(a => a.agentId === id)
+    if (!node) return yield* next(e)
+    const startedAt = await $.clock.now()
+    const r = yield* next(e)
+    const text = r.answer.trim()
+    if (text) {
+      try {
+        await addTurn($, { kind: 'turn', id: `turn:${e.turnId}:${e.index}`, agentId: node.agentId, text: cut(text, TURN_MAX), startedAt })
+      } catch {
+        // the step's answer stands whatever the record did
+      }
+    }
+    return r
+  })
 
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
@@ -956,7 +1049,21 @@ export const register: Register = (on, options) => {
       // Escape (or a click elsewhere) takes the keys from the pane: close the
       // dialog then, from a timer, since a render never writes state.
       if (!e.props.isFocused) $.clock.after(0, () => void update($, detail, () => null))
-      return drawDetail($, e, { detail: d, list: await read($, todos), nodes: await read($, agents), all: await read($, calls) })
+      const want: ImageRef[] = []
+      const tree = drawDetail($, e, {
+        detail: d,
+        list: await read($, todos),
+        nodes: await read($, agents),
+        all: await read($, calls),
+        turns: await read($, turns),
+        ring: e.props.isFocused ? await read($, ring) : null,
+        unfolded: await read($, unfolded),
+        earlier: await read($, earlier),
+        thumbs: await read($, thumbs),
+        want,
+      })
+      makeThumbs($, want)
+      return tree
     }
     const gone = new Set(await read($, expired))
     return drawPane($, e, {
