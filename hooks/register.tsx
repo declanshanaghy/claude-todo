@@ -625,6 +625,10 @@ async function focus($: $, key: string) {
   }
 }
 
+// Every first word `/todo` treats as a verb; any other word starts a title.
+// A new verb goes here, or `/todo <verb>` would add it as a todo.
+export const TODO_VERBS = ['', 'list', 'show', 'noshow', 'add', 'exec', 'auto', 'resume'] as const
+
 export async function addTodo($: $, title: string) {
   const clean = title.trim()
   if (!clean) return undefined
@@ -1360,9 +1364,13 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'todo' }, async ($, e) => {
     const [said = '', ...words] = e.args.trim().split(/\s+/)
+    // A first word that is no verb makes the whole args a title: `/todo Fix
+    // kitty` is `/todo add Fix kitty`. A title that starts with a verb word
+    // still needs the `add`.
+    const isBare = !(TODO_VERBS as readonly string[]).includes(said)
     // `/todo auto …` is short for `/todo exec auto …`.
-    const verb = said === 'auto' ? 'exec' : said
-    const rest = said === 'auto' ? ['auto', ...words] : words
+    const verb = isBare ? 'add' : said === 'auto' ? 'exec' : said
+    const rest = isBare ? [said, ...words] : said === 'auto' ? ['auto', ...words] : words
     const arg = rest.join(' ')
     if (verb === 'noshow') {
       await patchUi($, u => ({ ...u, isHidden: true }))
@@ -1418,7 +1426,7 @@ export const register: Register = (on, options) => {
       if (!t.hasRun && t.status === 'paused') return { text: execNote(t, false) }
       return { text: `Resuming #${t.n} ${t.title}: Claude picks its work up in the chat.` }
     }
-    return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title>' }
+    return { text: 'Usage: /todo [show] · /todo noshow · /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title>' }
   })
 
   on('tool.call', { tool: 'mcp__todo__update' as never }, async ($, e) => {

@@ -721,6 +721,7 @@ document.addEventListener('keydown', e => {
     else if(/^\/todo\s+exec\s+auto$/.test(v)){ chat('user',esc(v)); fireNext(); }
     else if(m=v.match(/^\/todo\s+exec\s+#?(\d+)/)){ const t=S.todos.find(x=>x.n===+m[1]); if(t && (t.status==='pending')) { t.expanded=true; execTodo(t,false); } else { chat('user',esc(v)); chat('sys', !t ? `todo: no #${m[1]}` : t.status==='prompting' ? `todo: ${stillPrompting(t)}` : `todo: #${t.n} is ${t.status}`); } }
     else if(/^\/todo\s*(list)?$/.test(v)){ chat('user',esc(v)); chat('sys','todo: pane opened'); focusPane(); }
+    else if(m=v.match(/^\/todo\s+(?!(?:list|show|noshow|add|exec|auto|resume)(?:\s|$))(.+)/)){ chat('user',esc(v)); const n=addTodo(m[1]); chat('sys',`todo: added #${n} ${esc(m[1])}`); render(); }
     else { chat('user',esc(v)); chat('sys','(mockup: only /todo commands are simulated)'); }
   }
 });

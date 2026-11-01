@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 185 of 189 cases (97.9%)** are covered by `claude plugin test .`.
+**Coverage: 186 of 190 cases (97.9%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -10,9 +10,10 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 |---|---|---|
 | C1 | `/todo add` stores a title-only todo with no model turn, and the pane lists it | M1: /todo add stores a title-only todo and the pane lists it |
 | C2 | The pane's add input adds a todo | M1: the pane input adds a todo |
-| C3 | `/todo add` with no title answers with usage and stores nothing | /todo add with no title, an unknown verb, and an unplaceable pane each say so |
-| C4 | An unknown verb answers with usage | /todo add with no title, an unknown verb, and an unplaceable pane each say so |
-| C5 | `/todo show` when the pane can't be placed gives the host's reason | /todo add with no title, an unknown verb, and an unplaceable pane each say so |
+| C3 | `/todo add` with no title answers with usage and stores nothing | /todo add with no title, a bare title, and an unplaceable pane each say so |
+| C4 | A first word that is no verb adds the whole args as a title (`/todo frobnicate`) | /todo add with no title, a bare title, and an unplaceable pane each say so |
+| C4a | `/todo <title>` stores the trimmed title as `/todo add <title>` does; a title whose first word is a verb (`list …`) runs that verb, and needs `/todo add` to be stored | /todo with a bare title adds it as /todo add does, and a title starting with a verb word needs the add |
+| C5 | `/todo show` when the pane can't be placed gives the host's reason | /todo add with no title, a bare title, and an unplaceable pane each say so |
 | C6 | `noshow` closes the pane and keeps it closed through later commands until `show` | show / noshow: noshow keeps the pane closed until show |
 | C7 | The pane opens at session start, unless hidden, which outlasts a reload | the pane opens at start, stays closed across a reload once hidden, and offers the way back from a transcript |
 | C8 | `/todo exec` finds a todo by number, `#n` or a case-insensitive title fragment; no match says so | /todo exec finds a todo by number or title fragment, submits once the command answered, and refuses one in flight |

@@ -833,16 +833,30 @@ const turnDone = ($: T$, agentId: string, answer: string, extra: { isAborted?: b
 
 // ---------- commands ----------
 
-test('/todo add with no title, an unknown verb, and an unplaceable pane each say so', async ($, on) => {
+test('/todo add with no title, a bare title, and an unplaceable pane each say so', async ($, on) => {
   const toasts: string[] = []
   const where: Where = { toasts }
   const { db } = engine(on, [], undefined, true, where)
   await start($)
   expect((await todo($, 'add   ')).text).toBe('Usage: /todo add <title>')
-  expect((await todo($, 'frobnicate')).text).toContain('Usage: /todo [show]')
   expect(titles(db, '/proj')).toEqual([])
+  expect((await todo($, 'frobnicate')).text).toBe('Added #1 frobnicate')
+  expect(titles(db, '/proj')).toEqual(['1 frobnicate'])
   where.unplaced = 'the terminal is too narrow'
   expect((await todo($, 'show')).text).toBe("Todo pane can't be placed: the terminal is too narrow")
+})
+
+test('/todo with a bare title adds it as /todo add does, and a title starting with a verb word needs the add', async ($, on) => {
+  const { db } = engine(on, [], undefined, true)
+  await start($)
+  expect((await todo($, '  Fix kitty tab titles  ')).text).toBe('Added #1 Fix kitty tab titles')
+  expect((await todo($, 'add Fix kitty tab titles')).text).toBe('Added #2 Fix kitty tab titles')
+  expect(titles(db, '/proj')).toEqual(['1 Fix kitty tab titles', '2 Fix kitty tab titles'])
+  // `list` is a verb, so it lists rather than adds; `add` makes it a title.
+  expect((await todo($, 'list the open ports')).text).toBe('Todo pane shown.')
+  expect(titles(db, '/proj')).toHaveLength(2)
+  expect((await todo($, 'add list the open ports')).text).toBe('Added #3 list the open ports')
+  expect(titles(db, '/proj')).toEqual(['1 Fix kitty tab titles', '2 Fix kitty tab titles', '3 list the open ports'])
 })
 
 test('/todo exec finds a todo by number or title fragment, submits once the command answered, and refuses one in flight', async ($, on) => {
