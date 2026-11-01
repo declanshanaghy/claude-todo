@@ -134,6 +134,8 @@ declare module 'claude-code' {
       cpuCap: number
       spin: number
       detail: Detail
+      // Whether a surface draws the pane now; the status line counts while not.
+      placed: boolean
       // The key of the element the pane's focus ring is on.
       ring: string | null
       // A done todo's time in the tree in ms (0 keeps it), and the todos past it.

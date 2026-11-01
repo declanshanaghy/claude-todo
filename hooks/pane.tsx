@@ -1,6 +1,7 @@
 import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-code'
 
 import type { AgentNode, Call, Dividers, PaneUi, Todo } from '../types'
+import { MARK, tally } from './marks'
 import {
   INFLIGHT,
   addTodo,
@@ -43,17 +44,10 @@ export const SPIN = ['·', '✢', '✳', '✶', '✻', '✽']
 
 type $ = EngineInterface
 
+// A status's mark (marks.ts); a running row spins Claude's spinner instead.
 export function todoGlyph(s: Todo['status'], f: number): [string, Color] {
-  switch (s) {
-    case 'pending': return ['○', 'inactive']
-    case 'drafting': return ['✎', 'suggestion']
-    case 'planning': return ['◇', 'planMode']
-    case 'running': return [SPIN[f % SPIN.length] ?? '·', 'claude']
-    case 'paused': return ['⏸', 'warning']
-    case 'stopped': return ['■', 'error']
-    case 'done': return ['⏺', 'success']
-    case 'failed': return ['✗', 'error']
-  }
+  const { symbol, color } = MARK[s]
+  return [s === 'running' ? (SPIN[f % SPIN.length] ?? symbol) : symbol, color]
 }
 
 function agentGlyph(s: AgentNode['status'], f: number): [string, Color] {
@@ -160,7 +154,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
 
   const open = new Set(u.expanded)
   const view = e.props.view as { agentId?: string } | undefined
-  const count = (s: Todo['status']) => list.filter(t => t.status === s).length
 
   const actions = (t: Todo) => {
     const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'default') => (
@@ -391,8 +384,13 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
           <Text>
             <Text weight="semibold">Todos </Text>
             <Text dimColor>{list.length} · </Text>
-            <Text color="claude">▶{count('running')}</Text> <Text color="warning">⏸{count('paused')}</Text>{' '}
-            <Text color="error">■{count('stopped')}</Text> <Text color="success">✓{count('done')}</Text>
+            {tally(list).map((m, i) => (
+              <Text color={m.color}>
+                {i > 0 ? ' ' : ''}
+                {m.symbol}
+                {m.count}
+              </Text>
+            ))}
           </Text>
         </Box>
         <Text dimColor>cap {cap} agents</Text>

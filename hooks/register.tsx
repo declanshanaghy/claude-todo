@@ -5,6 +5,7 @@ import type { AgentNode, Call, Confirm, Detail, Dividers, ImageRef, PaneUi, Todo
 import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
+import { MARK, tallyText } from './marks'
 import { drawPane, focusOrder } from './pane'
 import { execPrompt, restartPrompt, resumePrompt } from './protocol'
 
@@ -53,6 +54,10 @@ const ui = atom(
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
 const spin = atom({ plugin: 'todo', key: 'spin' } as const, 0)
 const detail = atom({ plugin: 'todo', key: 'detail' } as const, null as Detail)
+// Whether a surface draws the pane now. Its header summary or, while it isn't
+// on screen (closed, hidden, waiting for a wider terminal, or showing the
+// dialog), the status line counts the todos: one of them, never both.
+const placed = atom({ plugin: 'todo', key: 'placed' } as const, false)
 // The key of the element the pane's focus ring is on, so the pane can draw
 // that chip's border; a person's moves arrive at ui.focus, the mod's own here.
 const ring = atom({ plugin: 'todo', key: 'ring' } as const, null as string | null)
@@ -414,12 +419,28 @@ async function isForeign($: $, t: Todo) {
 
 async function syncStatus($: $) {
   const list = await read($, todos)
-  if (list.length === 0) {
-    $.ui.status(undefined)
-    return
-  }
-  const c = (s: Todo['status']) => list.filter(t => t.status === s).length
-  $.ui.status(`todo ▶${c('running')} ⏸${c('paused')} ■${c('stopped')} ✓${c('done')} ○${c('pending')}`)
+  const isSummed = (await read($, placed)) && (await read($, detail)) === null
+  // A status line carries plain text only, so it has the marks but not their
+  // colors; the pane's header draws the same marks in them.
+  $.ui.status(list.length === 0 || isSummed ? undefined : `todo ${tallyText(list)}`)
+}
+
+async function setPlaced($: $, isPlaced: boolean) {
+  if ((await read($, placed)) !== isPlaced) await update($, placed, () => isPlaced)
+  await syncStatus($)
+}
+
+// The engine raises nothing when a narrower terminal unseats the pane, so the
+// sync tick asks it where the pane stands.
+async function checkPlaced($: $) {
+  const isPlaced = (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
+  if ((await read($, placed)) !== isPlaced) await setPlaced($, isPlaced)
+}
+
+async function openPane($: $, asked: boolean) {
+  const opened = await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', ...(asked ? { focus: true } : {}) })
+  await setPlaced($, opened.isPlaced)
+  return opened
 }
 
 // The view-only detail dialog replaces the tree in the same pane, which
@@ -428,6 +449,12 @@ export async function openDetail($: $, d: Detail) {
   await update($, unfolded, () => [])
   await update($, earlier, () => 0)
   await update($, detail, () => d)
+  await syncStatus($)
+}
+
+async function closeDetail($: $) {
+  await update($, detail, () => null)
+  await syncStatus($)
 }
 
 // A fold toggle in the call browser: one block unfolds or folds again.
@@ -774,7 +801,10 @@ export const register: Register = (on, options) => {
     await expire($)
     $.clock.every(EXPIRE_MS, () => void expire($).catch(() => undefined))
     // A tick that fails (the module reloading under it) is tried again next tick.
-    $.clock.every(SYNC_MS, () => void sync($).catch(() => undefined))
+    $.clock.every(SYNC_MS, () => {
+      void sync($).catch(() => undefined)
+      void checkPlaced($).catch(() => undefined)
+    })
 
     $.clock.every(500, () => {
       void (async () => {
@@ -784,8 +814,9 @@ export const register: Register = (on, options) => {
     })
 
     const ran = await next(e)
-    await syncStatus($)
-    if (!(await read($, ui)).isHidden) void $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent' })
+    // Not drawn until the open says so; until then the status line counts.
+    await setPlaced($, false)
+    if (!(await read($, ui)).isHidden) void openPane($, false).catch(() => undefined)
     return ran
   })
 
@@ -802,7 +833,7 @@ export const register: Register = (on, options) => {
     // Every /todo is the person asking, so the pane seats at any width; one
     // opened unasked at session start waits for a wide enough terminal.
     if (asked || !(await read($, ui)).isHidden) {
-      const opened = await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', ...(asked ? { focus: true } : {}) })
+      const opened = await openPane($, asked)
       if (asked) return { text: opened.isPlaced ? 'Todo pane shown.' : `Todo pane can't be placed: ${opened.reason}` }
     }
     if (verb === 'add') {
@@ -850,7 +881,7 @@ export const register: Register = (on, options) => {
       ...(a.landed ? { landed: a.landed } : {}),
       hasRun: x.hasRun || a.status === 'running',
     }))
-    if (a.status === 'done' || a.status === 'failed') $.ui.toast(`${a.status === 'done' ? '✓' : '✗'} #${t.n} ${a.status}`)
+    if (a.status === 'done' || a.status === 'failed') $.ui.toast(`${MARK[a.status].symbol} #${t.n} ${a.status}`)
     const now = (await read($, todos)).find(x => x.n === t.n)
     return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
   })
@@ -1021,6 +1052,13 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch((_, e, next) => next(e))
 
+  // Any close: noshow's, the person's × or close key, an unload's.
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    const r = await next(e)
+    await setPlaced($, false)
+    return r
+  }).catch((_, e, next) => next(e))
+
   on('ui.focus', async ($, e, next) => {
     const r = await next(e)
     if (r.deny === undefined && e.component === 'Pane' && e.requestId === PANE) {
@@ -1044,11 +1082,14 @@ export const register: Register = (on, options) => {
   }).catch((_, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    // Drawn again (the person opened it, the terminal widened): the header
+    // takes the counts back, from a timer, since a render never writes state.
+    if (!(await read($, placed))) $.clock.after(0, () => void setPlaced($, true).catch(() => undefined))
     const d = await read($, detail)
     if (d) {
       // Escape (or a click elsewhere) takes the keys from the pane: close the
-      // dialog then, from a timer, since a render never writes state.
-      if (!e.props.isFocused) $.clock.after(0, () => void update($, detail, () => null))
+      // dialog then, from a timer, as above.
+      if (!e.props.isFocused) $.clock.after(0, () => void closeDetail($))
       const want: ImageRef[] = []
       const tree = drawDetail($, e, {
         detail: d,

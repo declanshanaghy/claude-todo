@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
+import { MARK, SUMMARY } from './marks'
 
 const PANE = {
   plugin: 'todo',
@@ -54,7 +55,8 @@ type Where = {
   size?: (path: string) => number | undefined
   // How `mkdir -p` goes.
   mkdir?: 'ok' | 'fail' | 'throw'
-  // Why the pane can't be placed, when it can't.
+  // Why the pane can't be placed, when it can't: an open answers it, and an
+  // open pane is listed unplaced while it's set (a narrower terminal).
   unplaced?: string
   // Runs before the stand-in answers each script: may change `db` (another
   // session's write between a read and a write), or answer instead.
@@ -191,11 +193,19 @@ function engine(
     return { value: ok('10\n') }
   })
   if (ownClock) on('clock.every', () => ({ value: undefined }))
+  const isOpen = new Set<string>()
   on('ui.open', (_, e) => {
     panes.opens.push(e.id)
+    isOpen.add(e.id)
     return { value: where.unplaced === undefined ? { isPlaced: true } : { isPlaced: false, reason: where.unplaced } } as never
   })
-  on('ui.close', (_, e) => (panes.closes.push(e.id), { value: undefined }))
+  on('ui.close', (_, e) => (panes.closes.push(e.id), isOpen.delete(e.id), { value: undefined }))
+  on('ui.panes', () => ({
+    value: [...isOpen].map(id => {
+      const isPlaced = where.unplaced === undefined
+      return { id, title: 'Todos', isShown: isPlaced, isFocused: false, isPlaced }
+    }),
+  }))
   on('ui.focus', () => ({}))
   on('ui.scroll', () => ({}))
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
@@ -209,7 +219,7 @@ function engine(
   if (ownClock) on('clock.now', () => ({ value: (t += 250) }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
-  return { store, db, ops, files, folders, statuses, runs, written }
+  return { store, db, ops, files, folders, statuses, runs, written, isOpen }
 }
 
 type TestBody = Extract<Parameters<typeof test>[1], (...args: never[]) => unknown>
@@ -770,7 +780,7 @@ test('/todo exec finds a todo by number or title fragment, submits once the comm
 })
 
 test('the status line counts todos by status and clears with the last one', async ($, on) => {
-  const { statuses } = engine(on, [])
+  const { statuses } = engine(on, [], undefined, true, { unplaced: 'the terminal is too narrow' })
   await start($)
   await todo($, 'add One')
   expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
@@ -779,6 +789,137 @@ test('the status line counts todos by status and clears with the last one', asyn
   await ui.press({ key: 'act:1:delete' })
   await ui.press({ key: 'act:1:deleteyes' })
   expect(statuses.at(-1)).toBeUndefined()
+  await ui.unmount()
+})
+
+// ---------- the counts: the pane's header or the status line, never both ----------
+
+// The header summary as drawn: each colored mark's text and color, in order.
+type Drawn = { props?: { color?: unknown }; children?: unknown[] }
+const headerMarks = async (ui: Drawing) => {
+  const header = (await ui.find({ type: 'Text', text: /^Todos / })) as { children?: unknown[] } | undefined
+  return ((header?.children ?? []) as Drawn[])
+    .filter(c => typeof c === 'object' && c.props?.color !== undefined)
+    .map(c => ({ text: (c.children ?? []).join('').trim(), color: c.props?.color }))
+}
+
+test('open: a placed pane counts in its header and clears the status line; an unplaced one leaves the counts to it', async ($, on) => {
+  const where: Where = {}
+  const { statuses } = engine(on, [], undefined, false, where)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'add One')
+  await clock.settle()
+  // Never both: the status line said nothing while the header counted.
+  expect(statuses.filter(x => x !== undefined)).toEqual([])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '⏸0', '■0', '✓0', '○1'])
+  await ui.unmount()
+
+  where.unplaced = 'the terminal is too narrow'
+  await start($)
+  await clock.settle()
+  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+})
+
+test('noshow hands the counts to the status line, and show takes them back', async ($, on) => {
+  const { statuses } = engine(on, [], undefined, false)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'add One')
+  expect(statuses.at(-1)).toBeUndefined()
+  await todo($, 'noshow')
+  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  await todo($, 'add Two')
+  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○2')
+  await todo($, 'show')
+  await clock.settle()
+  expect(statuses.at(-1)).toBeUndefined()
+})
+
+test('closing the pane with its × hands the counts to the status line; drawing it again takes them back', async ($, on) => {
+  const { statuses, isOpen } = engine(on, [], undefined, false)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'add One')
+  expect(statuses.at(-1)).toBeUndefined()
+  // The kit can't raise the person's ui.close (noshow's runs the same hook),
+  // so the engine just forgets the pane, as the × leaves it: the next tick sees.
+  isOpen.delete('todo')
+  await clock.advance(2000)
+  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  // The person opens it again: its render takes the counts back.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await clock.advance(1)
+  expect(statuses.at(-1)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a narrower terminal that unseats the pane hands the counts to the status line until it is drawn again', async ($, on) => {
+  const where: Where = {}
+  const { statuses } = engine(on, [], undefined, false, where)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'add One')
+  await clock.advance(2000)
+  expect(statuses.at(-1)).toBeUndefined()
+  where.unplaced = 'the terminal is too narrow'
+  await clock.advance(2000)
+  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  // Widened: the pane is drawn again.
+  delete where.unplaced
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await clock.advance(1)
+  expect(statuses.at(-1)).toBeUndefined()
+  await ui.unmount()
+  await clock.advance(2000)
+  expect(statuses.at(-1)).toBeUndefined()
+})
+
+test('the dialog covers the header, so the status line counts until it closes', async ($, on) => {
+  const { statuses } = engine(on, [], undefined, false)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'add One')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:details' })
+  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  await ui.unmount()
+  const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
+  await clock.advance(1)
+  await blurred.unmount()
+  expect(statuses.at(-1)).toBeUndefined()
+})
+
+test('the header, the status line and the rows draw the same marks in the same order and colors', async ($, on) => {
+  const db = seeded([
+    running(1, 'Runs'),
+    running(2, 'Waits', { status: 'paused' }),
+    aTodo(3, 'Halted', { status: 'stopped', hasRun: true }),
+    aTodo(4, 'Finished', { status: 'done', hasRun: true, doneAt: 1000 }),
+    aTodo(5, 'Later'),
+    aTodo(6, 'Also later'),
+  ])
+  const { statuses } = engine(on, [], undefined, false, { db, unplaced: 'the terminal is too narrow' })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await clock.settle()
+  const line = statuses.at(-1)
+  expect(line).toBe('todo ▶1 ⏸1 ■1 ✓1 ○2')
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const header = await headerMarks(ui)
+  expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
+  expect(header.map(m => m.color)).toEqual(['claude', 'warning', 'error', 'success', 'inactive'])
+  expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
+  // Each row's glyph is its status's mark; a running row spins in its color.
+  for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
+    const row = await ui.find({ type: 'Button', key: `todo:${n}` })
+    expect(JSON.stringify(row?.children)).toContain(JSON.stringify(MARK[s].color))
+    expect(row?.text).toContain(`${MARK[s].symbol} #${n}`)
+  }
+  expect(JSON.stringify((await ui.find({ type: 'Button', key: 'todo:1' }))?.children)).toContain(JSON.stringify(MARK.running.color))
   await ui.unmount()
 })
 
