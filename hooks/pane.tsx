@@ -2,7 +2,7 @@ import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-c
 
 import type { AgentNode, Call, PaneUi, Todo, Turn } from '../types'
 import { clean } from './detail'
-import { type Tone, markOf, statusChip, statusGlyph, tallySummary } from './marks'
+import { type Tone, markOf, markText, statusChip, statusGlyph, tallySummary } from './marks'
 import {
   INFLIGHT,
   addTodo,
@@ -83,19 +83,37 @@ const PAD_X = 1
 // truncate-end still guards a wide one.
 const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), x => x.segment)
 
-// A todo's header line, sized to `width` so it never wraps: `▸ ◐ #3 Fix kitty
-// tab titles ──── running 2/5`. The title is cut with … where it doesn't fit,
-// the rule fills the gap and is always at least two cells, and the status at
-// the right is never cut. The pane draws the toggle and rule dim, the mark,
-// number and title in the todo's status color.
+// The cells a grapheme takes on the terminal: two for an emoji or a wide East
+// Asian character, one otherwise. The header sums with it, so a wide mark or
+// title character can't push the line past its width.
+const WIDE = /\p{Emoji_Presentation}|️|[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\u{20000}-\u{3FFFD}]/u
+const cellsOf = (g: string) => (WIDE.test(g) ? 2 : 1)
+const cells = (s: string) => graphemes(s).reduce((n, g) => n + cellsOf(g), 0)
+
+// A todo's header line, sized to `width` so it never wraps: `▸ #3 Fix kitty
+// tab titles ──── ▶ 2/5`. The title is cut with … where it doesn't fit, the
+// rule fills the gap and is always at least two cells, and the status mark at
+// the right is never cut. Every sum is in terminal cells, so a wide symbol or
+// title character still fits. The pane draws the toggle and rule dim, the
+// number, title and mark in the todo's status color.
 export function headParts(n: number, title: string, right: string, width: number) {
-  // The toggle and its space, the mark, ` #N`, then a space either side of the
-  // rule and the right side.
-  const fixed = 2 + 1 + 1 + `#${n}`.length + 1 + 1 + graphemes(right).length
+  // The toggle and its space, `#N`, then a space either side of the rule and
+  // the right side.
+  const fixed = 2 + `#${n}`.length + 1 + 1 + cells(right)
   const room = width - fixed - 1 - 2
-  const chars = graphemes(title)
-  const text = room < 2 ? '' : chars.length <= room ? title : `${chars.slice(0, room - 1).join('').trimEnd()}…`
-  const used = fixed + (text ? 1 + graphemes(text).length : 0)
+  let text = ''
+  if (room >= 2 && cells(title) <= room) text = title
+  else if (room >= 2) {
+    // Whole graphemes while they and the … fit.
+    let used = 0
+    for (const g of graphemes(title)) {
+      if (used + cellsOf(g) > room - 1) break
+      text += g
+      used += cellsOf(g)
+    }
+    text = `${text.trimEnd()}…`
+  }
+  const used = fixed + (text ? 1 + cells(text) : 0)
   return { title: text ? ` ${text}` : '', rule: ` ${'─'.repeat(Math.max(2, width - used))} ` }
 }
 
@@ -397,21 +415,22 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     }
     const done = mine.filter(a => a.status === 'done').length
     const isProgress = mine.length > 0 && t.status !== 'pending' && t.status !== 'done'
-    const right = isProgress ? `${t.status} ${done}/${mine.length}` : t.status
+    const progress = isProgress ? ` ${done}/${mine.length}` : ''
+    // The status drawn as its mark at the right end; the word stays the
+    // line's label.
+    const [right] = markText(t.status, progress, f)
     const p = headParts(t.n, t.title, right, inner)
     return lit(
       `todo:${t.n}`,
-      <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
+      <Button key={`todo:${t.n}`} label={`#${t.n} ${t.title}: ${t.status}${progress}`} plain onPress={() => void toggle($, `t${t.n}`)}>
         <Text wrap="truncate-end">
           <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-          {statusGlyph(els, t.status, f)}
           <Text color={gc}>
-            {' '}
             <Text weight="semibold">#{t.n}</Text>
             {p.title}
           </Text>
           <Text dimColor>{p.rule}</Text>
-          {isProgress || t.status === 'done' ? <Text color={gc}>{right}</Text> : <Text dimColor>{right}</Text>}
+          <Text color={gc}>{right}</Text>
         </Text>
       </Button>,
     )

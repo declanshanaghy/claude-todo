@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
 import { CHIP_SYMBOL, MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
-import { clampLines } from './pane'
+import { clampLines, headParts } from './pane'
 
 const PANE = {
   plugin: 'todo',
@@ -1126,8 +1126,9 @@ test('the header, the status line and the rows draw the same marks in the same o
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
     const row = await ui.find({ type: 'Button', key: `todo:${n}` })
     expect(JSON.stringify(row?.children)).toContain(JSON.stringify(MARK[s].color))
-    // The header line is the todo's only line: ▸, the mark, #N and title.
-    expect(row?.text.startsWith(`▸ ${MARK[s].symbol} #${n} `)).toBe(true)
+    // The header line is the todo's only line: ▸, #N and title, the mark at its right end.
+    expect(row?.text.startsWith(`▸ #${n} `)).toBe(true)
+    expect(row?.text.endsWith(` ${MARK[s].symbol}`)).toBe(true)
   }
   expect(JSON.stringify((await ui.find({ type: 'Button', key: 'todo:1' }))?.children)).toContain(JSON.stringify(MARK.running.color))
   await ui.unmount()
@@ -1880,54 +1881,66 @@ const turnRow = (id: string, agentId: string, text: string, startedAt: number) =
   dir: '/proj', agentId, session: 's1', seq: 1000 + startedAt, body: { kind: 'turn', id, agentId, text, startedAt },
 })
 
-test('each todo is one line, its own splitter: toggle, mark, #N and title in the status color, a dim rule, the status at the right', async ($, on) => {
+test('each todo is one line, its own splitter: toggle, #N and title in the status color, a dim rule, the status mark at the right', async ($, on) => {
   const db = seeded([aTodo(1, 'Fix kitty tab titles'), running(2, 'Ship it')], [agentNode('ag1', 2, { status: 'done' }), agentNode('ag2', 2, { startedAt: 2 })])
   engine(on, [], undefined, true, { db })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const head = await ui.find({ type: 'Button', key: 'todo:1' })
   // 70 columns less the pane's paddingX and the ring's cell on each side.
-  expect(head?.text).toMatch(/^▸ ○ #1 Fix kitty tab titles ─+ pending$/)
+  expect(head?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ○$/)
   expect(head?.text.length).toBe(66)
+  // The word the mark stands for stays the line's label.
+  expect((head as { props?: { label?: string } } | undefined)?.props?.label).toBe('#1 Fix kitty tab titles: pending')
   const parts = textParts(head)
   expect(parts.find(p => p.text === '#1')?.props).toMatchObject({ weight: 'semibold' })
   expect(parts.find(p => p.text.includes('Fix kitty tab titles'))?.props).toMatchObject({ color: MARK.pending.color })
   expect(parts.find(p => p.text.startsWith(' ──'))?.props).toMatchObject({ dimColor: true })
-  expect(parts.find(p => p.text === 'pending')?.props).toMatchObject({ dimColor: true })
-  // A run with subtasks shows its progress in its status color.
+  expect(parts.find(p => p.text === MARK.pending.symbol)?.props).toMatchObject({ color: MARK.pending.color })
+  // A run with subtasks spins and shows its progress in its status color.
   const run = await ui.find({ type: 'Button', key: 'todo:2' })
-  expect(run?.text).toMatch(/^▸ . #2 Ship it ─+ running 1\/2$/)
-  expect(textParts(run as never).find(p => p.text === 'running 1/2')?.props).toMatchObject({ color: MARK.running.color })
+  expect(run?.text).toMatch(/^▸ #2 Ship it ─+ [·✢✳✶✻✽] 1\/2$/)
+  expect(textParts(run as never).find(p => p.text.endsWith(' 1/2'))?.props).toMatchObject({ color: MARK.running.color })
+  expect((run as { props?: { label?: string } } | undefined)?.props?.label).toBe('#2 Ship it: running 1/2')
   // No separate row or rule: the header is the todo's only line until it opens.
   expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeUndefined()
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
   await ui.press({ key: 'todo:1' })
-  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▾ ○ #1 /)
+  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▾ #1 /)
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeDefined()
   await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
   await ui.unmount()
 })
 
-test('at a narrow width the header cuts the title with … and keeps the rule and the status whole', async ($, on) => {
+test('at a narrow width the header cuts the title with … and keeps the rule and the status mark whole', async ($, on) => {
   engine(on, [], undefined, true, { db: seeded([aTodo(3, 'Fix kitty tab titles')]) })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 30 } })
   const head = await ui.find({ type: 'Button', key: 'todo:3' })
-  expect(head?.text).toBe('▸ ○ #3 Fix kit… ── pending')
+  expect(head?.text).toBe('▸ #3 Fix kitty tab t… ── ○')
   expect(head?.text.length).toBe(26)
   await ui.unmount()
-  // Too narrow for any title: the number, a little rule and the status.
-  const tiny = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 20 } })
-  expect((await tiny.find({ type: 'Button', key: 'todo:3' }))?.text).toBe('▸ ○ #3 ── pending')
+  // Too narrow for any title: the number, a little rule and the mark.
+  const tiny = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 13 } })
+  expect((await tiny.find({ type: 'Button', key: 'todo:3' }))?.text).toBe('▸ #3 ── ○')
   await tiny.unmount()
+})
+
+test('the header sums in terminal cells, so a wide title or mark never pushes it past its width', () => {
+  // 🔥 takes two cells: four of them and the … fit the room a 20-cell line leaves.
+  const p = headParts(3, '🔥🔥🔥🔥🔥🔥', '✓', 20)
+  expect(p.title).toBe(' 🔥🔥🔥🔥…')
+  expect(`▸ #3${p.title}${p.rule}✓`).toBe('▸ #3 🔥🔥🔥🔥… ─── ✓')
+  // A wide right end leaves the title one cell less than a narrow one.
+  expect(headParts(3, 'abcdefghijkl', '🔥', 20).title.length).toBe(headParts(3, 'abcdefghijkl', '✓', 20).title.length - 1)
 })
 
 test('an old todoDividers setting, from /config or the environment, is ignored', { options: { todoDividers: 'none' } }, async ($, on) => {
   engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]), env: { CLAUDE_TODO_DIVIDERS: 'line' } })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▸ ○ #1 Fix kitty tab titles ─+ pending$/)
+  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ○$/)
   expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeUndefined()
   await ui.unmount()
 })

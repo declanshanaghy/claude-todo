@@ -604,13 +604,15 @@ function renderPane(){
   for(const t of list){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
-    const right = t.status==='done' ? `<span class="ma">done</span>` : t.agents.length && t.status!=='pending' ? `<span class="${gc}">${t.status} ${done}/${t.agents.length}</span>` : `<span class="dim">${t.status}</span>`;
+    // The right end is the status's mark in its color (a running one spins), with d/n while it has run; the word is the line's label.
+    const prog = t.agents.length && t.status!=='pending' && t.status!=='done' ? ` ${done}/${t.agents.length}` : '';
+    const right = `<span class="${gc}" aria-label="${t.status}${prog}">${g}${prog}</span>`;
     const tw = t.expanded?'▾':'▸';
-    // Level 0: the header is the splitter. One focusable line, never wraps: toggle, mark, #N and title in the status color, a dim rule, the status.
+    // Level 0: the header is the splitter. One focusable line, never wraps: toggle, #N and title in the status color, a dim rule, the status mark.
     if(t.renaming){
       h += `<div class="row"><span class="dim">${tw} </span><span class="${gc}">${g}</span>&nbsp;#${t.n}&nbsp;<span class="inpwrap ${S.area==='pane'&&S.fid==='ren:'+t.id?'f':''}" data-fid="ren:${t.id}"><input class="inp" id="ren_${t.id}" value="${esc(t.title)}"></span></div>`;
     } else {
-      h += `<div class="row">${B('todo:'+t.id, `<span class="row thead" style="min-height:0"><span class="dim">${tw} </span><span class="${gc}">${g}&nbsp;<b>#${t.n}</b>&nbsp;</span><span class="tt ${gc}">${esc(t.title)}</span><span class="fill"></span><span class="st">${right}</span></span>`, 'grow')}</div>`;
+      h += `<div class="row">${B('todo:'+t.id, `<span class="row thead" style="min-height:0"><span class="dim">${tw} </span><span class="${gc}"><b>#${t.n}</b>&nbsp;</span><span class="tt ${gc}">${esc(t.title)}</span><span class="fill"></span><span class="st">${right}</span></span>`, 'grow')}</div>`;
     }
     if(!t.expanded){ continue; }
     // Level 1: what it was asked to do (2 lines), what you can do now, and how far it got.

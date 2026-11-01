@@ -35,6 +35,15 @@ export function glyphOf(s: TodoStatus, f = 0): [string, Color] {
   return [s === 'running' ? (SPIN[f % SPIN.length] ?? symbol) : symbol, color]
 }
 
+// A status's mark with what follows it, the one way any place spells a status
+// in symbols: a todo header's right end (`▶ 2/5`, `✓`), each summary count
+// (`▶1`), the status line. Running spins at frame `f` where the caller animates
+// one; a static place passes none and draws ▶. The word stays the label.
+export function markText(s: TodoStatus, rest = '', f?: number): [string, Color] {
+  const [g, color] = f === undefined ? [MARK[s].symbol, MARK[s].color] : glyphOf(s, f)
+  return [`${g}${rest}`, color]
+}
+
 export const countOf = (list: readonly Todo[], s: TodoStatus) => list.filter(t => t.status === s).length
 
 // The statuses the summaries count, in their order. The header and the status
@@ -45,8 +54,11 @@ export type Tally = Mark & { status: TodoStatus; count: number }
 
 export const tally = (list: readonly Todo[]): Tally[] => SUMMARY.map(status => ({ status, ...MARK[status], count: countOf(list, status) }))
 
+// A count as drawn: its status's mark and the number, `▶1`.
+const tallyMark = (m: Tally) => markText(m.status, String(m.count))[0]
+
 // The summary as plain text, for places that can't color it (the status line).
-export const tallyText = (list: readonly Todo[]) => tally(list).map(m => `${m.symbol}${m.count}`).join(' ')
+export const tallyText = (list: readonly Todo[]) => tally(list).map(tallyMark).join(' ')
 
 // The toast for a todo that settled: its mark, number and status.
 export const statusToast = (n: number, s: TodoStatus) => `${MARK[s].symbol} #${n} ${s}`
@@ -73,8 +85,7 @@ export const tallySummary = ({ Text }: Els, list: readonly Todo[]) =>
   tally(list).map((m, i) => (
     <Text color={m.color}>
       {i > 0 ? ' ' : ''}
-      {m.symbol}
-      {m.count}
+      {tallyMark(m)}
     </Text>
   ))
 

@@ -62,7 +62,7 @@ The pane opens on the right at session start and keeps the tree short, then lets
 
 | Level | Press | What opens |
 |---|---|---|
-| 0 | — | Each todo is one line, `▸ ◐ #N title ──── status d/n`: its mark, number and title in its status color, a dim rule, and its status (with subtasks done out of all) at the right. It never wraps: the title is cut with … first |
+| 0 | — | Each todo is one line, `▸ #N title ──── ▶ 2/5`: its number and title in its status color, a dim rule, and its status's mark (with subtasks done out of all) at the right, in the same symbol and color as the counts, so a glance down the right edge reads the backlog's state. The word stays the line's label for screen readers. It never wraps: the title is cut with … first, sized in terminal cells so a wide emoji can't overflow it |
 | 1 | the todo's line | Its prompt in two lines, a ✓ summary once done, the action chips, and `▸ N subtasks · d done · c calls` |
 | 2 | the subtasks line | One row per subtask (an agent), grouped by wave for a Workflow, worktree writers marked ⎇, with its call count |
 | 3 | a subtask | Its last 6 turns and tool calls, one line each, and **↗ Full transcript** |
