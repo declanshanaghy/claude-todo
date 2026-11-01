@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 97 of 100 cases (97.0%)** are covered by `claude plugin test .`.
+**Coverage: 103 of 106 cases (97.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -157,6 +157,12 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U7 | The mod's own focus moves light the right item: a confirmation's safe choice, Pause→Resume, Resume→Pause, Stop→Refine, Keep/Cancel→the chip that asked, Take over→Refine, Delete→add input, Rename→the row | every focusable item lights the same border while the ring is on it, and keeps its room otherwise; Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring; Take over stops the other session's agents here and cancelling it puts the ring back; Delete removes the row and puts the ring on the add input; Rename stores the new title and puts the ring back on the row |
 | U8 | In the tree an arrow key walks the ring like Tab, stops at the ends, and the wheel and page keys still scroll | in the tree an arrow key walks the ring like Tab, even when the tree is taller than the pane |
 | U9 | The spinner turns while a todo runs | the spinner turns only while a todo runs |
+| U10 | A titled divider sits above each todo, as wide as the pane's body less its padding, its number in the status color and the rest dim | a titled divider sits above each todo, sized to the pane, its number in the status color |
+| U11 | A divider is never focusable: the arrows walk the same items, and the rows keep their blank room | a divider is never focusable: the arrows walk the same items and the rows keep their room |
+| U12 | At a narrow width the divider cuts the title with … (or drops it) and still fits | at a narrow width the divider cuts the title with … and still fits |
+| U13 | `todoDividers` `line` draws a plain dim rule | todoDividers "line" draws a plain dim rule |
+| U14 | `todoDividers` `none` draws no divider | todoDividers "none" draws no divider |
+| U15 | `CLAUDE_TODO_DIVIDERS` overrides the option, and an unknown value falls back to `titled` | CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to titled |
 
 ## Outside the mod
 

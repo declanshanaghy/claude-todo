@@ -59,13 +59,14 @@ The pane opens on the right at session start and keeps the tree short: each todo
 - **Keys.** `ctrl+x tab` (or a click) moves the keys into the pane, `tab`/arrows move the focus ring (even when the tree is taller than the pane, which scrolls to keep the focused item in view; a trackpad swipe scrolls), `enter` presses, `esc` returns to the prompt. Confirmations put the ring on the safe choice first.
 - **Focus.** While the pane holds the keys, Claude Code's own focus ring (the inverted element) sits on the selected row, so that is where your typing goes. Inversion alone is hard to see, so whatever holds the ring (the add input, a todo or agent row, an action chip, the rename input) also gets a rounded border in Claude's color. The other items keep a blank cell on every side in the border's place, so moving the ring never shifts anything. The background is transparent, so your terminal's own shows through.
 - **Dialog.** It has nothing to press: the arrows (or a trackpad swipe) scroll it, and `esc` (or clicking elsewhere) closes it. It replaces the tree in the same pane rather than opening a second one, because a pane can't take the keyboard from another pane, and that would cost a second `esc`. Commands read as bash, file bodies are highlighted by their file type, an `Edit` shows as a diff and JSON responses are pretty-printed.
-- **Look.** Rows borrow Claude Code's transcript style so the pane reads like the chat beside it: Claude's spinner (· ✢ ✳ ✶ ✻ ✽) on running work, `⏺ Tool` rows in the dialog that are green, red or yellow for success, error or interrupted, and filled chips for the action buttons. Every color is a theme key, so the pane follows `/theme`.
+- **Look.** Rows borrow Claude Code's transcript style so the pane reads like the chat beside it: Claude's spinner (· ✢ ✳ ✶ ✻ ✽) on running work, `⏺ Tool` rows in the dialog that are green, red or yellow for success, error or interrupted, and filled chips for the action buttons. A dim rule above each todo, with its number (in its status color) and title set into it, keeps a long tree's todos apart; the title is cut with … to the pane's width so the rule never wraps, and it is never a focus stop, so the arrows and the spacing are as without it. Every color is a theme key, so the pane follows `/theme`.
 
 ## Settings
 
 | Setting | Default | What it does |
 |---|---|---|
 | **Done todo lifetime (minutes)**: `doneTtlMinutes` in `/config`, or the `CLAUDE_TODO_DONE_TTL_MINUTES` environment variable, which wins | 5 | How long a done todo stays in the tree after it finishes. `0` keeps them. Hidden todos stay in the database and in `mcp__todo__list`; a failed todo is never hidden. |
+| **Todo dividers**: `todoDividers` in `/config`, or the `CLAUDE_TODO_DIVIDERS` environment variable, which wins | `titled` | What the pane draws above each todo: `titled` a dim rule with the todo's number and title, `line` a plain dim rule, `none` nothing (the most rows for todos in a short pane). An unknown value means `titled`. |
 
 A dev copy loaded with `--plugin-dir` gets no `/config` row, so use the environment variable there.
 

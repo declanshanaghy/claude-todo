@@ -35,6 +35,8 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .pane.has-focus{box-shadow:inset 2px 0 0 var(--orange)}
 .panebody{padding:6px 8px 10px;overflow:auto;max-height:640px}
 .row{white-space:pre;display:flex;align-items:baseline;min-height:20px}
+/* The rule above each todo (todoDividers): dim, full width, the title cut with … so it never wraps. */
+.divider{color:var(--dim);overflow:hidden}.divider .dt{flex:0 1 auto;padding:0 1ch;overflow:hidden;text-overflow:ellipsis}.divider .fill{flex:1 1 0;min-width:2ch;overflow:hidden}.divider .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
 .ind1{padding-left:2ch}.ind2{padding-left:4ch}.ind3{padding-left:6ch}.ind4{padding-left:8ch}
 .btn{cursor:pointer;padding:0 1px;border-radius:2px}
 .btn.f:not(.chip){background:var(--fg);color:var(--term)}
@@ -103,6 +105,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 <h1>/todo pane: interactive mockup</h1>
 <div class="sub">The terminal below simulates Claude Code with the <code>todo</code> mod's right-hand pane. It supports only what the terminal mod API supports: a focus ring, Tab/arrows, Enter or click to press, Esc to leave. There are no hover effects and no single-letter hotkeys.</div>
 <div class="focusbar" id="focusbar"><b style="color:var(--fg)">Focus style:</b></div>
+<div class="focusbar" id="dividerbar"><b style="color:var(--fg)">Dividers:</b></div>
 <div class="tabs" id="tabs"></div>
 <div class="hint" id="hint"></div>
 
@@ -153,6 +156,22 @@ function setFocusMode(m, push){
   document.querySelectorAll('#focusbar button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
   const note=document.getElementById('focusnote'); if(note) note.textContent = FOCUS_MODES.find(x=>x[0]===m)[2];
   if(push){ const u=new URL(location.href); u.searchParams.set('focus', m); history.replaceState(null, '', u); }
+}
+// The todoDividers setting: ?dividers=titled|line|none (titled is the default).
+const DIVIDER_MODES = [['titled','a dim rule with the todo\'s number (in its status color) and title'],['line','a plain dim rule'],['none','no divider']];
+let dividerMode = new URLSearchParams(location.search).get('dividers');
+if(!DIVIDER_MODES.some(m=>m[0]===dividerMode)) dividerMode = 'titled';
+function setDividerMode(m, push){
+  dividerMode = m;
+  document.querySelectorAll('#dividerbar button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
+  const note=document.getElementById('dividernote'); if(note) note.textContent = DIVIDER_MODES.find(x=>x[0]===m)[1];
+  if(push){ const u=new URL(location.href); u.searchParams.set('dividers', m); history.replaceState(null, '', u); }
+}
+// Not focusable: no data-fid, so Tab and the arrows walk past it.
+function dividerRow(t, gc){
+  if(dividerMode==='none') return '';
+  if(dividerMode==='line') return `<div class="row divider"><span class="fill"></span></div>`;
+  return `<div class="row divider">── <span class="${gc}">#${t.n}</span><span class="dt">${esc(t.title)}</span><span class="fill"></span></div>`;
 }
 const SPIN = ['◐','◓','◑','◒'];
 let spin = 0, uidN = 0;
@@ -467,6 +486,7 @@ function renderPane(){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
     const right = t.status==='done' ? `<span class="gr">${esc(t.summary)}</span>` : t.agents.length && t.status!=='pending' ? `<span class="${gc}">${t.status} ${done}/${t.agents.length}</span>` : `<span class="dim">${t.status}</span>`;
+    h += dividerRow(t, gc);
     if(t.renaming){
       h += `<div class="row ind0"><span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span>&nbsp;#${t.n}&nbsp;<span class="inpwrap ${S.area==='pane'&&S.fid==='ren:'+t.id?'f':''}" data-fid="ren:${t.id}"><input class="inp" id="ren_${t.id}" value="${esc(t.title)}"></span></div>`;
     } else {
@@ -574,6 +594,10 @@ const fbar=document.getElementById('focusbar');
 FOCUS_MODES.forEach(([k,label,desc])=>{ const b=document.createElement('button'); b.textContent=label; b.title=desc; b.dataset.mode=k; b.onmousedown=e=>e.preventDefault(); b.onclick=()=>{ setFocusMode(k,true); render(); }; fbar.appendChild(b); });
 fbar.insertAdjacentHTML('beforeend', `<span class="note" id="focusnote"></span><span class="note">· link one directly: <code>?focus=current|uniform|border|both</code> (works with <code>#m1</code>–<code>#m6</code>)</span>`);
 setFocusMode(focusMode, false);
+const dbar=document.getElementById('dividerbar');
+DIVIDER_MODES.forEach(([k,desc])=>{ const b=document.createElement('button'); b.textContent=k; b.title=desc; b.dataset.mode=k; b.onmousedown=e=>e.preventDefault(); b.onclick=()=>{ setDividerMode(k,true); render(); }; dbar.appendChild(b); });
+dbar.insertAdjacentHTML('beforeend', `<span class="note" id="dividernote"></span><span class="note">· link one directly: <code>?dividers=titled|line|none</code></span>`);
+setDividerMode(dividerMode, false);
 const tabs=document.getElementById('tabs');
 SCENES.forEach((s,i)=>{ const b=document.createElement('button'); b.textContent=s.name; b.onclick=()=>loadScene(i); tabs.appendChild(b); });
 const rb=document.createElement('button'); rb.textContent='↺ Reset scene'; rb.onclick=()=>loadScene(S.scene); tabs.appendChild(rb);
