@@ -7,6 +7,7 @@ import {
   INFLIGHT,
   addTodo,
   askConfirm,
+  canResume,
   cancelConfirm,
   collapse,
   deleteTodo,
@@ -326,7 +327,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         // put it away, Details last.
         return [
           <Box gap={1}>
-            {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
+            {canResume(t) && btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
             {btn('refine', 'Refine', () => execTodo($, t, true), 'drafting')}
             {btn('restart', 'Restart', () => restartTodo($, t), 'drafting')}
             {fresh &&

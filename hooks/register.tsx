@@ -766,6 +766,31 @@ async function flushQueued($: $) {
 
 const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
 
+// What ▶ Exec can start: a todo at rest, or one paused before it ever ran
+// (paused for a new session, say), which has no run to resume.
+const isRunnable = (t: Todo) => RUNNABLE.has(t.status) || (t.status === 'paused' && !t.hasRun)
+
+// What ⏵ Resume is offered for, in the pane and by /todo resume: a paused
+// todo, or a stopped or failed one with an agent to wake or work it kept.
+export const canResume = (t: Todo) =>
+  t.status === 'paused' || ((t.status === 'stopped' || t.status === 'failed') && (t.taskId !== undefined || t.isAgentGone === true))
+
+// Why /todo resume can't take `t`, and the command that does apply.
+function resumeRefusal(t: Todo) {
+  const at = `#${t.n} is ${t.status}`
+  switch (t.status) {
+    case 'pending':
+      return `${at}: /todo exec ${t.n}`
+    case 'stopped':
+    case 'failed':
+      return `${at} with nothing to resume: /todo exec ${t.n}`
+    case 'done':
+      return `${at}: nothing to resume.`
+    default:
+      return `${at}: already in flight; pause or stop it in the pane (/todo show).`
+  }
+}
+
 // The todo `/todo exec auto` runs when it names none: the next by priority,
 // which for now is the lowest-numbered pending one.
 export const nextRunnable = (list: readonly Todo[]) =>
@@ -810,7 +835,7 @@ async function isDraftPending($: $, t: Todo) {
 // `auto` skips every question: Claude picks the prompt and, for multi-step
 // work, plans on defaults and runs it without plan-mode approval.
 export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
-  if (!refine && !RUNNABLE.has(t.status)) return `#${t.n} is ${t.status}.`
+  if (!refine && !isRunnable(t)) return `#${t.n} is ${t.status}.`
   if (refine) await clearRun($, t.n)
   await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
   await patchUi($, u => ({
@@ -921,6 +946,12 @@ export async function resumeTodo($: $, t: Todo) {
     $.ui.toast(`#${t.n} is paused in another session`)
     return
   }
+  // Paused before it ever ran: there's no run to pick up, so it starts as
+  // ▶ Exec would.
+  if (t.status === 'paused' && !t.hasRun) {
+    await execTodo($, t, false)
+    return
+  }
   // A resumed Workflow replays finished agents from its journal and spawns the
   // rest afresh, so the interrupted nodes are left marked as such.
   if (t.mode === 'workflow') {
@@ -985,6 +1016,8 @@ export async function setTodoStatus($: $, n: number, status: Todo['status']) {
 }
 
 async function findTodo($: $, arg: string) {
+  // Every title holds the empty string: no target names no todo.
+  if (arg.trim() === '') return undefined
   const list = await read($, todos)
   const n = Number(arg.replace(/^#/, ''))
   if (Number.isInteger(n) && n > 0) return list.find(t => t.n === n)
@@ -1144,7 +1177,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
-      description: 'Per-directory todos: /todo add <title> · /todo exec [auto] <n|title> · /todo exec auto · /todo show · /todo noshow',
+      description: 'Per-directory todos: /todo add <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title> · /todo show · /todo noshow',
     })
     await $.tool.register({
       name: 'update',
@@ -1224,7 +1257,10 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'todo' }, async ($, e) => {
-    const [verb = '', ...rest] = e.args.trim().split(/\s+/)
+    const [said = '', ...words] = e.args.trim().split(/\s+/)
+    // `/todo auto …` is short for `/todo exec auto …`.
+    const verb = said === 'auto' ? 'exec' : said
+    const rest = said === 'auto' ? ['auto', ...words] : words
     const arg = rest.join(' ')
     if (verb === 'noshow') {
       await patchUi($, u => ({ ...u, isHidden: true }))
@@ -1247,11 +1283,11 @@ export const register: Register = (on, options) => {
     if (verb === 'exec') {
       // `auto` may lead or trail the target: `exec auto 3` or `exec 3 auto`.
       const auto = rest[0] === 'auto' || (rest.length > 1 && rest.at(-1) === 'auto')
-      const words = auto ? (rest[0] === 'auto' ? rest.slice(1) : rest.slice(0, -1)) : rest
-      const target = words.join(' ')
+      const target = (auto ? (rest[0] === 'auto' ? rest.slice(1) : rest.slice(0, -1)) : rest).join(' ')
+      if (!auto && target === '') return { text: 'Usage: /todo exec [auto] <n|title>' }
       const t = auto && target === '' ? nextRunnable(await read($, todos)) : await findTodo($, target)
       if (!t) return { text: auto && target === '' ? NONE_PENDING : `No todo matches "${target}".` }
-      if (!RUNNABLE.has(t.status)) return { text: `#${t.n} is ${t.status}.` }
+      if (!isRunnable(t)) return { text: `#${t.n} is ${t.status}.` }
       // A command's own hook can't submit a prompt (it would wait on the turn
       // the command holds), so the exec starts from a timer once it answered.
       $.clock.after(0, () => {
@@ -1262,7 +1298,24 @@ export const register: Register = (on, options) => {
       })
       return { text: execNote(t, auto, await isDraftPending($, t)) }
     }
-    return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec [auto] <n|title> · /todo exec auto' }
+    if (verb === 'resume') {
+      // What the pane's ⏵ Resume does, for the todos it is offered on.
+      if (arg === '') return { text: 'Usage: /todo resume <n|title>' }
+      const t = await findTodo($, arg)
+      if (!t) return { text: `No todo matches "${arg}".` }
+      if (await isForeign($, t)) return { text: `#${t.n} is ${t.status} in another session.` }
+      if (!canResume(t)) return { text: resumeRefusal(t) }
+      // Submitted from a timer, as an exec is.
+      $.clock.after(0, () => {
+        void (async () => {
+          const now = (await read($, todos)).find(x => x.n === t.n)
+          if (now && canResume(now)) await resumeTodo($, now)
+        })()
+      })
+      if (!t.hasRun && t.status === 'paused') return { text: execNote(t, false, await isDraftPending($, t)) }
+      return { text: `Resuming #${t.n} ${t.title}: Claude picks its work up in the chat.` }
+    }
+    return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title>' }
   })
 
   on('tool.call', { tool: 'mcp__todo__update' as never }, async ($, e) => {

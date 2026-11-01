@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 167 of 170 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 173 of 176 cases (98.3%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -25,6 +25,12 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C15 | The session title the drafter's prompt names follows each change: set at session start, updated on each prompt, a hook's `sessionTitle` winning over the event's, cleared by a start with none | the header draws no session title; the title still follows each change, for the drafter's prompt |
 | C16 | `/todo exec auto` takes the keyword before or after the target; with no target it runs the lowest-numbered pending todo, and says so when none is pending | /todo exec auto runs a named todo with the keyword before or after it, or the lowest-numbered pending one, and says when none is |
 | C17 | The header is one row at any width: Todos and the toggles grow and clip, never wrapping, and 🔥 Fire, which never shrinks, sits flush at its right end | the header is one row at a narrow width, never wrapped, with 🔥 Fire flush at its right end |
+| C18 | `/todo resume` runs ⏵ Resume's own path from a timer once the command answered: a paused todo's agent is woken, the todo left drafting | /todo resume resumes a paused todo as the chip does, and one paused before it ever ran as an exec |
+| C19 | `/todo resume` of a todo paused before it ever ran starts it as ▶ Exec would | /todo resume resumes a paused todo as the chip does, and one paused before it ever ran as an exec |
+| C20 | `/todo resume` of a stopped todo whose agent is gone starts a fresh agent on the kept worktree | /todo resume picks up a stopped todo whose agent is gone with a fresh agent on the kept worktree |
+| C21 | `/todo resume` refuses every state the chip isn't offered on (pending, done, in flight, stopped with nothing kept, paused in another session) in one line naming its status and the command that applies, and submits nothing | /todo resume refuses a todo the chip is not offered on, naming its status and the command that applies |
+| C22 | `/todo resume` with no match says so, and with no target answers with its usage | /todo resume refuses a todo the chip is not offered on, naming its status and the command that applies |
+| C23 | `/todo auto [<n\|title>]` is `/todo exec auto [<n\|title>]`; a bare `/todo exec` answers with its usage instead of running the first todo | /todo auto is short for /todo exec auto, with or without a target |
 
 ## The counts: the pane's header or the status line
 
@@ -114,7 +120,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | P10 | Another session's in-flight todo offers Take over, not Pause | another session's running todo offers Take over, which stops it here |
 | P11 | Take over writes the todo stopped and clears its task, run and owner | another session's running todo offers Take over, which stops it here |
 | P12 | Take over writes the other session's agents stopped; Cancel leaves the todo running | Take over stops the other session's agents here and cancelling it puts the ring back |
-| P13 | Pause and resume refuse a todo in flight in another session | not covered: the pane never offers those actions for such a todo and no command reaches them, so the guard is unreachable from outside the mod |
+| P13 | Pause and resume refuse a todo in flight in another session | not covered: the pane never offers those actions for such a todo and `/todo resume` refuses one before reaching it (C21), so the guard is unreachable from outside the mod |
 
 ## A turn's end
 

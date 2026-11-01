@@ -895,6 +895,94 @@ test('/todo exec auto runs a named todo with the keyword before or after it, or 
   expect(submitted).toHaveLength(3)
 })
 
+test('/todo auto is short for /todo exec auto, with or without a target', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([aTodo(1, 'Done one', { status: 'done', hasRun: true }), aTodo(2, 'Count md files'), aTodo(3, 'Fix kitty tab titles')])
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  expect((await todo($, 'auto kitty')).text).toContain('Auto-executing #3 Fix kitty tab titles')
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Execute todo #3 "Fix kitty tab titles" in auto mode')
+  expect((await todo($, 'auto')).text).toContain('Auto-executing #2 Count md files')
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Execute todo #2 "Count md files" in auto mode')
+  expect((await todo($, 'auto')).text).toBe('No pending todo to run.')
+  expect((await todo($, 'auto 1')).text).toBe('#1 is done.')
+  // A bare exec names no todo, rather than the first one every title matches.
+  expect((await todo($, 'exec')).text).toBe('Usage: /todo exec [auto] <n|title>')
+  await clock.settle()
+  expect(submitted).toHaveLength(2)
+})
+
+test('/todo resume resumes a paused todo as the chip does, and one paused before it ever ran as an exec', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded(
+    [
+      aTodo(1, 'Count md files', { status: 'paused', hasRun: true, mode: 'agent', prompt: 'count them', taskId: 'ag1', owner: 's1' }),
+      aTodo(2, 'Fix kitty tab titles', { status: 'paused', owner: 's1' }),
+    ],
+    [agentNode('ag1', 1, { status: 'paused' })],
+  )
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  expect((await todo($, 'resume md')).text).toBe('Resuming #1 Count md files: Claude picks its work up in the chat.')
+  // Submitted from a timer once the command answered, as an exec is.
+  expect(submitted).toHaveLength(0)
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Send the stopped background agent "ag1" a SendMessage')
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect((await todo($, 'resume #2')).text).toContain('Executing #2 Fix kitty tab titles')
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Execute todo #2 "Fix kitty tab titles"')
+  expect(todoAt(db, 2).status).toBe('drafting')
+  expect(submitted).toHaveLength(2)
+})
+
+test('/todo resume picks up a stopped todo whose agent is gone with a fresh agent on the kept worktree', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded(
+    [aTodo(1, 'Count md files', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'count them', taskId: 'ag1', isAgentGone: true })],
+    [agentNode('ag1', 1, { status: 'stopped', name: 'Count' })],
+  )
+  engine(on, submitted, undefined, false, { db, worktrees: porcelain(['/proj/.claude/worktrees/agent-ag1', 'worktree-agent-ag1']) })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  expect((await todo($, 'resume 1')).text).toBe('Resuming #1 Count md files: Claude picks its work up in the chat.')
+  await clock.settle()
+  const text = submitted.at(-1) ?? ''
+  expect(text).toContain("can't be woken")
+  expect(text).toContain('- Count: /proj/.claude/worktrees/agent-ag1 (branch worktree-agent-ag1)')
+  expect(text).toContain('status: "stopped", summary: "resume failed: <why>"')
+  expect(todoAt(db, 1).status).toBe('drafting')
+})
+
+test('/todo resume refuses a todo the chip is not offered on, naming its status and the command that applies', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([
+    aTodo(1, 'Not yet'),
+    aTodo(2, 'Finished', { status: 'done', hasRun: true }),
+    aTodo(3, 'Halted', { status: 'stopped', hasRun: true }),
+    running(4, 'Busy'),
+    aTodo(5, 'Elsewhere', { status: 'paused', hasRun: true, mode: 'agent', taskId: 'ag5', owner: 's2' }),
+  ])
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  expect((await todo($, 'resume 1')).text).toBe('#1 is pending: /todo exec 1')
+  expect((await todo($, 'resume finished')).text).toBe('#2 is done: nothing to resume.')
+  expect((await todo($, 'resume 3')).text).toBe('#3 is stopped with nothing to resume: /todo exec 3')
+  expect((await todo($, 'resume 4')).text).toBe('#4 is running: already in flight; pause or stop it in the pane (/todo show).')
+  expect((await todo($, 'resume 5')).text).toBe('#5 is paused in another session.')
+  expect((await todo($, 'resume nothing-like-it')).text).toBe('No todo matches "nothing-like-it".')
+  expect((await todo($, 'resume')).text).toBe('Usage: /todo resume <n|title>')
+  await clock.settle()
+  expect(submitted).toHaveLength(0)
+  expect(todoAt(db, 1).status).toBe('pending')
+  expect(todoAt(db, 5).status).toBe('paused')
+})
+
 test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and dims while none is pending or the cap is full', async ($, on) => {
   const submitted: string[] = []
   const toasts: string[] = []

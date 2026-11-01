@@ -31,6 +31,8 @@ Or declare it in your settings so every machine picks it up:
 | `/todo exec 1` (or a title fragment), or **▶ Exec** in the pane | Claude asks for the prompt, offering the stored drafts straight away (or drafting 2–3 if there are none; type your own via Other), then classifies it |
 | `/todo exec auto 1` (or `/todo exec 1 auto`), or **⚡ Auto** in the pane | The same run with no questions: Claude takes the best draft (or writes the one prompt it would have offered first), and plans multi-step work on its own best-effort defaults, launching without plan-mode approval |
 | `/todo exec auto`, or **🔥 Fire** in the pane's header | Auto-runs the next todo in line, the lowest-numbered pending one, or says none is pending |
+| `/todo auto 1`, or bare `/todo auto` | Short for `/todo exec auto 1` and `/todo exec auto`, the commands you reach for most |
+| `/todo resume 1` (or a title fragment) | What **⏵ Resume** does, typed, so a paused or stopped todo can be picked up without the pane. It takes exactly the todos the chip is offered on; for any other it answers in one line with the todo's status and the command that does apply (`#3 is pending: /todo exec 3`). A todo paused before it ever ran has no run to pick up, so it starts as an exec would |
 | simple | One background Agent |
 | multi-step | Plan mode → questions until the subtasks are clear → an execution tree for you to approve → Workflow |
 | **⏸ Pause** / **⏵ Resume** | Stops the task; resuming wakes it (a Workflow replays its finished agents from cache, a lone Agent is sent a message to continue), or, when it can't be woken, starts a fresh agent on the worktree and record it left |

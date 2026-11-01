@@ -108,7 +108,7 @@ stateDiagram-v2
   done --> [*]: expires
 ```
 
-Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again.
+Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would.
 
 | State | Mark | Meaning | Who moves it on |
 |---|---|---|---|
