@@ -558,16 +558,19 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   }
 
   // The one line above every todo header shown, parting each todo from the
-  // header and from the todo above it: a dim rule as wide as the tree's columns, cut rather than wrapped. Not
-  // focusable, so it never joins the ring's order, and never drawn inside a
-  // todo's levels or in the dialog.
-  const divider = (n: number) => (
-    <Box key={`div:${n}`} flexShrink={0} overflow="hidden">
+  // header and from the todo above it: a dim rule as wide as the tree's
+  // columns, cut rather than wrapped. The list opens with a double `═` rule
+  // above its first todo, and the `N hidden by the view` footer gets one too;
+  // every later todo keeps the single `─`. Not focusable, so it never joins
+  // the ring's order, and never drawn inside a todo's levels or in the dialog.
+  const rule = (key: string, glyph: '─' | '═') => (
+    <Box key={key} flexShrink={0} overflow="hidden">
       <Text color={DIVIDER} dimColor wrap="truncate-end">
-        {'─'.repeat(Math.max(1, e.props.bodyColumns - 2 * PAD_X))}
+        {glyph.repeat(Math.max(1, e.props.bodyColumns - 2 * PAD_X))}
       </Text>
     </Box>
   )
+  const divider = (n: number, isFirst: boolean) => (isFirst ? rule(`div2:${n}`, '═') : rule(`div:${n}`, '─'))
 
   // The view: what the header's toggles light, plus the todo in hand.
   const keep = new Set(u.justStopped)
@@ -628,7 +631,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
       {list.length > 0 && shown.length === 0 ? <Text dimColor>Nothing in this view.</Text> : ''}
-      {shown.flatMap(t => [divider(t.n), ...todoRows(t)])}
+      {shown.flatMap((t, i) => [divider(t.n, i === 0), ...todoRows(t)])}
+      {hidden > 0 ? rule('div2:hidden', '═') : ''}
       {hidden > 0 ? <Text dimColor>{hidden} hidden by the view</Text> : ''}
     </Box>
   )

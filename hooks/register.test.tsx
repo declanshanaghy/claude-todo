@@ -2726,8 +2726,8 @@ test('each todo is one line, its own splitter: toggle, #N and title in the statu
   expect(textParts(run as never).find(p => p.text.endsWith(' 1/2'))?.props).toMatchObject({ color: MARK.running.color })
   expect((run as { props?: { label?: string } } | undefined)?.props?.label).toBe('#2 Ship it: running 1/2')
   // No row of its own: the header is the todo's only line until it opens, and
-  // even the first todo shown has its divider above it.
-  expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeDefined()
+  // even the first todo shown has its double rule above it.
+  expect(await ui.find({ type: 'Box', key: 'div2:1' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
   await ui.press({ key: 'todo:1' })
   expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▾ #1 /)
@@ -2737,28 +2737,31 @@ test('each todo is one line, its own splitter: toggle, #N and title in the statu
   await ui.unmount()
 })
 
-// The dividers the tree drew, in order, each keyed by the todo it sits above.
+// The rules the tree drew, in order: `div:N` a single ─ above todo N,
+// `div2:N` the double ═ above the first todo, `div2:hidden` the double above
+// the hidden footer.
 const dividers = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: unknown; props: Record<string, unknown> }[]> }) =>
-  (await ui.findAll({ type: 'Box' })).map(x => x.key ?? x.props['key']).filter((k): k is string => typeof k === 'string' && k.startsWith('div:'))
+  (await ui.findAll({ type: 'Box' })).map(x => x.key ?? x.props['key']).filter((k): k is string => typeof k === 'string' && /^div2?:/.test(k))
 
 test('a dim rule sits above every todo, the first included: N todos shown draw N, counting only the view', async ($, on) => {
   const db = seeded([aTodo(1, 'One'), aTodo(2, 'Two'), running(3, 'Three'), aTodo(4, 'Four', { status: 'done', hasRun: true, doneAt: 1 })])
   engine(on, [], undefined, true, { db })
   await start($)
-  // The default view hides done: three todos shown, three dividers, the first included.
+  // The default view hides done: three todos shown, three rules, the first a
+  // double, and one hidden, so a double above the footer.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await dividers(ui)).toEqual(['div:1', 'div:2', 'div:3'])
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2', 'div:3', 'div2:hidden'])
   const rule = await ui.find({ type: 'Box', key: 'div:2' })
   // The tree's 70 columns less its paddingX: one line of ─ in the divider's color.
   expect(rule?.text).toBe('─'.repeat(68))
   expect(textParts(rule)).toEqual([{ text: '─'.repeat(68), props: expect.objectContaining({ color: DIVIDER, dimColor: true, wrap: 'truncate-end' }) }])
-  // Every view lit: four shown, four dividers, done last.
+  // Every view lit: four shown, four rules, done last, and no footer.
   await ui.press({ key: 'view:all' })
-  expect(await dividers(ui)).toEqual(['div:1', 'div:2', 'div:3', 'div:4'])
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2', 'div:3', 'div:4'])
   // An open todo's levels draw none of their own.
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'todo:3' })
-  expect(await dividers(ui)).toEqual(['div:1', 'div:2', 'div:3', 'div:4'])
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2', 'div:3', 'div:4'])
   await ui.unmount()
 })
 
@@ -2766,11 +2769,11 @@ test('a lone todo draws one divider, and at a narrow width a divider is one row 
   engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Alone')]) })
   await start($)
   const one = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await dividers(one)).toEqual(['div:1'])
+  expect(await dividers(one)).toEqual(['div2:1'])
   await one.unmount()
   await todo($, 'add Second')
   const narrow = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 13 } })
-  expect(await dividers(narrow)).toEqual(['div:1', 'div:2'])
+  expect(await dividers(narrow)).toEqual(['div2:1', 'div:2'])
   // 13 columns less the paddingX: 11 cells, never more, and truncated, never wrapped.
   const rule = await narrow.find({ type: 'Box', key: 'div:2' })
   expect(rule?.text).toBe('─'.repeat(11))
@@ -2782,7 +2785,7 @@ test('the dividers never join the focus order: the ring walks the todos as it wo
   engine(on, [], undefined, true, { db: seeded([aTodo(1, 'One'), aTodo(2, 'Two'), aTodo(3, 'Three')]) })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await dividers(ui)).toEqual(['div:1', 'div:2', 'div:3'])
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2', 'div:3'])
   // The arrow keys walk the order the drawing placed: from the add input
   // straight from header to header, and into an open todo's chips, never
   // stopping on a divider.
@@ -2799,6 +2802,79 @@ test('the dividers never join the focus order: the ring walks the todos as it wo
     await arrow(-1)
     expect(`${key}: ${String(await isLit(ui, key))}`).toBe(`${key}: true`)
   }
+  await ui.unmount()
+})
+
+test('the double rule is above the first todo only: N todos draw one double and N-1 singles', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([running(1, 'One'), aTodo(2, 'Two'), aTodo(3, 'Three'), aTodo(4, 'Four')]) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const keys = await dividers(ui)
+  expect(keys).toEqual(['div2:1', 'div:2', 'div:3', 'div:4'])
+  expect(keys.filter(k => k.startsWith('div2:')).length).toBe(1)
+  expect(keys.filter(k => k.startsWith('div:')).length).toBe(3)
+  // One line of ═ as wide as the tree less its paddingX, in the divider's
+  // color, cut rather than wrapped; the later ones stay ─.
+  const first = await ui.find({ type: 'Box', key: 'div2:1' })
+  expect(first?.text).toBe('═'.repeat(68))
+  expect(textParts(first)).toEqual([{ text: '═'.repeat(68), props: expect.objectContaining({ color: DIVIDER, dimColor: true, wrap: 'truncate-end' }) }])
+  expect((await ui.find({ type: 'Box', key: 'div:2' }))?.text).toBe('─'.repeat(68))
+  // Hiding the first todo's view moves the double to the new first.
+  await ui.press({ key: 'view:running' })
+  expect(await dividers(ui)).toEqual(['div2:2', 'div:3', 'div:4', 'div2:hidden'])
+  await ui.unmount()
+})
+
+test('the double rule is above the hidden footer only while the view hides something', async ($, on) => {
+  const db = seeded([aTodo(1, 'One'), aTodo(2, 'Done', { status: 'done', hasRun: true, doneAt: 1 })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Done hidden: the double is the line right above the footer.
+  expect(await dividers(ui)).toEqual(['div2:1', 'div2:hidden'])
+  const tree = (await ui.findAll({ type: 'Box' })).find(b => b.props['paddingX'] !== undefined && b.props['flexDirection'] === 'column')
+  const kids = ((tree as { children?: unknown[] } | undefined)?.children ?? []).filter(c => typeof c === 'object' && c !== null) as { key?: unknown; props?: Record<string, unknown> }[]
+  const at = kids.findIndex(k => keyOf(k) === 'div2:hidden')
+  expect(at).toBeGreaterThan(-1)
+  expect(JSON.stringify(kids[at + 1])).toContain('hidden by the view')
+  const rule = await ui.find({ type: 'Box', key: 'div2:hidden' })
+  expect(rule?.text).toBe('═'.repeat(68))
+  expect(textParts(rule)).toEqual([{ text: '═'.repeat(68), props: expect.objectContaining({ color: DIVIDER, dimColor: true, wrap: 'truncate-end' }) }])
+  // Nothing hidden: no footer, and no double for it.
+  await ui.press({ key: 'view:all' })
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2'])
+  expect(await ui.find({ type: 'Text', text: /hidden by the view/ })).toBeUndefined()
+  // Everything hidden: no todo rules, but the footer keeps its double.
+  await ui.press({ key: 'view:all' })
+  for (const v of ['running', 'pending', 'failed']) await ui.press({ key: `view:${v}` })
+  expect(await dividers(ui)).toEqual(['div2:hidden'])
+  await ui.unmount()
+})
+
+test('each double rule is one line and never joins the focus order', async ($, on) => {
+  const db = seeded([aTodo(1, 'One'), aTodo(2, 'Two'), aTodo(3, 'Done', { status: 'done', hasRun: true, doneAt: 1 })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 13 } })
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2', 'div2:hidden'])
+  for (const key of ['div2:1', 'div2:hidden']) {
+    const rule = await ui.find({ type: 'Box', key })
+    // One Text of 11 ═ cells at 13 columns, truncated, never wrapped.
+    expect(rule?.text).toBe('═'.repeat(11))
+    expect(textParts(rule as never).map(t => t.props['wrap'])).toEqual(['truncate-end'])
+    expect(blankRows(rule)).toEqual([])
+  }
+  // The arrows walk from the add input to #1's header and on to #2's, with
+  // nothing focusable between: the doubles are skipped like the singles.
+  const arrow = (by: 1 | -1) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: Math.max(0, by), by, bodyRows: 4, contentRows: 40, origin: { kind: 'person' } })
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'add', origin: { kind: 'person' } })
+  for (const key of ['todo:1', 'todo:2']) {
+    await arrow(1)
+    expect(`${key}: ${String(await isLit(ui, key))}`).toBe(`${key}: true`)
+  }
+  expect(await ui.find({ type: 'Box', key: 'ring:div2:1' })).toBeUndefined()
+  expect(await ui.find({ type: 'Box', key: 'ring:div2:hidden' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -2830,8 +2906,8 @@ test('an old todoDividers setting, from /config or the environment, is ignored',
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ●$/)
-  // todoDividers 'none' would have dropped it: the divider is drawn regardless.
-  expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeDefined()
+  // todoDividers 'none' would have dropped it: the rule is drawn regardless.
+  expect(await ui.find({ type: 'Box', key: 'div2:1' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -3492,11 +3568,12 @@ test('a dialog left open across a reload starts closed', async ($, on) => {
 // ---------- compact: one line per row, no blank lines ----------
 
 // Every drawn row: a Box laid out as a row is one line; a column stacks its children.
-// The one line allowed between items is a todo's divider: a Box keyed div:N
-// holding one Text of ─ alone. A rule-only line anywhere else is a spacer by
+// The one line allowed between items is a rule: a Box keyed div:N (above a
+// later todo) or div2:N / div2:hidden (above the first todo or the hidden
+// footer) holding one Text of ─ or ═ alone. A rule-only line anywhere else is a spacer by
 // another name, so it's refused like a blank one.
 const isRule = (el: { type?: unknown; children?: unknown[] }) =>
-  el.type === 'Text' && Array.isArray(el.children) && el.children.length > 0 && el.children.every(c => typeof c === 'string' && /^─+$/.test(c))
+  el.type === 'Text' && Array.isArray(el.children) && el.children.length > 0 && el.children.every(c => typeof c === 'string' && /^(─+|═+)$/.test(c))
 const keyOf = (el: { key?: unknown; props?: Record<string, unknown> }) => {
   const k = el.key ?? el.props?.['key']
   return typeof k === 'string' ? k : ''
@@ -3513,7 +3590,7 @@ function blankRows(node: unknown, out: string[] = [], inDivider = false): string
     if (el.type === 'Box' && p['borderStyle'] !== undefined && key.startsWith('ring:')) out.push(`ring border ${key}`)
     if (el.type === 'Text' && Array.isArray(el.children) && el.children.every(c => typeof c === 'string' && c.trim() === '')) out.push('blank Text')
     if (isRule(el) && !inDivider) out.push('stray rule')
-    const isDivider = keyOf(el).startsWith('div:')
+    const isDivider = /^div2?:/.test(keyOf(el))
     if (isDivider) {
       const kids = (el.children ?? []).filter(c => typeof c === 'object' && c !== null) as { type?: unknown; children?: unknown[] }[]
       if (el.type !== 'Box' || kids.length !== 1 || kids.some(c => !isRule(c))) out.push(`divider ${keyOf(el)} is not one rule`)
@@ -3552,9 +3629,10 @@ test('every state draws its actions on one row, and the pane has no blank lines'
   }
   expect(await ui.find({ type: 'Text', text: /What next/ })).toBeUndefined()
   expect(blankRows(tree)).toEqual([])
-  // The dividers, the one exception to one line per element: one above each
-  // todo, the first included, and nothing else.
-  expect(await dividers(ui)).toEqual(['div:1', 'div:2', 'div:3', 'div:4', 'div:5'])
+  // The rules, the one exception to one line per element: a double above the
+  // first todo, a single above each later one, and nothing else (nothing is
+  // hidden, so no footer and no double above it).
+  expect(await dividers(ui)).toEqual(['div2:1', 'div:2', 'div:3', 'div:4', 'div:5'])
   await ui.unmount()
 })
 

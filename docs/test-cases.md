@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 186 of 190 cases (97.9%)** are covered by `claude plugin test .`.
+**Coverage: 189 of 193 cases (97.9%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -220,7 +220,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| U90 | Every state draws its action chips on one row (a just-stopped todo included, Resume first and Details last), no element draws a blank line (no vertical padding or margin, spacer text, stray rule-only line or focus border; the only line between items is the divider above each todo, one rule Text in a `div:N` Box), and the old "What next?" line is gone | every state draws its actions on one row, and the pane has no blank lines |
+| U90 | Every state draws its action chips on one row (a just-stopped todo included, Resume first and Details last), no element draws a blank line (no vertical padding or margin, spacer text, stray rule-only line or focus border; the only lines between items are the rules: a single `─` in a `div:N` Box above each later todo, a double `═` in a `div2:N` Box above the first, and a double in a `div2:hidden` Box above the hidden footer, each one rule Text), and the old "What next?" line is gone | every state draws its actions on one row, and the pane has no blank lines |
 | U1 | Level 1 sums a todo's agents on one `▸ N subtasks · d done · c calls` line; their rows wait behind it, and a subtask's calls never draw as code in the tree | M3: a tagged Agent links its spawn and its tool calls show under it |
 | U2 | ↗ Full transcript turns the pane into a call browser, with nothing to press while nothing in it is long enough to fold | M3: a tagged Agent links its spawn and its tool calls show under it |
 | U3 | The pane losing the keys (Esc) closes the dialog | M3: Esc (the pane losing the keys) closes the call browser |
@@ -232,8 +232,11 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U8a | A chip that leaves a todo's row while the ring is on it (▶ Exec once the todo turns drafting) hands the ring to that todo's header | a chip that leaves the row under the ring hands the ring to its todo header |
 | U9 | The spinner turns while a todo runs | the spinner turns only while a todo runs |
 | U10 | Each todo is one focusable line, its own splitter: ▸/▾, #N and title in the status color, a dim rule filling the gap, the status's mark (and d/n subtasks while it has run; a running one spins) at the right in its color, with the status word as the line's label, as wide as the pane's body less its padding and the ring's room; pressing it opens and closes the todo | each todo is one line, its own splitter: toggle, #N and title in the status color, a dim rule, the status mark at the right |
-| U10a | A dim `─` rule in `DIVIDER`'s color, as wide as the tree's columns and cut rather than wrapped, sits above every todo's header shown, the first included, parting it from the pane's header and from the todo above: N todos in the view draw N, counting only the todos the view shows, and an open todo's levels draw none | a dim rule sits above every todo, the first included: N todos shown draw N, counting only the view |
-| U10b | A lone todo draws one divider above it, and at a narrow width the divider stays one row of the tree's width | a lone todo draws one divider, and at a narrow width a divider is one row cut to the tree |
+| U10a | A dim rule in `DIVIDER`'s color, as wide as the tree's columns and cut rather than wrapped, sits above every todo's header shown, parting it from the pane's header and from the todo above: a double `═` above the first, a single `─` above each later one; N todos in the view draw N, counting only the todos the view shows, and an open todo's levels draw none | a dim rule sits above every todo, the first included: N todos shown draw N, counting only the view |
+| U10b | A lone todo draws one rule above it, the double, and at a narrow width a rule stays one row of the tree's width | a lone todo draws one divider, and at a narrow width a divider is one row cut to the tree |
+| U10d | N todos shown draw one double `═` rule, above the first, and N-1 single `─` rules; when the first todo leaves the view, the double moves to the new first | the double rule is above the first todo only: N todos draw one double and N-1 singles |
+| U10e | A double `═` rule sits on the line directly above the `N hidden by the view` footer only while the view hides something, a hidden-everything view included, and never when nothing is hidden | the double rule is above the hidden footer only while the view hides something |
+| U10f | Each double rule is one line of `═` cut to the tree's width, never wrapped, and never joins the focus order | each double rule is one line and never joins the focus order |
 | U10c | The dividers are never focusable: the arrow keys walk from header to header and through an open todo's chips as they would without them | the dividers never join the focus order: the ring walks the todos as it would without them |
 | U11 | The arrow keys walk the drill-down in drawing order: the todo's header, its chips, the subtasks line, each subtask row, its ↗ Full transcript, then the next todo | the arrow keys walk the drill-down in the order it draws, header by header and level by level |
 | U12 | At a narrow width the header cuts the title with … (or drops it), keeping the rule and the status mark whole | at a narrow width the header cuts the title with … and keeps the rule and the status mark whole |
