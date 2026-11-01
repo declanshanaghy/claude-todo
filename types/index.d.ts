@@ -41,6 +41,9 @@ export type Todo = {
   // While prompting: when its drafter started. The session that spawned it is
   // `owner`; another session counts the todo stuck once this is old enough.
   promptingAt?: number
+  // Set when ▶ Exec, ⚡ Auto or 🔥 Fire last fired it: whether that run skips
+  // every question, so the drafting hint reads its mode.
+  isAuto?: boolean
 }
 
 // One candidate prompt: a short name for the question's option, and the task.

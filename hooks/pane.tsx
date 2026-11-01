@@ -296,7 +296,11 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
             ? 'planning in the chat…'
             : t.hasRun
               ? 'continuing in the chat…'
-              : 'answer the prompt question in the chat…'
+              : !t.isAuto
+                ? 'answer the prompt question in the chat…'
+                : t.prompt
+                  ? 'starting with the first draft…'
+                  : 'drafting the prompt…'
         : ''
     if (c === 'delete') {
       return [
@@ -474,10 +478,16 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
             {' '}
             {plural(t.drafts.length, 'draft')} ready: ▶ Exec picks one
           </Text>
-        ) : (
+        ) : t.status === 'pending' ? (
           <Text dimColor italic>
             {' '}
             no prompt yet: ▶ Exec drafts one
+          </Text>
+        ) : (
+          // Fired: its prompt is Claude's to settle, and Exec isn't the way on.
+          <Text dimColor italic>
+            {' '}
+            {t.status === 'drafting' || t.status === 'planning' ? 'prompt being settled in the chat…' : 'prompt not recorded'}
           </Text>
         )}
         {t.status === 'done' && t.summary ? (

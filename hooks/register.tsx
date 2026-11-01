@@ -913,7 +913,7 @@ async function submit($: $, t: Todo, text: string) {
     $.ui.toast(`#${t.n} queued: it starts after your next message`)
     return QUEUED
   }
-  await patchTodo($, t.n, x => assign(x, { status: t.status, taskId: t.taskId, runId: t.runId }))
+  await patchTodo($, t.n, x => assign(x, { status: t.status, taskId: t.taskId, runId: t.runId, prompt: t.prompt, isAuto: t.isAuto }))
   $.ui.toast(`#${t.n} didn't start: ${r.drop}`)
   return r.drop
 }
@@ -1091,7 +1091,10 @@ export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
     return why
   }
   // A move the guard refuses (the todo moved on meanwhile) starts nothing.
-  const held = await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
+  // Auto with drafts runs the first as it is: it's the prompt from the start,
+  // so the row shows it before Claude's update comes back.
+  const best = auto && !refine ? t.drafts?.[0]?.prompt : undefined
+  const held = await patchTodo($, t.n, x => ({ ...x, status: 'drafting', isAuto: auto, ...(best !== undefined ? { prompt: best } : {}) }))
   if (held !== undefined) return held
   if (refine) await clearRun($, t.n)
   await patchUi($, u => ({

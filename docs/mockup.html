@@ -360,7 +360,7 @@ function closeDialog(){ S.dialog=null; S.area='prompt'; render(); }
 /* ---------- flows ---------- */
 const later = (ms, fn) => setTimeout(fn, ms);
 function execTodo(t, refine){
-  t.status='drafting'; t.confirm=null; render();
+  t.status='drafting'; t.isAuto=false; t.confirm=null; render();
   if(!refine) chat('user', `/todo exec ${t.n}`);
   chat('claude', refine ? `Refining the prompt for <b>#${t.n} ${esc(t.title)}</b>, starting from the current one.` : `Drafting prompts for <b>#${t.n} ${esc(t.title)}</b> from its title and this session's context.`);
   const kitty = t.title.startsWith('Fix kitty');
@@ -391,7 +391,9 @@ function execTodo(t, refine){
 // prompt it would have offered first and, for multi-step work, launches its
 // plan on stated defaults without plan-mode approval.
 function autoExec(t){
-  t.status='drafting'; t.confirm=null; t.expanded=true; render();
+  // With drafts, the first is the prompt from the moment it's fired.
+  if(t.drafts && !t.prompt) t.prompt='Set the kitty tab title from the session name, on both profiles, then reload kitty.';
+  t.status='drafting'; t.isAuto=true; t.confirm=null; t.expanded=true; render();
   chat('claude', `Auto mode: drafting the one best prompt for <b>#${t.n} ${esc(t.title)}</b> and launching it, no questions asked.`);
   const kitty=t.title.startsWith('Fix kitty'), multi=kitty||t.title.startsWith('Migrate');
   const build=kitty?'kittyTree':t.title.startsWith('Migrate')?'statusline':'countmd', mode=multi?'workflow':'agent';
@@ -551,7 +553,7 @@ function actRow(t){
     case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')} ${det}</div>`;
     case 'stopped': return `<div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}${t.justStopped?' '+a('leave','Leave'):''} ${det}</div>`;
     case 'done': return `<div class="row ind2">${det}</div>`;
-    case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
+    case 'drafting': return `<div class="row ind2 dim">${t.agents.length ? 'continuing in the chat…' : !t.isAuto ? 'answer the prompt question in the chat…' : t.prompt ? 'starting with the first draft…' : 'drafting the prompt…'}</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';
   }
@@ -642,7 +644,7 @@ function renderPane(){
     }
     if(!t.expanded) return;
     // Level 1: what it was asked to do (2 lines), what you can do now, and how far it got.
-    h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts ready: ▶ Exec picks one</i>' : '<i>no prompt yet: ▶ Exec drafts one</i>'))}</div>`;
+    h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts ready: ▶ Exec picks one</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
     if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="ma">✓ ${esc(t.summary)}</span></div>`;
     h += actRow(t);
     if(t.agents.length){

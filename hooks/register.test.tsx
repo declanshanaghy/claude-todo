@@ -348,6 +348,40 @@ test('Auto drafts the one best prompt and runs it with no questions, planning mu
   await ui.unmount()
 })
 
+test('a fired todo never says "no prompt yet": Auto stores its first draft as the prompt, and the hint names the mode', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([
+    aTodo(1, 'Fix kitty tab titles', { drafts: DRAFTS }),
+    aTodo(2, 'Count md files', { drafts: DRAFTS }),
+    aTodo(3, 'Tidy the docs'),
+  ])
+  engine(on, submitted, undefined, false, { db })
+  mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  for (const n of [1, 2, 3]) await ui.press({ key: `todo:${n}` })
+  await ui.press({ key: 'act:1:auto' })
+  await ui.press({ key: 'act:2:exec' })
+  await ui.press({ key: 'act:3:auto' })
+  expect(submitted).toHaveLength(3)
+
+  // Auto with drafts takes the first at once: it's the prompt from the start.
+  expect(todoAt(db, 1)).toMatchObject({ status: 'drafting', prompt: DRAFTS[0]?.prompt, isAuto: true })
+  expect(await ui.find({ type: 'Text', text: /Set the kitty tab title from the session name/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'starting with the first draft…' })).toBeDefined()
+  // Plain Exec asks: no prompt stored yet, and the hint says so.
+  expect(todoAt(db, 2).prompt).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'answer the prompt question in the chat…' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' prompt being settled in the chat…' })).toBeDefined()
+  // Auto without drafts: Claude drafts it, with no question to answer.
+  expect(todoAt(db, 3).prompt).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'drafting the prompt…' })).toBeDefined()
+
+  expect(await ui.find({ type: 'Text', text: /no prompt yet/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Exec drafts one|Exec picks one/ })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('every protocol puts the work on its own worktree branch and lands it only after the checks pass', async ($, on) => {
   const submitted: string[] = []
   const db = seeded([
