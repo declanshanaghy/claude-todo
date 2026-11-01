@@ -44,6 +44,7 @@ SQLite through the `sqlite3` CLI, with all SQL in `hooks/db.ts`. One process run
 - **Test coverage list:** every behaviour gets a row in `docs/test-cases.md` (unique id, the covering test's title), and the "Coverage: X of Y" line must match the rows, or CI fails.
 - **Test kit quirks:** register each event hook once (put options on `engine()`'s `where` argument), and register hooks before the first `$` call. Drive timers with `mock.clock` and `ownClock: false`.
 - **This checkout runs the mod live** in sessions started here. Work only lands in them after `git pull --ff-only` on `main`.
+- **Bump the version with every landing that changes the mod** (`hooks/`, `types/`, `.claude-plugin/`): a patch bump in `.claude-plugin/plugin.json`, minor for a new feature. Sessions anywhere else run the installed copy, and `claude plugin update` only refreshes it when the version changed, so an unbumped landing never reaches them. On a rebase conflict over the version, take the higher one and bump it once more.
 
 ## Todos and git
 
