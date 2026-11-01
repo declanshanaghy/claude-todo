@@ -787,7 +787,7 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
   for (let i = 0; i < 20; i++) await arrow(-1)
   expect(await lit(ui, 'view:running')).toBe(true)
   // The header's toggles come first, then 🔥 Fire, then add, then the list.
-  for (const key of ['view:pending', 'view:failed', 'view:paused', 'view:stopped', 'view:done', 'view:all', 'fire', 'add', 'todo:1']) {
+  for (const key of ['view:prompting', 'view:pending', 'view:failed', 'view:paused', 'view:stopped', 'view:done', 'view:all', 'fire', 'add', 'todo:1']) {
     await arrow(1)
     expect(await lit(ui, key)).toBe(true)
   }
@@ -1051,7 +1051,7 @@ test('the status line counts todos by status and clears with the last one', asyn
   const { statuses } = engine(on, [], undefined, true, { unplaced: 'the terminal is too narrow' })
   await start($)
   await todo($, 'add One')
-  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:delete' })
@@ -1086,13 +1086,13 @@ test('open: a placed pane counts in its header and clears the status line; an un
   // Never both: the status line said nothing while the header counted.
   expect(statuses.filter(x => x !== undefined)).toEqual([])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '○1', '✗0', '⏸0', '■0', '✓0'])
+  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '◔0', '○1', '✗0', '⏸0', '■0', '✓0'])
   await ui.unmount()
 
   where.unplaced = 'the terminal is too narrow'
   await start($)
   await clock.settle()
-  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
 })
 
 // The header row as drawn: the pane's first child.
@@ -1226,9 +1226,9 @@ test('noshow hands the counts to the status line, and show takes them back', asy
   await todo($, 'add One')
   expect(statuses.at(-1)).toBeUndefined()
   await todo($, 'noshow')
-  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
   await todo($, 'add Two')
-  expect(statuses.at(-1)).toBe('todo ▶0 ○2 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○2 ✗0 ⏸0 ■0 ✓0')
   await todo($, 'show')
   await clock.settle()
   expect(statuses.at(-1)).toBeUndefined()
@@ -1244,7 +1244,7 @@ test('closing the pane with its × hands the counts to the status line; drawing 
   // so the engine just forgets the pane, as the × leaves it: the next tick sees.
   isOpen.delete('todo')
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
   // The person opens it again: its render takes the counts back.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await clock.advance(1)
@@ -1262,7 +1262,7 @@ test('a narrower terminal that unseats the pane hands the counts to the status l
   expect(statuses.at(-1)).toBeUndefined()
   where.unplaced = 'the terminal is too narrow'
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
   // Widened: the pane is drawn again.
   delete where.unplaced
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1281,7 +1281,7 @@ test('the dialog covers the header, so the status line counts until it closes', 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:details' })
-  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
   await ui.unmount()
   const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
   await clock.advance(1)
@@ -1297,21 +1297,23 @@ test('the header, the status line and the rows draw the same marks in the same o
     aTodo(4, 'Finished', { status: 'done', hasRun: true, doneAt: 1000 }),
     aTodo(5, 'Later'),
     aTodo(6, 'Also later'),
+    // Another session's drafter is still writing its prompts.
+    aTodo(7, 'Being prompted', { status: 'prompting', owner: 's2', promptingAt: 1000 }),
   ])
   const { statuses } = engine(on, [], undefined, false, { db, unplaced: 'the terminal is too narrow' })
   const clock = mock.clock(on, { now: 1000 })
   await start($)
   await clock.settle()
   const line = statuses.at(-1)
-  expect(line).toBe('todo ▶1 ○2 ✗0 ⏸1 ■1 ✓1')
+  expect(line).toBe('todo ▶1 ◔1 ○2 ✗0 ⏸1 ■1 ✓1')
 
   const ui = await mountAll($)
   const header = await headerMarks(ui)
   expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
-  expect(header.map(m => m.color)).toEqual(['success', 'inactive', 'error', 'warning', 'error', 'merged'])
+  expect(header.map(m => m.color)).toEqual(['success', 'remember', 'inactive', 'error', 'warning', 'error', 'merged'])
   expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
   // Each row's glyph is its status's mark; a running row spins in its color.
-  for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
+  for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending'], [7, 'prompting']] as const) {
     const row = await ui.find({ type: 'Button', key: `todo:${n}` })
     expect(JSON.stringify(row?.children)).toContain(JSON.stringify(MARK[s].color))
     // The header line is the todo's only line: ▸, #N and title, the mark at its right end.
@@ -1349,11 +1351,11 @@ test('the default view shows running (drafting and planning too), pending and fa
   await start($)
   await clock.settle()
   // The status line counts every todo, whatever the pane shows.
-  expect(statuses.at(-1)).toBe('todo ▶3 ○1 ✗1 ⏸1 ■1 ✓1')
+  expect(statuses.at(-1)).toBe('todo ▶3 ◔0 ○1 ✗1 ⏸1 ■1 ✓1')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
   const marks = await headerMarks(ui)
-  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '○1', '✗1', '⏸1 hidden', '■1 hidden', '✓1 hidden'])
+  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '○1', '✗1', '⏸1 hidden', '■1 hidden', '✓1 hidden'])
   // A hidden view's toggle is dim and struck through, in its own color.
   const struck = (await ui.find({ type: 'Button', key: 'view:done' })) as Drawn | undefined
   expect(JSON.stringify(struck?.children)).toContain('"strikethrough":true')
@@ -1448,7 +1450,18 @@ test('a todo in hand stays in the default view: paused under the ring, or just s
 type Lead = Todo['status'] | 'removed' | 'browser' | { confirm: string[] }
 type StateRow = { state: string; todo: (n: number) => Todo; before?: string[]; chips: Record<string, Lead> }
 
+// A todo another session's drafter is still prompting, started far ahead of
+// the test clock, so the sync tick never counts it stuck mid-table.
+const prompting = (n: number, title: string) => aTodo(n, title, { status: 'prompting', owner: 'other', promptingAt: Date.now() })
+
 const BY_STATE: StateRow[] = [
+  {
+    // Exec and Auto are drawn dimmed: a press says why and starts nothing.
+    state: 'prompting',
+    todo: n => prompting(n, 'Prompting'),
+    chips: { exec: 'prompting', auto: 'prompting', rename: 'prompting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+  },
+  { state: 'prompting, confirming Delete', todo: n => prompting(n, 'Prompting'), before: ['delete'], chips: { deleteyes: 'removed', cancel: 'prompting' } },
   {
     state: 'pending, never ran',
     todo: n => aTodo(n, 'Waiting'),
@@ -2041,88 +2054,159 @@ test('drafts that arrive once a todo is running are kept without touching its ru
   expect(todoAt(db, 1)).toMatchObject({ status: 'running', prompt: 'mine', drafts: DRAFTS })
 })
 
-test('an exec while the drafter works waits for it, says so, then offers its drafts or auto-takes the first', async ($, on) => {
-  const { db, clock, submitted, toasts } = drafterEngine(on)
-  await start($)
-  await todo($, 'add Fix kitty tab titles')
-  await todo($, 'add Count md files')
-  await clock.settle()
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'act:1:exec' })
-  await clock.settle()
-  expect(submitted).toHaveLength(0)
-  expect(todoAt(db, 1).status).toBe('drafting')
-  expect(toasts).toContain('#1: waiting for prompt drafts…')
-  expect(await ui.find({ type: 'Text', text: /waiting for prompt drafts…/ })).toBeDefined()
-  const said = await todo($, 'exec auto 2')
-  expect(said.text).toContain('Waiting for its prompt drafts')
-  await clock.settle()
-  expect(submitted).toHaveLength(0)
-
-  await storeDrafts($, 1, '1.1')
-  await clock.settle()
-  expect(submitted).toHaveLength(1)
-  expect(submitted[0]).toContain("don't draft new ones")
-  expect(submitted[0]).toContain(DRAFTS[0]?.prompt ?? '-')
-  await storeDrafts($, 2, '2.2', [{ label: 'Count', prompt: 'Count the md files.' }])
-  await clock.settle()
-  expect(submitted).toHaveLength(2)
-  expect(submitted[1]).toContain('in auto mode')
-  expect(submitted[1]).toContain('Count the md files.')
-  // A drafter's later end, after it stored them, runs nothing more.
-  await turnDone($, 'dr1', 'Stored 3 drafts.')
-  await clock.settle()
-  expect(submitted).toHaveLength(2)
-  await ui.unmount()
-})
-
-test('a drafter that ends without drafts, fails to start or takes too long falls back to drafting in the chat, saying so', async ($, on) => {
-  const { clock, submitted, toasts, gate } = drafterEngine(on)
-  await start($)
-  await todo($, 'add Ends empty')
-  await todo($, 'add Hangs')
-  await clock.settle()
-  await todo($, 'exec 1')
-  await todo($, 'exec 2')
-  await clock.settle()
-  expect(submitted).toHaveLength(0)
-
-  await turnDone($, 'dr1', 'Nothing to say.')
-  await clock.settle()
-  expect(submitted).toHaveLength(1)
-  expect(submitted[0]).toContain('its drafting subagent ended without drafts, so draft the prompts here')
-  expect(submitted[0]).toContain('Draft 2–3')
-  expect(toasts).toContain('#1: its drafting subagent ended without drafts; drafting in the chat')
-
-  await clock.advance(120_000)
-  expect(submitted).toHaveLength(2)
-  expect(submitted[1]).toContain('Execute todo #2')
-  expect(submitted[1]).toContain('its drafts took too long')
-
-  // A spawn the engine refuses leaves nothing to wait for.
-  gate.deny = 'no subagents here'
-  await todo($, 'add Refused')
-  await clock.settle()
-  await todo($, 'exec 3')
-  await clock.settle()
-  expect(submitted).toHaveLength(3)
-  expect(submitted[2]).toContain('Draft 2–3')
-})
-
-test('a reset while an exec waits on drafts cancels it', async ($, on) => {
+test("a todo is prompting from its drafter's spawn until its drafts are stored, Exec and Auto dimmed meanwhile", async ($, on) => {
   const { db, clock, submitted } = drafterEngine(on)
   await start($)
   await todo($, 'add Fix kitty tab titles')
+  // Added pending; prompting once its drafter is spawned, owned by this session.
+  expect(todoAt(db, 1).status).toBe('pending')
   await clock.settle()
-  await todo($, 'exec 1')
-  await clock.settle()
+  expect(todoAt(db, 1)).toMatchObject({ status: 'prompting', owner: 's1', promptingAt: 1000 })
+
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'act:1:reset' })
+  expect(await ui.find({ type: 'Button', key: 'view:prompting' })).toBeDefined()
+  const row = await ui.find({ type: 'Button', key: 'todo:1' })
+  expect(row?.text.endsWith(` ${MARK.prompting.symbol}`)).toBe(true)
+  await ui.press({ key: 'todo:1' })
+  expect(await ui.find({ type: 'Text', text: /no prompt yet: drafting prompts…/ })).toBeDefined()
+  for (const k of ['exec', 'auto']) expect((await ui.find({ type: 'Button', key: `act:1:${k}` }))?.props['dimColor']).toBe(true)
+  expect((await ui.find({ type: 'Button', key: 'act:1:rename' }))?.props['dimColor']).toBeUndefined()
+
   await storeDrafts($, 1, '1.1')
+  const t = todoAt(db, 1)
+  expect(t).toMatchObject({ status: 'pending', drafts: DRAFTS })
+  expect(t.owner).toBeUndefined()
+  expect(t.promptingAt).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /3 drafts ready/ })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'act:1:exec' }))?.props['dimColor']).toBeUndefined()
+  // Its drafter's later end changes nothing.
+  await turnDone($, 'dr1', 'Stored 3 drafts.')
+  await clock.settle()
+  expect(todoAt(db, 1).status).toBe('pending')
+  expect(submitted).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('Exec, Auto, 🔥 Fire and /todo exec never start a prompting todo, and say its prompts are still being drafted', async ($, on) => {
+  const { db, clock, submitted, toasts } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Fix kitty tab titles')
+  await clock.settle()
+  const still = "#1's prompts are still being drafted: it can start once they're ready."
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:exec' })
+  expect(toasts.at(-1)).toBe(still)
+  await ui.press({ key: 'act:1:auto' })
+  expect(toasts.at(-1)).toBe(still)
+  expect((await todo($, 'exec 1')).text).toBe(still)
+  expect((await todo($, 'exec auto 1')).text).toBe(still)
+  expect((await todo($, 'auto 1')).text).toBe(still)
+  expect((await todo($, 'resume 1')).text).toBe(still)
+  // Nothing else pending: `/todo exec auto` and Fire skip it, saying why; Fire is dimmed.
+  expect((await todo($, 'exec auto')).text).toBe(`No pending todo to run. ${still}`)
+  expect((await ui.find({ type: 'Button', key: 'fire' }))?.props['dimColor']).toBe(true)
+  await ui.press({ key: 'fire' })
+  expect(toasts.at(-1)).toBe(`No pending todo to run. ${still}`)
   await clock.settle()
   expect(submitted).toHaveLength(0)
+  expect(todoAt(db, 1).status).toBe('prompting')
+  await ui.unmount()
+})
+
+test("a drafter that ends without drafts, fails or can't start leaves its todo pending, and Exec drafts in the chat", async ($, on) => {
+  const { db, clock, submitted, toasts, gate } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Ends empty')
+  await todo($, 'add Fails')
+  await clock.settle()
+  expect(todoAt(db, 1).status).toBe('prompting')
+  expect(todoAt(db, 2).status).toBe('prompting')
+
+  await turnDone($, 'dr1', 'Nothing to say.')
+  expect(todoAt(db, 1).status).toBe('pending')
+  expect(toasts).toContain('#1: no prompt drafts; ▶ Exec drafts in the chat')
+  await turnDone($, 'dr2', 'no', { refused: true })
+  expect(todoAt(db, 2).status).toBe('pending')
+  expect(toasts).toContain('#2: its drafter failed; ▶ Exec drafts in the chat')
+
+  // A spawn the engine refuses never holds the todo.
+  gate.deny = 'no subagents here'
+  await todo($, 'add Refused')
+  await clock.settle()
+  expect(todoAt(db, 3).status).toBe('pending')
+
+  await todo($, 'exec 1')
+  await clock.settle()
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toContain('Draft 2–3')
+  // Fire takes the lowest-numbered pending todo.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'fire' })
+  expect(submitted.at(-1)).toContain('Execute todo #2 "Fails" in auto mode')
+  await ui.unmount()
+})
+
+test('a prompting todo can be renamed, staying prompting under its new drafter, or deleted', async ($, on) => {
+  const { db, clock, spawns } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Old title')
+  await todo($, 'add Unwanted')
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:rename' })
+  await ui.input({ key: 'ren:1', text: 'New title' })
+  await clock.settle()
+  expect(spawns).toHaveLength(3)
+  expect(todoAt(db, 1)).toMatchObject({ title: 'New title', status: 'prompting' })
+  // The old drafter's end and late drafts don't release it; the new one's do.
+  await turnDone($, 'dr1', 'Nothing.')
+  expect((await storeDrafts($, 1, '1.1')).result).toContain('stale')
+  expect(todoAt(db, 1).status).toBe('prompting')
+  await storeDrafts($, 1, '1.3')
   expect(todoAt(db, 1)).toMatchObject({ status: 'pending', drafts: DRAFTS })
+
+  await ui.press({ key: 'todo:2' })
+  await ui.press({ key: 'act:2:delete' })
+  await ui.press({ key: 'act:2:deleteyes' })
+  expect(db.todos['/proj']?.[2]).toBeUndefined()
+  // Its drafter's late drafts find nothing to store.
+  expect(await storeDrafts($, 2, '2.2')).toMatchObject({ isError: true })
+  await ui.unmount()
+})
+
+test("a prompting todo whose drafter isn't running goes back to pending at the next sync: this session's at once, another's after the wait", async ($, on) => {
+  const db = seeded([
+    // This session's, its drafter lost to a /clear or a restart.
+    aTodo(1, 'Mine', { status: 'prompting', owner: 's1', promptingAt: 1000 }),
+    aTodo(2, 'Theirs', { status: 'prompting', owner: 'other', promptingAt: 1000 }),
+  ])
+  engine(on, [], undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await clock.advance(2000)
+  expect(todoAt(db, 1).status).toBe('pending')
+  expect(todoAt(db, 1).owner).toBeUndefined()
+  expect(todoAt(db, 2).status).toBe('prompting')
+  await clock.advance(120_000)
+  expect(todoAt(db, 2).status).toBe('pending')
+})
+
+test('a view stored before prompting had a toggle shows prompting todos wherever it showed pending ones', async ($, on) => {
+  const db = seeded([aTodo(1, 'Prompting', { status: 'prompting', owner: 'other', promptingAt: Date.now() }), aTodo(2, 'Waits')])
+  const held = legacyState(on, { ui: { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, view: ['running', 'failed'] } })
+  engine(on, [], undefined, true, { db })
+  await start($)
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Pending was hidden, so prompting is too.
+  expect(await rowsDrawn(ui)).toEqual([])
+  // A toggle stores the new view in its place, prompting still hidden.
+  await ui.press({ key: 'view:pending' })
+  expect(held('ui')).toMatchObject({ value: { views: ['running', 'pending', 'failed'] } })
+  await ui.unmount()
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(ui)).toEqual([2])
   await ui.unmount()
 })
 

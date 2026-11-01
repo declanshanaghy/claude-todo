@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 175 of 179 cases (97.8%)** are covered by `claude plugin test .`.
+**Coverage: 178 of 182 cases (97.8%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -41,7 +41,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | K3 | The person closing the pane with its × hands the counts to the status line; drawing it again takes them back | closing the pane with its × hands the counts to the status line; drawing it again takes them back (the kit can't raise the person's `ui.close`, so the test has the engine forget the pane and the sync tick notice; the hook itself is the one K2 runs) |
 | K4 | A narrower terminal that unseats the pane hands the counts to the status line within a sync tick; a render of the pane takes them back | a narrower terminal that unseats the pane hands the counts to the status line until it is drawn again |
 | K5 | The detail dialog covers the header, so the status line counts until it closes | the dialog covers the header, so the status line counts until it closes |
-| K6 | The header, the status line and the rows show the same marks (▶ ○ ✗ ⏸ ■ ✓) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
+| K6 | The header, the status line and the rows show the same marks (▶ ◔ ○ ✗ ⏸ ■ ✓) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
 | K7 | The status line's counts are the whole list's, whatever the view hides; drafting and planning count as running | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
 
 ## Launching and prompts
@@ -74,14 +74,16 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | ID | Behaviour | Covered by |
 |---|---|---|
 | R1 | Adding a todo answers at once; then, from a timer, the plugin spawns the drafter itself: its own registered agent type (haiku, tools Read, Grep, Glob and `mcp__todo__drafts` only), in the background, its description tagged `[todo-drafts:N]` and its prompt carrying the launch's key | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
-| R2 | `mcp__todo__drafts` stores up to 3 drafts on the todo without touching its status, prompt or run, and a pending todo's level 1 hints "3 drafts ready"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R2 | `mcp__todo__drafts` stores up to 3 drafts on the todo without touching its prompt or run, and a pending todo's level 1 hints "3 drafts ready"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 | R3 | The drafter never links as a todo's run: its spawn, its tool calls and its end add no agent, call or tool-use id and change no status | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 | R4 | With drafts stored, ▶ Exec asks ONE AskUserQuestion offering them (labels and whole prompts, plus Other) without drafting; ⚡ Auto takes the first; ✨ Refine still refines the chosen prompt | Exec offers the stored drafts without drafting, Auto takes the first, Refine is unchanged |
 | R5 | A rename clears the drafts and launches a new drafter; drafts sent under the old launch's key are refused as stale; the same title again drafts nothing | a rename clears the drafts and drafts again; drafts the old drafter sends late are refused as stale |
 | R6 | Drafts that arrive once the todo started are stored, its status and chosen prompt untouched | drafts that arrive once a todo is running are kept without touching its run or its chosen prompt |
-| R7 | An exec (▶ Exec, ⚡ Auto, 🔥 Fire, `/todo exec`) while the drafter works waits: a toast, the level-1 hint "waiting for prompt drafts…" and a line in the exec message say so, and the drafts are offered (or the first auto-taken) as soon as they arrive; the drafter's later end runs nothing more | an exec while the drafter works waits for it, says so, then offers its drafts or auto-takes the first |
-| R8 | A drafter that ends without drafts, or a wait past 2 minutes, falls back to drafting in the chat, saying why in a toast and the prompt; a refused spawn leaves nothing to wait for | a drafter that ends without drafts, fails to start or takes too long falls back to drafting in the chat, saying so |
-| R9 | A Reset while an exec waits on drafts cancels it; the drafts are still stored | a reset while an exec waits on drafts cancels it |
+| R7 | A todo turns prompting (◔, owned by this session, stamped with the time) once its drafter is spawned, and back to pending (owner and stamp cleared) when its drafts are stored; meanwhile level 1 says "no prompt yet: drafting prompts…" and ▶ Exec and ⚡ Auto are drawn dimmed; the drafter's later end changes nothing | a todo is prompting from its drafter's spawn until its drafts are stored, Exec and Auto dimmed meanwhile |
+| R8 | ▶ Exec, ⚡ Auto, `/todo exec` (named, auto or not), `/todo auto` and `/todo resume` refuse a prompting todo, saying its prompts are still being drafted; `/todo exec auto` with no target and 🔥 Fire skip it, dimmed, saying so when nothing else is pending; nothing is submitted | Exec, Auto, 🔥 Fire and /todo exec never start a prompting todo, and say its prompts are still being drafted |
+| R9 | A drafter that ends without drafts or fails puts its todo back to pending with a toast, a refused spawn never holds it, and ▶ Exec then drafts in the chat; 🔥 Fire takes the lowest-numbered pending todo | a drafter that ends without drafts, fails or can't start leaves its todo pending, and Exec drafts in the chat |
+| R11 | A prompting todo can be renamed (it stays prompting under the new drafter; the old one's end and late drafts don't release it) or deleted (its drafter's late drafts find nothing) | a prompting todo can be renamed, staying prompting under its new drafter, or deleted |
+| R12 | A todo left prompting with no drafter goes back to pending at the next sync tick: this session's as soon as its drafter isn't tracked (a /clear or restart lost it), another session's once 2 minutes have passed | a prompting todo whose drafter isn't running goes back to pending at the next sync: this session's at once, another's after the wait |
 | R10 | The drafter's agent type is hidden from the model's own agent listing (`agent.offer`); other types are offered as ever | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 
 ## Linking and tracing
@@ -200,14 +202,15 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| V1 | The header draws one toggle per view (▶ running, ○ pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
-| V2 | The default view shows running (with drafting and planning), pending and failed, and hides paused, stopped and done | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| V1 | The header draws one toggle per view (▶ running, ◔ prompting, ○ pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| V2 | The default view shows running (with drafting and planning), prompting, pending and failed, and hides paused, stopped and done | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
 | V3 | Pressing a toggle shows or hides its view's todos; done todos, when shown, sort after all others, the rest by number | each status toggle shows or hides its todos, done sorts last, and all flips to default and back |
 | V4 | `all` lights every view and reads `default` while they all are; pressing it then restores the default view | each status toggle shows or hides its todos, done sorts last, and all flips to default and back |
 | V5 | A dim footer says `N hidden by the view` while the view hides any; `Nothing in this view.` while it hides them all; an empty list says only how to add one | each status toggle shows or hides its todos, done sorts last, and all flips to default and back; the view outlasts a redraw and a reload, and a list with no todos only says to add one |
 | V6 | The view is kept with the pane's UI state, across redraws, reloads and sessions | the view outlasts a redraw and a reload, and a list with no todos only says to add one |
+| V9 | A view stored before prompting had a toggle shows prompting todos wherever it showed pending ones, and the next toggle stores the view in its new field | a view stored before prompting had a toggle shows prompting todos wherever it showed pending ones |
 | V7 | A todo in hand stays in the list whatever the view: the one the ring is on (so Pause keeps it under the ring on ⏵ Resume) and one just stopped, until ✓ Leave | a todo in hand stays in the default view: paused under the ring, or just stopped and asking what next |
-| V8 | Each state draws exactly the chips docs/architecture.md's "Buttons by state" lists (pending with and without a run, drafting, planning, running, paused, stopped right after a Stop or not, with or without work to resume, failed, done, in flight in another session, and each confirmation), and each chip leads to the state the doc gives | each state draws exactly the chips docs/architecture.md lists for it, and each leads where the doc says |
+| V8 | Each state draws exactly the chips docs/architecture.md's "Buttons by state" lists (prompting, pending with and without a run, drafting, planning, running, paused, stopped right after a Stop or not, with or without work to resume, failed, done, in flight in another session, and each confirmation), and each chip leads to the state the doc gives | each state draws exactly the chips docs/architecture.md lists for it, and each leads where the doc says |
 
 ## Pane, dialog and focus
 

@@ -44,8 +44,6 @@ export type PaneData = {
   u: PaneUi
   cap: number
   f: number
-  // The todos whose exec waits for its drafting subagent's prompts.
-  waiting: number[]
 }
 
 // Layout follows docs/mockup.html (scene 3, Drill down); glyphs and colors follow Claude
@@ -216,7 +214,7 @@ export function ringBox({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, ring:
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, waiting }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -232,8 +230,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const agentView = e.props.view as { agentId?: string } | undefined
 
   const actions = (t: Todo) => {
-    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => (
-      chip(`act:${t.n}:${k}`, label, onPress, tone)
+    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'neutral', isDimmed = false) => (
+      chip(`act:${t.n}:${k}`, label, onPress, tone, isDimmed)
     )
     const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }))
     const c = u.confirm?.n === t.n ? u.confirm.kind : null
@@ -275,17 +273,22 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       ]
     }
     switch (t.status) {
-      case 'pending':
+      case 'prompting':
+      case 'pending': {
+        // Prompting, its drafter is still writing: Exec and Auto stay in place
+        // dimmed, and a press says why rather than starting it.
+        const isHeld = t.status === 'prompting'
         return [
           <Box gap={1}>
-            {btn('exec', 'Exec', () => execTodo($, t, false), 'running')}
+            {btn('exec', 'Exec', () => execTodo($, t, false), 'running', isHeld)}
             {/* Exec and Auto start a run (through drafting), so both wear running's fill. */}
-            {btn('auto', 'Auto', () => execTodo($, t, false, true), 'running')}
+            {btn('auto', 'Auto', () => execTodo($, t, false, true), 'running', isHeld)}
             {btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
             {!t.hasRun && btn('delete', 'Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
             {details}
           </Box>,
         ]
+      }
       case 'drafting':
       case 'planning':
         return [
@@ -295,9 +298,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
                 ? 'queued: starts after your next message'
                 : t.status === 'planning'
                   ? 'planning in the chat…'
-                  : waiting.includes(t.n)
-                    ? 'waiting for prompt drafts…'
-                    : t.hasRun
+                  : t.hasRun
                       ? 'continuing in the chat…'
                       : 'answer the prompt question in the chat…'}
             </Text>
@@ -494,6 +495,11 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
               {l}
             </Text>
           ))
+        ) : t.status === 'prompting' ? (
+          <Text color={markOf('prompting').color} italic>
+            {' '}
+            no prompt yet: drafting prompts…
+          </Text>
         ) : (
           <Text dimColor italic>
             {' '}

@@ -1,4 +1,5 @@
 export type TodoStatus =
+  | 'prompting'
   | 'pending'
   | 'drafting'
   | 'planning'
@@ -37,6 +38,9 @@ export type Todo = {
   // renamed), best first: ▶ Exec offers them without drafting, ⚡ Auto takes
   // the first. Never the chosen prompt, which stays `prompt`.
   drafts?: Draft[]
+  // While prompting: when its drafter started. The session that spawned it is
+  // `owner`; another session counts the todo stuck once this is old enough.
+  promptingAt?: number
 }
 
 // One candidate prompt: a short name for the question's option, and the task.
@@ -45,10 +49,6 @@ export type Draft = { label: string; prompt: string }
 // A todo's drafting subagent while it works: the key its launch gave it, and
 // its agent id once known.
 export type Drafting = { key: string; agentId?: string; at: number }
-
-// An exec waiting on that subagent: whether it's auto, and the status to put
-// back if its prompt is dropped.
-export type Waiting = { auto: boolean; was: TodoStatus }
 
 // A prompt the host refused because the session was stopped, held until the
 // person's next message, with the todo's state before it went into the chat.
@@ -124,6 +124,8 @@ export type PaneUi = {
   isHidden: boolean
   // The statuses the list shows, toggled in the header; absent (stored by an
   // earlier version), the default view.
+  views?: View[]
+  // What `views` was before prompting had a toggle: read once, then dropped.
   view?: View[]
 }
 
@@ -182,8 +184,6 @@ declare module 'claude-code' {
       drafters: Record<string, { n: number; key: string }>
       draftKeys: Record<number, string>
       draftSeq: number
-      // Execs held until their todo's drafts arrive, by todo.
-      waiting: Record<number, Waiting>
       // The agent type the drafting subagents spawn as.
       drafterType: string
     }

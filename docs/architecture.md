@@ -46,7 +46,7 @@ flowchart LR
 | The session's copy of its directory's rows | `$.state` atoms | The pane draws from them, and a write to one redraws it |
 | Pane layout (open rows, confirmations, focus ring, the view) | `$.state` atoms | Per session; nothing else needs it. What's open and the view outlast a reload |
 | A todo's drafts | On the todo's row, beside (never in) its chosen prompt | Ready for any session's ▶ Exec, and kept through restarts |
-| Drafters in flight, their keys, execs waiting on them | `$.state` atoms | A drafter belongs to the session that spawned it |
+| Drafters in flight and their keys | `$.state` atoms | A drafter belongs to the session that spawned it; the todo's `prompting` status (with its owner and start time) is what other sessions see |
 | Settings | `/config` (`pluginConfigs`) or environment variables | Claude Code's standard plugin options |
 
 A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list. A `/clear` or `/new` carries on under a new session id with the session's state reset and no `session.start`, so the mod sets itself up again at that `SessionStart` (and at any sync tick that finds no database handle), and the repo's list comes back from the database.
@@ -76,13 +76,16 @@ A failed run (most often a write the host aborts as the turn it served ends) is 
 
 ## A todo's life
 
-A todo is always in one of eight states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire and ⏵ Resume launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. Buttons that change no status (✎ Rename, ☰ Details, ✓ Leave, ↩) and ↺ Reset, which only hands the todo back, are neutral grey.
+A todo is always in one of nine states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire and ⏵ Resume launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. Buttons that change no status (✎ Rename, ☰ Details, ✓ Leave, ↩) and ↺ Reset, which only hands the todo back, are neutral grey. While a todo is prompting, ▶ Exec and ⚡ Auto stay in its row but dimmed: a press says its prompts are still being drafted.
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "20px"}, "state": {"nodeSpacing": 60, "rankSpacing": 70}}}%%
 stateDiagram-v2
   direction TB
-  [*] --> pending: ＋ add
+  [*] --> prompting: ＋ add
+  pending --> prompting: ✎ Rename
+  prompting --> prompting: ✎ Rename
+  prompting --> pending: drafts ready / drafter gone
 
   pending --> drafting: ▶ Exec · ⚡ Auto · 🔥 Fire
   drafting --> planning: multi-step
@@ -104,16 +107,18 @@ stateDiagram-v2
   drafting --> stopped: ↺ Reset (has run)
   planning --> stopped: ↺ Reset (has run)
 
+  prompting --> [*]: ✕ Delete
   pending --> [*]: ✕ Delete (never ran)
   done --> [*]: expires
 ```
 
-Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would.
+Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would.
 
 | State | Mark | Meaning | Who moves it on |
 |---|---|---|---|
-| pending | ○ | Added, never run (or run, then reset before it started again) | You |
-| drafting | ✎ | Claude is writing or refining the prompt (or waiting for its drafter), or resuming | Claude, via `mcp__todo__update` |
+| prompting | ◔ | Added (or renamed); its drafter is writing prompt drafts, so nothing may start it yet | The drafter's drafts or its end; the sync tick if it's gone |
+| pending | ○ | Ready to run: never run (or run, then reset before it started again) | You |
+| drafting | ✎ | Claude is writing or refining the prompt, or resuming | Claude, via `mcp__todo__update` |
 | planning | ◇ | Multi-step: plan-mode questions and the execution tree | Claude |
 | running | ▶ (spins) | An Agent or Workflow is working | The agent's end |
 | paused | ⏸ | Halted with its run kept, so Resume picks up where it was | You |
@@ -129,8 +134,9 @@ Each button is filled with the color of the state it leads to (the launchers in 
 
 | State | Buttons | Leads to |
 |---|---|---|
-| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint once its drafts are stored: "3 drafts ready" | drafting · drafting · pending · confirm → removed · call browser |
-| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "waiting for prompt drafts…" while its drafter works, "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
+| prompting | ▶ Exec and ⚡ Auto dimmed · ✎ Rename · ✕ Delete · ☰ Details, and the hint "no prompt yet: drafting prompts…" | refused, saying why · refused · prompting under a new drafter · confirm → removed · call browser |
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint once its drafts are stored: "3 drafts ready" | drafting · drafting · prompting · confirm → removed · call browser |
+| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
 | stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ☰ Details, all on one row | drafting · drafting · drafting · collapses it · call browser |
@@ -142,7 +148,7 @@ The confirmations:
 | Confirm for | Buttons |
 |---|---|
 | Stop | ■ Stop · ↩ Keep (back to running or paused) |
-| Delete | ✕ Delete · ↩ Cancel (back to pending) |
+| Delete | ✕ Delete · ↩ Cancel (back to pending or prompting) |
 | Takeover | ⇄ Takeover · ↩ Cancel (left in flight there) |
 
 Pane-wide controls:
@@ -150,13 +156,13 @@ Pane-wide controls:
 | Control | Where | Does |
 |---|---|---|
 | ＋ add todo… | top of the list | adds a pending todo |
-| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo; dimmed while none is pending or the agent cap is full |
+| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); dimmed while none is pending or the agent cap is full |
 | ↗ Full transcript | under an open subtask's latest calls | opens the call browser; Esc returns to the subtask |
-| status toggles `▶ ○ ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, pending and failed; done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
+| status toggles `▶ ◔ ○ ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, prompting, pending and failed (a view stored before prompting had a toggle shows it wherever it showed pending); done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
 
 ## Running a todo
 
-Drafting starts when the todo is added, so ▶ Exec has its prompts ready:
+Drafting starts when the todo is added, so ▶ Exec has its prompts ready. Until they are, the todo is prompting and nothing starts it:
 
 ```mermaid
 sequenceDiagram
@@ -166,9 +172,10 @@ sequenceDiagram
   U->>H: ＋ add (or ✎ Rename)
   H-->>U: added at once
   H->>D: from a timer: $.agent.spawn "[todo-drafts:N] …" with a fresh key
+  H->>H: status prompting (owner, start time): Exec, Auto, Fire refuse it
   D->>D: a few Grep, Glob, Read calls
   D->>H: mcp__todo__drafts {n, key, 3 drafts}
-  H->>H: store them on the todo (an older key's are stale and refused)
+  H->>H: store them on the todo, status pending (an older key's are stale and refused)
 ```
 
 ```mermaid
@@ -181,10 +188,6 @@ sequenceDiagram
   participant O as origin
   U->>P: ▶ Exec
   P->>H: execTodo: status drafting
-  opt its drafter is still working
-    H-->>U: toast and hint: waiting for prompt drafts…
-    H->>H: hold until the drafts arrive, the drafter ends, or 2 minutes pass
-  end
   H->>M: protocol prompt, carrying the drafts when there are any
   M->>U: pick a draft or write the prompt (auto: the first draft)
   M->>H: mcp__todo__update (prompt, mode, running)
@@ -200,7 +203,7 @@ sequenceDiagram
   M->>H: mcp__todo__update (done or failed, branch, landed)
 ```
 
-Without drafts (the drafter ended with none, couldn't start, or took too long), the protocol has Claude draft 2–3 prompts in the chat as before, and says why. Drafts that arrive after the todo started are kept but change nothing. The drafter's tag is `[todo-drafts:N]`, which the linking hooks skip, so it never becomes the todo's run.
+Without drafts (the drafter ended with none, couldn't start, or was lost), the protocol has Claude draft 2–3 prompts in the chat. Drafts that arrive after the todo started are kept but change nothing. The drafter's tag is `[todo-drafts:N]`, which the linking hooks skip, so it never becomes the todo's run.
 
 A dropped prompt (the host refusing it, a Stop standing) puts the todo back where it was and says why. An agent stopped outside the pane ends with an aborted turn, which marks its todo stopped and its agent as one that can't be woken. ⏵ Resume then has Claude start a fresh agent in the worktree the old one kept, briefed with its branch and the turns and calls already recorded; it does the same when a Workflow run belongs to another session, or after a takeover.
 

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, Draft, Drafting, ImageRef, Kept, PaneUi, Queued, Todo, Turn, View, Waiting } from '../types'
+import type { AgentNode, Call, Confirm, Detail, Draft, Drafting, ImageRef, Kept, PaneUi, Queued, Todo, Turn, View } from '../types'
 import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
@@ -47,11 +47,12 @@ const unfolded = atom({ plugin: 'todo', key: 'unfolded' } as const, [] as string
 const earlier = atom({ plugin: 'todo', key: 'earlier' } as const, 0)
 const thumbs = atom({ plugin: 'todo', key: 'thumbs' } as const, {} as Record<string, string>)
 // The pane's layout, kept across reloads and sessions: what's open, a pending
-// confirmation, the view the header toggles. `view` is optional, so the tag
-// stays: what an earlier version stored (without one) reads as the default.
+// confirmation, the view the header toggles. The views are optional, so the
+// tag stays: what an earlier version stored (without them) reads as the
+// default, or as its `view` from before prompting had a toggle.
 const ui = atom(
   { plugin: 'todo', key: 'ui' } as const,
-  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, view: [...DEFAULT_VIEW] },
+  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, views: [...DEFAULT_VIEW] },
   { shape: 'ui-2' },
 )
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
@@ -80,13 +81,11 @@ const sessionTitle = atom({ plugin: 'todo', key: 'sessionTitle' } as const, '')
 // Each todo's drafting subagent while it works; every drafter this session
 // spawned, by agent id, until it ends; each todo's latest drafting key (drafts
 // sent under an older one were asked for an old title) and the last key's
-// number; the execs held until their drafts arrive; and the agent type
-// drafters spawn as.
+// number; and the agent type drafters spawn as.
 const drafting = atom({ plugin: 'todo', key: 'drafting' } as const, {} as Record<number, Drafting>)
 const drafters = atom({ plugin: 'todo', key: 'drafters' } as const, {} as Record<string, { n: number; key: string }>)
 const draftKeys = atom({ plugin: 'todo', key: 'draftKeys' } as const, {} as Record<number, string>)
 const draftSeq = atom({ plugin: 'todo', key: 'draftSeq' } as const, 0)
-const waiting = atom({ plugin: 'todo', key: 'waiting' } as const, {} as Record<number, Waiting>)
 const drafterType = atom({ plugin: 'todo', key: 'drafterType' } as const, 'Explore')
 
 const CALLS_PER_AGENT = 200
@@ -578,7 +577,10 @@ export async function toggle($: $, id: string) {
 // A header toggle shows or hides one view's todos. `all` lights every view;
 // pressed while they all are (it reads `default` then), it puts the default
 // view back. Kept in SUMMARY's order, so the stored view reads the same way.
-export const viewIn = (u: PaneUi): readonly View[] => u.view ?? DEFAULT_VIEW
+// A view stored before prompting had its own toggle shows prompting todos
+// wherever it showed pending ones, as they were pending then.
+export const viewIn = (u: PaneUi): readonly View[] =>
+  u.views ?? (u.view ? SUMMARY.filter(v => u.view?.includes(v === 'prompting' ? 'pending' : v)) : DEFAULT_VIEW)
 
 export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
   if (v === 'all') return [...(view.length === SUMMARY.length ? DEFAULT_VIEW : SUMMARY)]
@@ -589,7 +591,7 @@ export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
 }
 
 export async function toggleView($: $, v: View | 'all') {
-  await patchUi($, u => ({ ...u, view: nextView(viewIn(u), v) }))
+  await patchUi($, u => assign(u, { views: nextView(viewIn(u), v), view: undefined }))
 }
 
 async function focus($: $, key: string) {
@@ -624,8 +626,10 @@ export async function addTodo($: $, title: string) {
 
 // ---------- prompt drafts ----------
 
-// How long an exec waits on its todo's drafting subagent before it drafts in
-// the chat after all.
+// How long a todo another session put in prompting may stay there before
+// this one counts its drafter gone (that session cleared or quit) and hands it
+// back as pending. One this session prompts goes back as soon as its drafter
+// isn't tracked here any more.
 export const DRAFT_WAIT_MS = 120_000
 export const DRAFTS_TAG = (n: number) => `[todo-drafts:${n}] `
 
@@ -639,7 +643,9 @@ function queueDrafts($: $, n: number) {
 // registered, in the background. It stores its drafts through
 // mcp__todo__drafts with the key it was given; it is never linked as the
 // todo's run. Each launch gets a new key, so a rename's stale drafts are told
-// apart from the ones the new title asked for.
+// apart from the ones the new title asked for. Once it's spawned, a pending
+// todo turns prompting (nothing may start it) until its drafts are stored, or
+// its drafter ends without them; one that already started is left as it is.
 async function launchDrafts($: $, n: number) {
   const t = (await read($, todos)).find(x => x.n === n)
   if (!t) return
@@ -665,14 +671,50 @@ async function launchDrafts($: $, n: number) {
   if (ran?.deny !== undefined) {
     if (!(await isMine())) return
     await update($, drafting, d => omit(d, n))
-    await releaseWait($, n, 'its drafting subagent could not start')
+    // A rename's drafter that can't start: the earlier one's prompting ends.
+    await unprompt($, n)
     return
   }
   // Its id tells its end apart; an answer without one is found by its tag.
+  // Untracked (no id to tell its end by), it can't hold the todo: drafts it
+  // stores still land.
   const id = ran?.agentId ?? (await findDrafter($, description))
   if (!id) return
   await update($, drafters, x => ({ ...x, [id]: { n, key } }))
-  if (await isMine()) await update($, drafting, d => (d[n]?.key === key ? { ...d, [n]: { ...d[n], agentId: id } } : d))
+  if (!(await isMine())) return
+  await update($, drafting, d => (d[n]?.key === key ? { ...d, [n]: { ...d[n], agentId: id } } : d))
+  const self = await read($, me)
+  const isHeld = (x: Todo) => x.status === 'pending' || x.status === 'prompting'
+  await patchTodo($, n, x => (isHeld(x) ? { ...x, status: 'prompting', owner: self, promptingAt: at } : x))
+  // Its drafts (or its end) may have come in while that was written.
+  if ((await read($, drafting))[n] === undefined) await unprompt($, n)
+}
+
+// A prompting todo goes back to pending: its drafts are stored, or its
+// drafter ended (or never started) without them, so ▶ Exec drafts in the chat.
+const toPending = (t: Todo) => assign(t, { status: 'pending', owner: undefined, promptingAt: undefined })
+
+async function unprompt($: $, n: number) {
+  if ((await read($, todos)).find(x => x.n === n)?.status !== 'prompting') return
+  await patchTodo($, n, x => (x.status === 'prompting' ? toPending(x) : x))
+}
+
+// A todo left prompting with no drafter to finish it goes back to pending at
+// the next sync: one this session prompts once its drafter isn't tracked here
+// (it ended unseen, or the session's state was reset by a /clear or a
+// restart), another session's once DRAFT_WAIT_MS have passed.
+async function settlePrompting($: $) {
+  const list = await read($, todos)
+  if (!list.some(t => t.status === 'prompting')) return
+  const self = await read($, me)
+  const live = await read($, drafting)
+  const now = await $.clock.now()
+  const isStuck = (t: Todo) =>
+    t.status === 'prompting' && (t.owner === self ? live[t.n] === undefined : now - (t.promptingAt ?? 0) >= DRAFT_WAIT_MS)
+  const stuck = new Set(list.filter(isStuck).map(t => t.n))
+  if (stuck.size === 0) return
+  await editTodos($, l => l.map(t => (stuck.has(t.n) && t.status === 'prompting' ? toPending(t) : t)))
+  await syncStatus($)
 }
 
 async function findDrafter($: $, description: string) {
@@ -689,30 +731,9 @@ function omit<V>(o: Record<number, V>, n: number): Record<number, V> {
   return rest
 }
 
-// The exec held for #n's drafts goes ahead: with the drafts if they arrived,
-// else drafting in the chat, saying `why`. It submits from a timer, since it
-// is reached from hooks of the drafter's own loop.
-async function releaseWait($: $, n: number, why: string) {
-  const w = (await read($, waiting))[n]
-  if (!w) return
-  await update($, waiting, x => omit(x, n))
-  const t = (await read($, todos)).find(x => x.n === n)
-  // Reset (or taken elsewhere) while it waited: nothing to run.
-  if (t?.status !== 'drafting') return
-  const note = t.drafts?.length ? undefined : `${why}, so draft the prompts here`
-  if (note) $.ui.toast(`#${n}: ${why}; drafting in the chat`)
-  $.clock.after(0, () => {
-    void (async () => {
-      const now = (await read($, todos)).find(x => x.n === n)
-      if (now?.status !== 'drafting') return
-      await submit($, { ...now, status: w.was }, execPrompt(now, await read($, cpuCap), false, w.auto, note))
-    })().catch(() => undefined)
-  })
-}
-
-// Drafts a drafter stored. Ones whose key an earlier launch had (the todo
-// was renamed since) are refused; a todo that already started keeps them and
-// nothing is interrupted.
+// Drafts a drafter stored, which take a prompting todo to pending. Ones whose
+// key an earlier launch had (the todo was renamed since) are refused; a todo
+// that already started keeps them and nothing is interrupted.
 async function storeDrafts($: $, a: { n?: unknown; key?: unknown; drafts?: unknown }) {
   const t = (await read($, todos)).find(x => x.n === a.n)
   if (!t) return { result: `No todo #${String(a.n)}.`, isError: true as const }
@@ -725,21 +746,23 @@ async function storeDrafts($: $, a: { n?: unknown; key?: unknown; drafts?: unkno
     .filter(d => d.label && d.prompt)
     .slice(0, 3)
   if (drafts.length === 0) return { result: 'No drafts given: each needs a label and a prompt.', isError: true as const }
-  await patchTodo($, t.n, x => ({ ...x, drafts }))
   await update($, drafting, d => omit(d, t.n))
-  await releaseWait($, t.n, 'drafts arrived')
+  await patchTodo($, t.n, x => (x.status === 'prompting' ? toPending({ ...x, drafts }) : { ...x, drafts }))
   return { result: `Stored ${drafts.length} drafts for #${t.n}.` }
 }
 
-// A drafter's turn ended: if it stored nothing, its todo isn't drafting any
-// more, and an exec waiting on it drafts in the chat.
+// A drafter's turn ended: if it stored nothing, its todo isn't prompting any
+// more, and ▶ Exec drafts in the chat.
 async function drafterEnded($: $, id: string, failed: boolean) {
   const who = (await read($, drafters))[id]
   if (!who) return
   await update($, drafters, d => Object.fromEntries(Object.entries(d).filter(([k]) => k !== id)))
   if ((await read($, drafting))[who.n]?.key !== who.key) return
   await update($, drafting, d => omit(d, who.n))
-  await releaseWait($, who.n, failed ? 'its drafting subagent failed' : 'its drafting subagent ended without drafts')
+  if ((await read($, todos)).find(x => x.n === who.n)?.status === 'prompting') {
+    $.ui.toast(`#${who.n}: ${failed ? 'its drafter failed' : 'no prompt drafts'}; ▶ Exec drafts in the chat`)
+  }
+  await unprompt($, who.n)
 }
 
 async function clearRun($: $, n: number) {
@@ -813,6 +836,8 @@ function resumeRefusal(t: Todo) {
       return `${at} with nothing to resume: /todo exec ${t.n}`
     case 'done':
       return `${at}: nothing to resume.`
+    case 'prompting':
+      return stillPrompting(t.n)
     default:
       return `${at}: already in flight; pause or stop it in the pane (/todo show).`
   }
@@ -825,10 +850,21 @@ export const nextRunnable = (list: readonly Todo[]) =>
 
 export const NONE_PENDING = 'No pending todo to run.'
 
+// What an exec of a prompting todo answers: nothing may start it yet.
+export const stillPrompting = (n: number) => `#${n}'s prompts are still being drafted: it can start once they're ready.`
+
+// What `/todo exec auto` and 🔥 Fire say when nothing is pending: that, or,
+// while some todo is still prompting, that its prompts are on their way.
+export const noneRunnable = (list: readonly Todo[]) => {
+  const next = list.filter(t => t.status === 'prompting').sort((a, b) => a.n - b.n)[0]
+  return next ? `${NONE_PENDING} ${stillPrompting(next.n)}` : NONE_PENDING
+}
+
 // Why 🔥 Fire can't launch the next todo right now, or null when it can:
-// nothing is pending, or this directory's live agents already fill the cap.
+// nothing is pending (a prompting todo is skipped), or this directory's live
+// agents already fill the cap.
 export function fireBlock(list: readonly Todo[], nodes: readonly AgentNode[], cap: number): string | null {
-  if (!nextRunnable(list)) return NONE_PENDING
+  if (!nextRunnable(list)) return noneRunnable(list)
   const live = nodes.filter(a => a.status === 'running').length
   return live >= cap ? `The agent cap is reached (${live} of ${cap} running).` : null
 }
@@ -840,29 +876,31 @@ export async function fireNext($: $) {
   const why = fireBlock(list, await read($, agents), await read($, cpuCap))
   const t = nextRunnable(list)
   if (why !== null || !t) {
-    $.ui.toast(why ?? NONE_PENDING)
-    return why ?? NONE_PENDING
+    const said = why ?? noneRunnable(list)
+    $.ui.toast(said)
+    return said
   }
   return execTodo($, t, false, true)
 }
 
-export const WAIT_NOTE = 'Waiting for its prompt drafts: they are offered as soon as they arrive.'
+const execNote = (t: Todo, auto: boolean) =>
+  auto
+    ? `Auto-executing #${t.n} ${t.title}: Claude ${t.drafts?.length ? 'takes the best drafted prompt' : 'drafts the prompt'} and launches it, no questions asked.`
+    : `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`
 
-const execNote = (t: Todo, auto: boolean, isWaiting = false) =>
-  (auto
-    ? `Auto-executing #${t.n} ${t.title}: Claude ${t.drafts?.length || isWaiting ? 'takes the best drafted prompt' : 'drafts the prompt'} and launches it, no questions asked.`
-    : `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`) + (isWaiting ? `\n${WAIT_NOTE}` : '')
-
-// Whether an exec of `t` now should wait for the drafting subagent still at
-// work on it rather than draft from scratch.
-async function isDraftPending($: $, t: Todo) {
-  return !t.drafts?.length && (await read($, drafting))[t.n] !== undefined
-}
+// Why `t` can't be executed now, or undefined when it can. A prompting todo
+// waits for its drafter, whatever asked (▶ Exec, ⚡ Auto, 🔥 Fire, /todo exec).
+const execBlock = (t: Todo, refine: boolean) =>
+  t.status === 'prompting' ? stillPrompting(t.n) : !refine && !isRunnable(t) ? `#${t.n} is ${t.status}.` : undefined
 
 // `auto` skips every question: Claude picks the prompt and, for multi-step
 // work, plans on defaults and runs it without plan-mode approval.
 export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
-  if (!refine && !isRunnable(t)) return `#${t.n} is ${t.status}.`
+  const why = execBlock(t, refine)
+  if (why !== undefined) {
+    $.ui.toast(why)
+    return why
+  }
   if (refine) await clearRun($, t.n)
   await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
   await patchUi($, u => ({
@@ -870,14 +908,6 @@ export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
     expanded: u.expanded.includes(`t${t.n}`) ? u.expanded : [...u.expanded, `t${t.n}`],
     justStopped: u.justStopped.filter(x => x !== t.n),
   }))
-  // Its drafter is still at work: hold the exec until the drafts arrive, the
-  // drafter ends without them, or the wait runs out.
-  if (!refine && (await isDraftPending($, t))) {
-    await update($, waiting, w => ({ ...w, [t.n]: { auto, was: t.status } }))
-    $.ui.toast(`#${t.n}: waiting for prompt drafts…`)
-    $.clock.after(DRAFT_WAIT_MS, () => void releaseWait($, t.n, 'its drafts took too long').catch(() => undefined))
-    return execNote(t, auto, true)
-  }
   const drop = await submit($, t, execPrompt(t, await read($, cpuCap), refine, auto))
   if (drop === QUEUED) return `Queued #${t.n} ${t.title}: it starts after your next message.`
   if (drop !== undefined) return `#${t.n} didn't start: ${drop}`
@@ -1271,6 +1301,7 @@ export const register: Register = (on, options) => {
       void (async () => {
         if (!(await read($, db)) && !(await read($, fault))) await boot($, options)
         else await sync($)
+        await settlePrompting($)
       })().catch(() => undefined)
       void checkPlaced($).catch(() => undefined)
     })
@@ -1319,8 +1350,9 @@ export const register: Register = (on, options) => {
       const target = (auto ? (rest[0] === 'auto' ? rest.slice(1) : rest.slice(0, -1)) : rest).join(' ')
       if (!auto && target === '') return { text: 'Usage: /todo exec [auto] <n|title>' }
       const t = auto && target === '' ? nextRunnable(await read($, todos)) : await findTodo($, target)
-      if (!t) return { text: auto && target === '' ? NONE_PENDING : `No todo matches "${target}".` }
-      if (!isRunnable(t)) return { text: `#${t.n} is ${t.status}.` }
+      if (!t) return { text: auto && target === '' ? noneRunnable(await read($, todos)) : `No todo matches "${target}".` }
+      const why = execBlock(t, false)
+      if (why !== undefined) return { text: why }
       // A command's own hook can't submit a prompt (it would wait on the turn
       // the command holds), so the exec starts from a timer once it answered.
       $.clock.after(0, () => {
@@ -1329,7 +1361,7 @@ export const register: Register = (on, options) => {
           if (now) await execTodo($, now, false, auto)
         })()
       })
-      return { text: execNote(t, auto, await isDraftPending($, t)) }
+      return { text: execNote(t, auto) }
     }
     if (verb === 'resume') {
       // What the pane's ⏵ Resume does, for the todos it is offered on.
@@ -1345,7 +1377,7 @@ export const register: Register = (on, options) => {
           if (now && canResume(now)) await resumeTodo($, now)
         })()
       })
-      if (!t.hasRun && t.status === 'paused') return { text: execNote(t, false, await isDraftPending($, t)) }
+      if (!t.hasRun && t.status === 'paused') return { text: execNote(t, false) }
       return { text: `Resuming #${t.n} ${t.title}: Claude picks its work up in the chat.` }
     }
     return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title>' }
@@ -1643,7 +1675,6 @@ export const register: Register = (on, options) => {
       cap: await read($, cpuCap),
       f: await read($, spin),
       turns: await read($, turns),
-      waiting: Object.keys(await read($, waiting)).map(Number),
     })
   })
 }

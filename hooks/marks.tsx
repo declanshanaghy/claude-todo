@@ -11,6 +11,9 @@ import type { Todo, TodoStatus, View } from '../types'
 export type Mark = { symbol: string; color: Color }
 
 export const MARK: Record<TodoStatus, Mark> = {
+  // Added, its background drafter still writing its prompt drafts: pending's
+  // circle filling in, in a color of its own, as nothing may start it yet.
+  prompting: { symbol: '◔', color: 'remember' },
   pending: { symbol: '○', color: 'inactive' },
   drafting: { symbol: '✎', color: 'suggestion' },
   planning: { symbol: '◇', color: 'planMode' },
@@ -50,11 +53,12 @@ export function markText(s: TodoStatus, rest = '', f?: number): [string, Color] 
 // same, and their counts add up to the whole list.
 export type { View }
 
-export const SUMMARY: readonly View[] = ['running', 'pending', 'failed', 'paused', 'stopped', 'done']
+export const SUMMARY: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'done']
 
-// What a fresh pane shows: the work that's live or waiting on you. Paused,
-// stopped and done todos are a toggle away.
-export const DEFAULT_VIEW: readonly View[] = ['running', 'pending', 'failed']
+// What a fresh pane shows: the work that's live or waiting on you, a todo
+// still being prompted included. Paused, stopped and done todos are a toggle
+// away.
+export const DEFAULT_VIEW: readonly View[] = ['running', 'prompting', 'pending', 'failed']
 
 export const viewOf = (s: TodoStatus): View => (s === 'drafting' || s === 'planning' ? 'running' : s)
 

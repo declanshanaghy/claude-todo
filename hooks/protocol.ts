@@ -64,8 +64,9 @@ ${TAG_RULES(t.n)}`
 //
 // A todo whose drafting subagent already stored candidate prompts skips the
 // drafting: the one question offers them as they are, and auto takes the
-// first. `note` says why there are none when they were waited for in vain.
-export function execPrompt(t: Todo, cap: number, refine: boolean, auto = false, note?: string): string {
+// first. A todo is never executed while its drafter works (it's prompting),
+// so a todo without drafts is one whose drafter gave none: Claude drafts here.
+export function execPrompt(t: Todo, cap: number, refine: boolean, auto = false): string {
   const drafts = refine ? [] : (t.drafts ?? [])
   const best = drafts[0]
   const draft = auto
@@ -80,7 +81,7 @@ export function execPrompt(t: Todo, cap: number, refine: boolean, auto = false, 
     ? `1. These prompts were already drafted for this todo: don't draft new ones. Straight away, ask with ONE AskUserQuestion (header "Prompt", question 'Prompt for #${t.n} "${t.title}"?') offering them in this order, each label as an option's label and its prompt, whole, as that option's description; the user can type their own via Other.
 ${drafts.map(d => `   - ${d.label}: ${d.prompt}`).join('\n')}`
     : `1. Draft 2–3 concrete prompts for this todo from its title and this session's context (repo, recent work, open threads). Ask with ONE AskUserQuestion (header "Prompt", question 'Prompt for #${t.n} "${t.title}"?'). Each option's label is a short name and its description is the full prompt; the user can type their own via Other.`
-  return `[todo] Execute todo #${t.n} "${t.title}"${auto ? ' in auto mode' : ''}. Follow this protocol exactly.${note ? `\n(${note})` : ''}
+  return `[todo] Execute todo #${t.n} "${t.title}"${auto ? ' in auto mode' : ''}. Follow this protocol exactly.
 ${draft}
 2. Call mcp__todo__update {n: ${t.n}, prompt: "<the final prompt>"}.
 ${RUN_STEPS(t, cap, auto)}`
