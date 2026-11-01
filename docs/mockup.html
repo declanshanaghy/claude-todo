@@ -38,7 +38,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .pane.has-focus{box-shadow:inset 2px 0 0 var(--orange)}
 .panebody{padding:6px 8px 10px;overflow:auto;max-height:640px}
 .row{white-space:pre;display:flex;align-items:baseline;min-height:20px}
-/* The rule between two todos, above every header but the first shown: one dim line of ─, full width, cut so it never wraps; not focusable. */
+/* The rule above every todo header shown, the first included: one dim line of ─, full width, cut so it never wraps; not focusable. */
 .divider{color:var(--dim);opacity:.6;overflow:hidden;white-space:nowrap}.divider::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
 /* The todo's header IS its splitter: one focusable line `▸ ◐ #N title ──── status`. */
 .thead{color:var(--dim)}.thead .tt{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}.thead .fill{flex:1 1 0;min-width:2ch;overflow:hidden;padding:0 1ch}.thead .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
@@ -616,8 +616,8 @@ function renderPane(){
   const list = S.todos.filter(t=>S.show.has(viewOf(t.status))).sort((a,b)=>(a.status==='done')-(b.status==='done') || a.n-b.n);
   const hidden = S.todos.length-list.length;
   list.forEach((t,i)=>{
-    // A dim rule between todos, above every header but the first shown: the one line that isn't an element's own.
-    if(i>0) h += `<div class="row divider"></div>`;
+    // A dim rule above every todo header shown, the first included: the one line that isn't an element's own.
+    h += `<div class="row divider"></div>`;
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
     // The right end is the status's mark in its color (a running one spins), with d/n while it has run; the word is the line's label.

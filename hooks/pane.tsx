@@ -549,8 +549,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     ]
   }
 
-  // The one line between two todos, above every header but the first shown:
-  // a dim rule as wide as the tree's columns, cut rather than wrapped. Not
+  // The one line above every todo header shown, parting each todo from the
+  // header and from the todo above it: a dim rule as wide as the tree's columns, cut rather than wrapped. Not
   // focusable, so it never joins the ring's order, and never drawn inside a
   // todo's levels or in the dialog.
   const divider = (n: number) => (
@@ -620,7 +620,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
       {list.length > 0 && shown.length === 0 ? <Text dimColor>Nothing in this view.</Text> : ''}
-      {shown.flatMap((t, i) => (i === 0 ? todoRows(t) : [divider(t.n), ...todoRows(t)]))}
+      {shown.flatMap(t => [divider(t.n), ...todoRows(t)])}
       {hidden > 0 ? <Text dimColor>{hidden} hidden by the view</Text> : ''}
     </Box>
   )
