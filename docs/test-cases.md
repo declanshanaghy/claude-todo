@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 103 of 106 cases (97.2%)** are covered by `claude plugin test .`.
+**Coverage: 115 of 118 cases (97.5%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -149,7 +149,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | ID | Behaviour | Covered by |
 |---|---|---|
 | U1 | The tree keeps a subtask to one line, with no call rows or code | M3: a tagged Agent links its spawn and its tool calls show under it |
-| U2 | Pressing a subtask turns the pane into a call browser with nothing to press | M3: a tagged Agent links its spawn and its tool calls show under it |
+| U2 | Pressing a subtask turns the pane into a call browser, with nothing to press while nothing in it is long enough to fold | M3: a tagged Agent links its spawn and its tool calls show under it |
 | U3 | The pane losing the keys (Esc) closes the dialog | M3: Esc (the pane losing the keys) closes the call browser |
 | U4 | A todo's Details shows its prompt, summary, run ids and agents, with nothing to press | a todo's Details shows its prompt, summary, run ids and agents, with nothing to press |
 | U5 | The call browser shows an Edit as a diff, JSON pretty-printed, durations, and "Running…" for an open call | a subtask's calls read as their tool would: an Edit as a diff, JSON pretty-printed |
@@ -163,6 +163,23 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U13 | `todoDividers` `line` draws a plain dim rule | todoDividers "line" draws a plain dim rule |
 | U14 | `todoDividers` `none` draws no divider | todoDividers "none" draws no divider |
 | U15 | `CLAUDE_TODO_DIVIDERS` overrides the option, and an unknown value falls back to `titled` | CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to titled |
+
+## The call browser
+
+| ID | Behaviour | Covered by |
+|---|---|---|
+| B1 | A todo agent's text from each model step is kept as a turn row beside its calls; the main loop's steps and steps with no text are not | an agent's turns are kept beside its calls and read in time order |
+| B2 | The browser interleaves turns and calls by start time, a step's text before its calls, and counts turns in its header | an agent's turns are kept beside its calls and read in time order |
+| B3 | A restarted session reads its kept turns back, in place among the calls | a restarted session reads the turns it kept back, in place among the calls |
+| B4 | Turns and markdown-looking responses draw as Markdown; a Read keeps its file-typed Code and shell output stays Code | a response that reads as markdown is drawn as Markdown; shell output and file bodies stay code; an agent's turns are kept beside its calls and read in time order |
+| B5 | A long output folds to its first lines behind a `… +N lines` toggle that unfolds and folds it, lit by the ring like every focusable item | a long output folds to a preview, and its toggle unfolds and folds it, lighting the ring |
+| B6 | Only the newest 40 entries are drawn; a toggle adds the next 40 older | hundreds of calls draw the newest window, older ones a toggle away |
+| B7 | Drawing stops before the 100000-character limit, saying how many entries it left out | calls too big to draw together stop short of the drawing limit, saying so |
+| B8 | A Read of a picture records its path, name, size and type, never its bytes, and the response carries no base64 | a Read of a picture keeps a reference, not its bytes, and draws it as a thumbnail |
+| B9 | The terminal draws a picture as a 24×8 Image, alt text its name and size; a PNG on disk is drawn as is | a Read of a picture keeps a reference, not its bytes, and draws it as a thumbnail |
+| B10 | A picture the host won't read keeps its alt text instead of blanking the dialog | a Read of a picture keeps a reference, not its bytes, and draws it as a thumbnail |
+| B11 | A surface without Image shows the alt text | a surface without Image shows the picture as its alt text |
+| B12 | An image block in a result is spooled beside the database; its PNG thumbnail is made only once the browser draws it | a result's image block is spooled beside the database and made a PNG thumbnail only when drawn |
 
 ## Outside the mod
 

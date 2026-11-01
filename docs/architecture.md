@@ -29,7 +29,7 @@ flowchart LR
 
 | Piece | Role | Source |
 |---|---|---|
-| Hooks module | Registers `/todo`, the `mcp__todo__*` tools and the pane; links launched agents to their todo; records every tool call; keeps the session's copy of the list in sync | `hooks/register.tsx` |
+| Hooks module | Registers `/todo`, the `mcp__todo__*` tools and the pane; links launched agents to their todo; records every tool call and the text its agents write between them; keeps the session's copy of the list in sync | `hooks/register.tsx` |
 | Database layer | Builds each SQL script, runs it through `sqlite3`, parses the answer | `hooks/db.ts` |
 | Pane and call browser | Draw the tree, the action chips and the read-only dialog from the session's copy | `hooks/pane.tsx`, `hooks/detail.tsx` |
 | Protocol | The prompts Claude follows for exec, restart and resume, including the git rules | `hooks/protocol.ts` |
@@ -39,7 +39,7 @@ flowchart LR
 
 | State | Where | Why there |
 |---|---|---|
-| Todos, agents, tool calls | One SQLite file in Claude Code's plugin data folder, keyed by directory | Shared by every session and every copy of the mod; survives restarts |
+| Todos, agents, tool calls and turns | One SQLite file in Claude Code's plugin data folder, keyed by directory | Shared by every session and every copy of the mod; survives restarts |
 | The session's copy of its directory's rows | `$.state` atoms | The pane draws from them, and a write to one redraws it |
 | Pane layout (open rows, confirmations, focus ring) | `$.state` atoms | Per session; nothing else needs it |
 | Settings | `/config` (`pluginConfigs`) or environment variables | Claude Code's standard plugin options |
@@ -65,7 +65,7 @@ sequenceDiagram
   end
 ```
 
-Agents and calls are written through as they change: they're keyed by id and only ever written by the session that recorded them, so they need no revision check. Every two seconds the session re-reads when the database file's modification times change, picking up new calls by sequence number.
+Agents, calls and turns (an agent's text between calls, kept as rows of the calls table) are written through as they change: they're keyed by id and only ever written by the session that recorded them, so they need no revision check. Every two seconds the session re-reads when the database file's modification times change, picking up new calls by sequence number.
 
 A failed run (most often a write the host aborts as the turn it served ends) is reported once and doesn't stop the next write. Only a missing `sqlite3` or data folder makes the pane read-only.
 
@@ -88,7 +88,7 @@ sequenceDiagram
   H->>H: tool.call / agent.spawn link it to #N
   loop its work
     W->>W: edit, commit
-    W-->>H: each tool call recorded with input and response
+    W-->>H: each tool call recorded with input and response, and the text between them
   end
   W->>W: run the project's checks
   W->>O: fetch, rebase onto origin/base, push HEAD:base
