@@ -51,7 +51,7 @@ type Where = {
   // What `git worktree list --porcelain` answers.
   worktrees?: string
   // Each $.ui.open's argument, readable by the test.
-  openedWith?: { id: string; focus?: boolean }[]
+  openedWith?: { id: string; focus?: boolean; closeOnEscape?: boolean }[]
   toasts?: string[]
   // The environment beyond HOME.
   env?: Record<string, string>
@@ -206,7 +206,7 @@ function engine(
   const isOpen = new Set<string>()
   on('ui.open', (_, e) => {
     panes.opens.push(e.id)
-    where.openedWith?.push({ id: e.id, ...(e.focus !== undefined ? { focus: e.focus } : {}) })
+    where.openedWith?.push({ id: e.id, ...(e.focus !== undefined ? { focus: e.focus } : {}), ...(e.closeOnEscape !== undefined ? { closeOnEscape: e.closeOnEscape } : {}) })
     isOpen.add(e.id)
     return { value: where.unplaced === undefined ? { isPlaced: true } : { isPlaced: false, reason: where.unplaced } } as never
   })
@@ -3190,6 +3190,28 @@ test('Escape on the dialog closes it and puts the ring back on the subtask row i
   expect(await back.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
   expect((await back.find({ type: 'Box', key: 'ring:ag:ag1' }))?.props['paddingX']).toBeUndefined()
   await back.unmount()
+})
+
+test('the dialog turns on closeOnEscape while it shows, and leaving it turns it off again', async ($, on) => {
+  const openedWith: { id: string; focus?: boolean; closeOnEscape?: boolean }[] = []
+  const db = seeded([aTodo(1, 'Count', { status: 'done', hasRun: true })])
+  engine(on, [], undefined, false, { db, openedWith })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:details' })
+  // Escape then raises the person's ui.close, which closes the dialog and
+  // keeps the pane, so it never reaches the prompt (and a running turn).
+  expect(openedWith.at(-1)).toEqual({ id: 'todo', closeOnEscape: true })
+  await ui.unmount()
+  // The dialog closes: the pane takes the keys back without closeOnEscape,
+  // so Escape on the tree is a plain hand-back again.
+  const before = openedWith.length
+  const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
+  await clock.advance(1)
+  await blurred.unmount()
+  expect(openedWith.slice(before)).toEqual([{ id: 'todo', focus: true }])
 })
 
 test('a dialog left open across a reload starts closed', async ($, on) => {

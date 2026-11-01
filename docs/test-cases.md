@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 173 of 176 cases (98.3%)** are covered by `claude plugin test .`.
+**Coverage: 174 of 178 cases (97.8%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -241,6 +241,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | B13 | Code and Markdown get no control or format character (escapes, C1, zero-width, bidi, separators, a surrogate half a cut leaves), so the host never refuses the dialog's drawing | the call browser hands Code and Markdown no control or format character, even where a cut splits an emoji |
 | B14 | Escape on the call browser closes it, reopens the pane with the keys and puts the ring back on the subtask row it came from | Escape on the dialog closes it and puts the ring back on the subtask row it came from, keeping the keys in the pane |
 | B15 | A dialog left open across a reload starts closed | a dialog left open across a reload starts closed |
+| B16 | While the dialog shows, the pane is opened with `closeOnEscape`, so Escape raises the person's close; leaving the dialog opens it without | the dialog turns on closeOnEscape while it shows, and leaving it turns it off again |
+| B17 | The person's close (Escape or ×) while the dialog shows closes the dialog and keeps the pane, so Escape never reaches a running turn | not covered: the test kit can't raise the person's `ui.close` |
 | B1 | A todo agent's text from each model step is kept as a turn row beside its calls; the main loop's steps and steps with no text are not | an agent's turns are kept beside its calls and read in time order |
 | B2 | The browser interleaves turns and calls by start time, a step's text before its calls, and counts turns in its header | an agent's turns are kept beside its calls and read in time order |
 | B3 | A restarted session reads its kept turns back, in place among the calls | a restarted session reads the turns it kept back, in place among the calls |

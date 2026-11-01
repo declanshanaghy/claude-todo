@@ -23,7 +23,7 @@ The tests enforce 1–4. A new element or state needs a test there too.
 - **No Node, Bun or `require`**, in the hooks module or in tests. Only `$` reaches outside: files, processes, store, clock. `claude plugin validate` refuses dynamic `import()` and `$` passed through a namespace member call, so import named functions.
 - **A render never writes state.** Write from a handler, a hook, or `$.clock.after(0, …)`.
 - **The mod's own `$.ui.focus` call skips its own `ui.focus` hook.** Note the ring before calling it. In tests that call has no implementation and throws.
-- **Esc always hands the keys back to the prompt.** The dialog takes them back with `$.ui.open({ focus: true })`.
+- **Esc always hands the keys back to the prompt**, where a second Esc cancels a running turn. So the dialog opens the pane with `closeOnEscape`: Esc then raises the person's `ui.close`, which the mod answers by closing the dialog and keeping the pane, and it takes the keys back with `$.ui.open({ focus: true })`.
 - **After a Stop, the host refuses a plugin's `$.prompt.submit` until the person types** ("the session was stopped and nobody has sent input since"). `submit` holds the prompt, and the `prompt.submit` hook sends it after their next message. Never treat that refusal as a failure.
 - **A prompt submitted from inside a hook waits on that hook's own turn.** Submit from `$.clock.after(0, …)`.
 - **Arrow keys scroll a pane taller than its window.** The `ui.scroll` hook turns ±1 arrows into ring moves.

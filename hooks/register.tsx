@@ -467,6 +467,12 @@ async function openPane($: $, asked: boolean) {
 // The view-only detail dialog replaces the tree in the same pane, which
 // already holds the keys; Escape hands them back and the render closes it.
 // `back` is where Escape puts the ring, when not on what opened it.
+//
+// While it shows, the pane is opened with closeOnEscape, so the Escape that
+// takes the keys from the pane raises ui.close (the person's). That hook
+// keeps the pane and closes the dialog instead: the render alone never saw
+// the keys leave reliably, and a second Escape at the prompt cancelled the
+// running turn.
 export async function openDetail($: $, d: Detail, back?: string) {
   const at = back ?? (await read($, ring))
   await update($, returnTo, () => at)
@@ -474,27 +480,48 @@ export async function openDetail($: $, d: Detail, back?: string) {
   await update($, earlier, () => 0)
   await update($, detail, () => d)
   await syncStatus($)
+  await reopen($, { closeOnEscape: true })
 }
 
-async function closeDetail($: $) {
+// Opens the pane again with its usual options plus `extra`; each open sets
+// closeOnEscape anew, so one without it turns it off. A pane that can't be
+// seated now keeps the prompt's keys.
+async function reopen($: $, extra: { focus?: true; closeOnEscape?: true } = {}) {
+  try {
+    await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', ...extra })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Closes the dialog; `reopened` when the caller opens the pane itself.
+async function closeDetail($: $, reopened = false) {
   await update($, detail, () => null)
   await syncStatus($)
+  if (!reopened) await reopen($)
 }
 
 // Escape (or a click elsewhere) takes the keys from the pane while the dialog
 // shows: it closes, and the pane takes the keys back with the ring where it
 // was before the dialog opened, rather than leaving them at the prompt.
 async function leaveDetail($: $) {
+  if (!(await read($, detail))) return
   const back = await read($, returnTo)
-  await closeDetail($)
+  await closeDetail($, true)
   await update($, returnTo, () => null)
-  try {
-    await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', focus: true })
-  } catch {
-    // The pane can't be seated now: the prompt keeps the keys.
-    return
-  }
+  if (!(await reopen($, { focus: true }))) return
   if (back !== null) await focus($, back)
+}
+
+// The person's close of the pane (Escape, under closeOnEscape, or the ×):
+// while the dialog shows, it closes the dialog instead and keeps the pane.
+// Answers whether it did. The pane is opened again from a timer, as a hook
+// can't seat it under its own close.
+async function escapeDetail($: $) {
+  if (!(await read($, detail))) return false
+  $.clock.after(0, () => void leaveDetail($).catch(() => undefined))
+  return true
 }
 
 // A fold toggle in the call browser: one block unfolds or folds again.
@@ -1527,7 +1554,10 @@ export const register: Register = (on, options) => {
   }).catch((_, e, next) => next(e))
 
   // Any close: noshow's, the person's × or close key, an unload's.
+  // The person's Escape (or ×) while the dialog shows closes the dialog,
+  // not the pane, and the pane keeps the keys (see openDetail).
   on('ui.close', { id: PANE }, async ($, e, next) => {
+    if (e.origin.kind === 'person' && (await escapeDetail($))) return { value: undefined }
     const r = await next(e)
     await setPlaced($, false)
     return r
