@@ -10,6 +10,12 @@ import type { Todo, TodoStatus, View } from '../types'
 // no two places can drift.
 export type Mark = { symbol: string; color: Color }
 
+// Stopped's red. The theme has no red but `error`, which failed and Delete
+// wear, so a stopped todo would read as a failed one. A raw hex color is a
+// Color the engine paints as is (Text's color and backgroundColor alike), so
+// stopped, its ■ Stop chips and its header toggle all share this true red.
+export const STOP_RED: Color = '#ff0000'
+
 export const MARK: Record<TodoStatus, Mark> = {
   // Added, its background drafter still writing its prompt drafts: the
   // circle filling in toward pending's full one, in a color of its own, as
@@ -22,7 +28,7 @@ export const MARK: Record<TodoStatus, Mark> = {
   // Auto, Fire and Resume start a run and their chips share it.
   running: { symbol: '▶', color: 'success' },
   paused: { symbol: '⏸', color: 'warning' },
-  stopped: { symbol: '■', color: 'error' },
+  stopped: { symbol: '■', color: STOP_RED },
   // Landed on the base branch: the merged color, so it never reads as running.
   done: { symbol: '✓', color: 'merged' },
   failed: { symbol: '✗', color: 'error' },

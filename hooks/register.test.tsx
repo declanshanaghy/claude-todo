@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { CHIP_SYMBOL, DIVIDER, MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
+import { CHIP_SYMBOL, DIVIDER, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 import { clampLines, headParts } from './pane'
 import { execPrompt } from './protocol'
 
@@ -1403,7 +1403,7 @@ test('the header, the status line and the rows draw the same marks in the same o
   const ui = await mountAll($)
   const header = await headerMarks(ui)
   expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
-  expect(header.map(m => m.color)).toEqual(['success', 'remember', 'inactive', 'error', 'warning', 'error', 'merged'])
+  expect(header.map(m => m.color)).toEqual(['success', 'remember', 'inactive', 'error', 'warning', STOP_RED, 'merged'])
   expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
   // Each row's glyph is its status's mark; a running row spins in its color.
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending'], [7, 'prompting']] as const) {
@@ -3122,9 +3122,15 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
   // The chips share the rows' palette: Resume and a running row are one color.
   expect(toneColor('running')).toBe(MARK.running.color)
   expect(MARK.running.color).toBe('success')
+  // ■ Stop fills in stopped's own true red, which failed and Delete don't share.
+  expect((await fill('act:2:stop')).color).toBe(MARK.stopped.color)
+  expect(MARK.stopped.color).toBe(STOP_RED)
+  expect(MARK.stopped.color).not.toBe(MARK.failed.color)
+  expect(MARK.stopped.color).not.toBe(toneColor('danger'))
   // A confirmation's go-ahead is the status it leads to; its way out is neutral.
   await ui.press({ key: 'act:2:stop' })
   await check(2, { stopyes: 'stopped', keep: 'neutral' })
+  expect((await fill('act:2:stopyes')).color).toBe(MARK.stopped.color)
   await ui.press({ key: 'act:6:takeover' })
   await check(6, { takeyes: 'stopped', cancel: 'neutral' })
   await ui.press({ key: 'act:1:delete' })
@@ -3145,8 +3151,8 @@ test('no two actions share a chip symbol, apart from the safe way back out of a 
   expect(CHIP_SYMBOL['Exec']).not.toBe(CHIP_SYMBOL['Resume'])
 })
 
-test('the palette gives every status its own color, apart from the two ends that halt a run, and the toasts name it by its mark', () => {
-  const colors = Object.entries(MARK).filter(([s]) => s !== 'failed').map(([, m]) => m.color)
+test('the palette gives every status its own color, stopped and failed included, and the toasts name it by its mark', () => {
+  const colors = Object.values(MARK).map(m => m.color)
   expect(new Set(colors).size).toBe(colors.length)
   expect(MARK.done.color).not.toBe(MARK.running.color)
   expect(statusToast(3, 'done')).toBe(`${MARK.done.symbol} #3 done`)

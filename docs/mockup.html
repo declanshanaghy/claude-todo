@@ -7,7 +7,7 @@
 <style>
 :root{
   --bg:#0d1016; --term:#11141b; --panebg:#0f1219; --line:#262b36; --fg:#d6d9e0; --dim:#6b7383; --faint:#3a4150;
-  --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757; --teal:#48968c; --ide:#4782c8; --periwinkle:#b1b9f9;
+  --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff0000; --error:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757; --teal:#48968c; --ide:#4782c8; --periwinkle:#b1b9f9;
   --chrome:#181c25; --chromefg:#aab1bf; --subtle:#8b93a3; --inv:#11141b;
   --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
 }
@@ -53,13 +53,13 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .btn.f:not(.chip) *{color:var(--term)!important}
 /* Action chips mirror statusChip() in hooks/marks.tsx: a filled label whose fill is
    the mark color of the status the action moves the todo into (tone-<status>, the
-   same colors as MARK below), danger = error red, details = its own ide teal-blue
+   same colors as MARK below), danger and failed = the theme's error red, stopped = a true red, details = its own ide teal-blue
    (Details moves no status), neutral = subtle grey. The focus
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
-.chip{--tone:var(--subtle)}.chip.tone-neutral{--tone:var(--subtle)}.chip.tone-danger{--tone:var(--red)}.chip.tone-details{--tone:var(--ide)}
+.chip{--tone:var(--subtle)}.chip.tone-neutral{--tone:var(--subtle)}.chip.tone-danger{--tone:var(--error)}.chip.tone-details{--tone:var(--ide)}
 .chip.tone-prompting{--tone:var(--periwinkle)}.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
-.chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--red)}
+.chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--error)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
 /* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
 .chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
@@ -82,7 +82,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .focusbar .note{color:var(--dim);font-size:12px}
 .focusbar code{font-family:var(--mono);font-size:12px;color:var(--fg)}
 .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
-.dim{color:var(--dim)}.faint{color:var(--faint)}.cy{color:var(--cyan)}.gr{color:var(--green)}.ye{color:var(--yellow)}.re{color:var(--red)}.ma{color:var(--magenta)}.bl{color:var(--blue)}.or{color:var(--orange)}.te{color:var(--teal)}.pw{color:var(--periwinkle)}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.cy{color:var(--cyan)}.gr{color:var(--green)}.ye{color:var(--yellow)}.re{color:var(--red)}.er{color:var(--error)}.ma{color:var(--magenta)}.bl{color:var(--blue)}.or{color:var(--orange)}.te{color:var(--teal)}.pw{color:var(--periwinkle)}
 .code{white-space:pre-wrap;word-break:break-all;background:#0a0c11;border-left:2px solid var(--faint);margin:1px 0 3px 8ch;padding:2px 8px;color:#b8bfcc;font-size:12px}
 .code .lbl{color:var(--dim)}
 .inp{font:inherit;background:transparent;border:0;outline:0;color:var(--fg);flex:1;padding:0;caret-color:var(--orange)}
@@ -520,7 +520,7 @@ function press(fid){
 
 /* ---------- pane render ---------- */
 // MARK in hooks/marks.tsx: one symbol and color per status, for rows, header, status line and chips.
-const MARK={prompting:['◔','pw'],pending:['●','dim'],drafting:['✎','bl'],planning:['◇','te'],running:['▶','gr'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','ma'],failed:['✗','re']};
+const MARK={prompting:['◔','pw'],pending:['●','dim'],drafting:['✎','bl'],planning:['◇','te'],running:['▶','gr'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','ma'],failed:['✗','er']};
 function glyph(st){ if(st==='running'||st==='run') return [SPIN[spin],'gr']; return MARK[st] || ({queued:['◌','faint'],ok:['✓','gr']})[st] || ['?','dim']; }
 // tallySummary(): the header's colored counts, in SUMMARY's order.
 // Views: each status in the header is a toggle for its own rows. Default view: running, prompting, pending, failed.
