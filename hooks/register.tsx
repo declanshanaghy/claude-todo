@@ -1043,12 +1043,96 @@ async function noteTitle($: $, now: string | undefined) {
   if ((await read($, sessionTitle)) !== t) await update($, sessionTitle, () => t)
 }
 
+// Everything the session's state holds that the mod sets up itself. A
+// /clear goes on under a new session id with that state reset and no
+// session.start, so it runs again at classic.SessionStart's `clear`, and
+// sync runs it whenever the database handle is missing. One runs at a time.
+type Options = Parameters<Register>[1]
+let booting: Promise<void> | undefined
+async function boot($: $, options: Options) {
+  booting ??= setUp($, options).finally(() => (booting = undefined))
+  return booting
+}
+
+async function setUp($: $, options: Options) {
+  // The drafter: small, cheap and read-only, run in the background and
+  // hidden from the model's own agent listing. Without it (an engine that
+  // refuses the type) drafters spawn as the read-only Explore.
+  try {
+    const { agent } = await $.agent.register({
+      name: 'drafter',
+      description: "Drafts candidate prompts for a todo-pane todo; spawned by the todo plugin only.",
+      prompt:
+        'You draft candidate prompts for a todo in a todo list. You only read: never edit or write files, and never change git state. Follow the task you are given and store your drafts with mcp__todo__drafts.',
+      tools: ['Read', 'Grep', 'Glob', 'mcp__todo__drafts'],
+      model: 'haiku',
+      effort: 'low',
+      maxTurns: 12,
+      background: true,
+    })
+    await update($, drafterType, () => agent)
+  } catch {
+    await update($, drafterType, () => 'Explore')
+  }
+  let cap = 1
+  for (const argv of [['sysctl', '-n', 'hw.ncpu'], ['nproc']]) {
+    try {
+      const r = await $.process.run(argv, CWD)
+      const cpus = parseInt(r.stdout, 10)
+      if (r.exitCode === 0 && cpus > 0) {
+        cap = Math.max(1, cpus - 4)
+        break
+      }
+    } catch {
+      // try the next one
+    }
+  }
+  await update($, cpuCap, () => cap)
+
+  // The database first: a session that can't reach it keeps its 0.2 todos
+  // where they are and shows them read-only.
+  // A dialog left open across a reload (or stranded by a refused drawing)
+  // starts closed.
+  await update($, detail, () => null)
+  const bootAt = await $.clock.now()
+  const self = await $.session.id()
+  await update($, me, () => self)
+  const found = await locate($)
+  if (typeof found === 'string') {
+    await update($, db, () => null)
+    await fail($, found)
+    const old = (await read($, legacy)).filter(isTodo)
+    if (old.length > 0) await update($, todos, () => old)
+  } else {
+    await update($, db, () => found)
+    await update($, fault, () => '')
+    try {
+      await settle($)
+      await migrateStore($)
+      await migrate($)
+      await persistTraces($)
+      await pruneBackups($, bootAt)
+      await reload($, true)
+      // Done before 0.3 kept the time: their time in the tree starts now.
+      if ((await read($, todos)).some(t => t.status === 'done' && t.doneAt === undefined)) {
+        await editTodos($, l => l.map(t => (t.status === 'done' && t.doneAt === undefined ? { ...t } : t)))
+      }
+    } catch (err) {
+      await warn($, err)
+    }
+  }
+  const keep = await ttlMs($, options['doneTtlMinutes'])
+  await update($, ttl, () => keep)
+  await expire($)
+}
+
 export const register: Register = (on, options) => {
   // The pane's header draws the session's title, so it follows each change:
   // set at start (a resume brings its old one), and on every prompt, where a
   // rename or a hook's sessionTitle shows up.
   on('classic.SessionStart', async ($, e, next) => {
     const r = await next(e)
+    if (e.source === 'clear') await boot($, options)
     await noteTitle($, r.sessionTitle ?? e.session_title)
     return r
   }).catch((_, e, next) => next(e))
@@ -1107,25 +1191,6 @@ export const register: Register = (on, options) => {
       },
       isDeferred: false,
     })
-    // The drafter: small, cheap and read-only, run in the background and
-    // hidden from the model's own agent listing. Without it (an engine that
-    // refuses the type) drafters spawn as the read-only Explore.
-    try {
-      const { agent } = await $.agent.register({
-        name: 'drafter',
-        description: "Drafts candidate prompts for a todo-pane todo; spawned by the todo plugin only.",
-        prompt:
-          'You draft candidate prompts for a todo in a todo list. You only read: never edit or write files, and never change git state. Follow the task you are given and store your drafts with mcp__todo__drafts.',
-        tools: ['Read', 'Grep', 'Glob', 'mcp__todo__drafts'],
-        model: 'haiku',
-        effort: 'low',
-        maxTurns: 12,
-        background: true,
-      })
-      await update($, drafterType, () => agent)
-    } catch {
-      await update($, drafterType, () => 'Explore')
-    }
     await $.tool.register({
       name: 'list',
       description: "List this repo's todos, or the home directory's outside a repo (number, title, status, prompt, summary).",
@@ -1133,60 +1198,14 @@ export const register: Register = (on, options) => {
       isDeferred: false,
     })
 
-    let cap = 1
-    for (const argv of [['sysctl', '-n', 'hw.ncpu'], ['nproc']]) {
-      try {
-        const r = await $.process.run(argv, CWD)
-        const cpus = parseInt(r.stdout, 10)
-        if (r.exitCode === 0 && cpus > 0) {
-          cap = Math.max(1, cpus - 4)
-          break
-        }
-      } catch {
-        // try the next one
-      }
-    }
-    await update($, cpuCap, () => cap)
-
-    // The database first: a session that can't reach it keeps its 0.2 todos
-    // where they are and shows them read-only.
-    // A dialog left open across a reload (or stranded by a refused drawing)
-    // starts closed.
-    await update($, detail, () => null)
-    const bootAt = await $.clock.now()
-    const self = await $.session.id()
-    await update($, me, () => self)
-    const found = await locate($)
-    if (typeof found === 'string') {
-      await update($, db, () => null)
-      await fail($, found)
-      const old = (await read($, legacy)).filter(isTodo)
-      if (old.length > 0) await update($, todos, () => old)
-    } else {
-      await update($, db, () => found)
-      await update($, fault, () => '')
-      try {
-        await settle($)
-        await migrateStore($)
-        await migrate($)
-        await persistTraces($)
-        await pruneBackups($, bootAt)
-        await reload($, true)
-        // Done before 0.3 kept the time: their time in the tree starts now.
-        if ((await read($, todos)).some(t => t.status === 'done' && t.doneAt === undefined)) {
-          await editTodos($, l => l.map(t => (t.status === 'done' && t.doneAt === undefined ? { ...t } : t)))
-        }
-      } catch (err) {
-        await warn($, err)
-      }
-    }
-    const keep = await ttlMs($, options['doneTtlMinutes'])
-    await update($, ttl, () => keep)
-    await expire($)
+    await boot($, options)
     $.clock.every(EXPIRE_MS, () => void expire($).catch(() => undefined))
     // A tick that fails (the module reloading under it) is tried again next tick.
     $.clock.every(SYNC_MS, () => {
-      void sync($).catch(() => undefined)
+      void (async () => {
+        if (!(await read($, db)) && !(await read($, fault))) await boot($, options)
+        else await sync($)
+      })().catch(() => undefined)
       void checkPlaced($).catch(() => undefined)
     })
 

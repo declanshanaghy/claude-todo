@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 164 of 167 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 166 of 169 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -150,6 +150,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | S10 | A fresh read keeps only the directory's newest 1500 calls | a fresh read keeps only the newest 1500 calls of the directory |
 | S11 | The database is under `CLAUDE_CONFIG_DIR` when it's set | the database lives in the plugin data folder, under CLAUDE_CONFIG_DIR when set |
 | S12 | Otherwise it is under `~/.claude` | without CLAUDE_CONFIG_DIR the database is under ~/.claude |
+| S14 | A `/clear` (or `/new`) resets the session's state without a `session.start`; the list loads again from the database at its `SessionStart` | a /clear resets the session state, and the list loads again from the database |
+| S15 | A sync tick that finds no database handle sets the session up again | the sync tick sets the session up again when its state was reset under it |
 | S13 | The SQL scripts do what the stand-in models (the rev guard, the run-once import, paging) against real sqlite3 | not covered: the test sandbox runs no processes, so the scripts never reach a real sqlite3 |
 
 ## Failures

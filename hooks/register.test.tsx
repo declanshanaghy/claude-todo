@@ -1054,6 +1054,57 @@ test('the header shows the session title at its right in the prompt bar color, f
   await ui.unmount()
 })
 
+test('a /clear resets the session state, and the list loads again from the database', async ($, on) => {
+  const db = emptyDb()
+  db.todos['/proj'] = { 1: legacyTodo(1, 'Kept') }
+  engine(on, [], undefined, true, { db })
+  // The session's state, held here so the test can drop it as a /clear does.
+  const held = new Map<string, { value: unknown; version: number }>()
+  on('state.get', (_, e) => ({ value: held.get(e.key) ?? { value: undefined, version: 0 } }))
+  on('state.set', (_, e) => {
+    const version = (held.get(e.key)?.version ?? 0) + 1
+    held.set(e.key, { value: e.value, version })
+    return { value: { isSet: true, version } }
+  })
+  on('classic.SessionStart', () => ({}))
+  await start($)
+  const listed = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const at = await ui.find({ type: 'Button', key: 'todo:1' })
+    await ui.unmount()
+    return at !== undefined
+  }
+  expect(await listed()).toBe(true)
+
+  held.clear()
+  expect(await listed()).toBe(false)
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(await listed()).toBe(true)
+  // And a write after it lands in the same list.
+  await todo($, 'add After the clear')
+  expect(titles(db, '/proj')).toEqual(['1 Kept', '2 After the clear'])
+})
+
+test('the sync tick sets the session up again when its state was reset under it', async ($, on) => {
+  const db = emptyDb()
+  db.todos['/proj'] = { 1: legacyTodo(1, 'Kept') }
+  engine(on, [], undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  const held = new Map<string, { value: unknown; version: number }>()
+  on('state.get', (_, e) => ({ value: held.get(e.key) ?? { value: undefined, version: 0 } }))
+  on('state.set', (_, e) => {
+    const version = (held.get(e.key)?.version ?? 0) + 1
+    held.set(e.key, { value: e.value, version })
+    return { value: { isSet: true, version } }
+  })
+  await start($)
+  held.clear()
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('noshow hands the counts to the status line, and show takes them back', async ($, on) => {
   const { statuses } = engine(on, [], undefined, false)
   const clock = mock.clock(on, { now: 1000 })

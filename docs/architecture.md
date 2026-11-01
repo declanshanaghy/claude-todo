@@ -49,7 +49,7 @@ flowchart LR
 | Drafters in flight, their keys, execs waiting on them | `$.state` atoms | A drafter belongs to the session that spawned it |
 | Settings | `/config` (`pluginConfigs`) or environment variables | Claude Code's standard plugin options |
 
-A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list.
+A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list. A `/clear` or `/new` carries on under a new session id with the session's state reset and no `session.start`, so the mod sets itself up again at that `SessionStart` (and at any sync tick that finds no database handle), and the repo's list comes back from the database.
 
 ## Writing without losing edits
 
