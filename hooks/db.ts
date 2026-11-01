@@ -119,6 +119,12 @@ export const script = (op: Op) => `-- op ${JSON.stringify(op)}\n${SCHEMA}${sql(o
 
 // ---------- the file and the binary ----------
 
+// Every run names its own directory: by default a run starts in the
+// session's, and when that is gone (a worktree removed under the session)
+// the spawn fails with ENOENT though the binary is there. Nothing here
+// depends on the cwd, so '/' always exists and always works.
+export const CWD = { cwd: '/' } as const
+
 export async function locate($: $): Promise<{ bin: string; file: string } | string> {
   const home = (await $.env.get('HOME')) ?? ''
   const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${home}/.claude`
@@ -126,7 +132,7 @@ export async function locate($: $): Promise<{ bin: string; file: string } | stri
   let bin: string | undefined
   for (const b of ['/usr/bin/sqlite3', 'sqlite3']) {
     try {
-      if ((await $.process.run([b, '-version'])).exitCode === 0) {
+      if ((await $.process.run([b, '-version'], CWD)).exitCode === 0) {
         bin = b
         break
       }
@@ -136,7 +142,7 @@ export async function locate($: $): Promise<{ bin: string; file: string } | stri
   }
   if (!bin) return 'sqlite3 was not found; todos are read-only until it is installed'
   try {
-    const r = await $.process.run(['mkdir', '-p', folder])
+    const r = await $.process.run(['mkdir', '-p', folder], CWD)
     if (r.exitCode !== 0) return `can't create ${folder}: ${r.stderr.trim()}`
   } catch (err) {
     return `can't create ${folder}: ${String(err)}`
@@ -147,7 +153,7 @@ export async function locate($: $): Promise<{ bin: string; file: string } | stri
 type Where = { bin: string; file: string }
 
 async function run($: $, at: Where, op: Op) {
-  const r = await $.process.run([at.bin, '-batch', at.file], { stdin: script(op) })
+  const r = await $.process.run([at.bin, '-batch', at.file], { ...CWD, stdin: script(op) })
   return r
 }
 

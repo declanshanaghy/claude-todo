@@ -174,6 +174,9 @@ function engine(
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__todo__${e.name}` } }))
   on('process.run', (_, e) => {
+    // The session's directory may be gone (a worktree removed under it), and a
+    // run left to default to it fails to spawn: every run must name its own.
+    if (e.init?.cwd !== '/') throw new Error(`ENOENT: ${e.argv[0]} spawned in the session's directory`)
     const [bin = '', ...args] = e.argv
     if (bin === 'git' && args.includes('worktree')) return { value: ok(where.worktrees ?? '') }
     if (bin === 'git') {
@@ -183,7 +186,7 @@ function engine(
     if (bin.endsWith('sqlite3')) {
       if (where.hasSqlite === false) throw new Error('ENOENT')
       if (args[0] === '-version') return { value: ok('3.43.2\n') }
-      const stdin = e.init?.stdin ?? ''
+      const stdin = e.init.stdin ?? ''
       const op = JSON.parse(stdin.slice('-- op '.length, stdin.indexOf('\n'))) as Op
       ops.push(op)
       files.push(args[1] ?? '')

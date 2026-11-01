@@ -1,6 +1,7 @@
 import type { EngineInterface, ImageSource } from 'claude-code'
 
 import type { ImageRef } from '../types'
+import { CWD } from './db'
 
 // Pictures in a todo agent's tool results. The database keeps a reference
 // only: the file a Read named, or a sidecar the result's base64 was spooled to.
@@ -123,7 +124,7 @@ function hash(text: string) {
 
 async function ran($: $, argv: string[]) {
   try {
-    return (await $.process.run(argv)).exitCode === 0
+    return (await $.process.run(argv, CWD)).exitCode === 0
   } catch {
     return false
   }

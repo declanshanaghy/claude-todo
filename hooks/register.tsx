@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentNode, Call, Confirm, Detail, Dividers, ImageRef, Kept, PaneUi, Todo, Turn } from '../types'
-import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
+import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
 import { statusToast, tallyText } from './marks'
@@ -118,7 +118,7 @@ async function real($: $, path: string) {
 // The repo `from` is in, its worktree its own; outside any repo, home.
 async function keyFor($: $, from: string) {
   try {
-    const r = await $.process.run(['git', '-C', from, 'rev-parse', '--show-toplevel'])
+    const r = await $.process.run(['git', '-C', from, 'rev-parse', '--show-toplevel'], CWD)
     if (r.exitCode === 0 && r.stdout.trim()) return await real($, r.stdout.trim())
   } catch {
     // not a repo, or no git
@@ -667,7 +667,7 @@ async function keptWork($: $, t: Todo): Promise<Kept[]> {
   if (t.taskId !== undefined && !names.has(t.taskId)) names.set(t.taskId, `#${t.n}`)
   let listed = ''
   try {
-    const r = await $.process.run(['git', '-C', await read($, dir), 'worktree', 'list', '--porcelain'])
+    const r = await $.process.run(['git', '-C', await read($, dir), 'worktree', 'list', '--porcelain'], CWD)
     if (r.exitCode !== 0) return []
     listed = r.stdout
   } catch {
@@ -883,7 +883,7 @@ export const register: Register = (on, options) => {
     let cap = 1
     for (const argv of [['sysctl', '-n', 'hw.ncpu'], ['nproc']]) {
       try {
-        const r = await $.process.run(argv)
+        const r = await $.process.run(argv, CWD)
         const cpus = parseInt(r.stdout, 10)
         if (r.exitCode === 0 && cpus > 0) {
           cap = Math.max(1, cpus - 4)
