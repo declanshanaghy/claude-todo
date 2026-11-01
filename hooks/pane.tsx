@@ -99,8 +99,9 @@ const PAD_X = 1
 
 // The rule above a todo, sized to `width` so it never wraps: `── #3 Fix kitty
 // tab titles ─────`, the title cut with … where it doesn't fit, always ending
-// on a little rule. Counted in graphemes, so a cut never splits a character;
-// the Text's truncate-end still guards a wide one.
+// on a little rule. The pane draws lead and tail dim, num and title in the
+// todo's status color. Counted in graphemes, so a cut never splits a
+// character; the Text's truncate-end still guards a wide one.
 const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), x => x.segment)
 
 export function dividerParts(n: number, title: string, width: number) {
@@ -112,7 +113,7 @@ export function dividerParts(n: number, title: string, width: number) {
   const chars = graphemes(title)
   const text = room < 2 ? '' : chars.length <= room ? title : `${chars.slice(0, room - 1).join('').trimEnd()}…`
   const used = lead.length + num.length + 1 + (text ? graphemes(text).length + 1 : 0)
-  return { lead, num, text: text ? ` ${text} ` : ' ', tail: '─'.repeat(Math.max(0, width - used)) }
+  return { lead, num, title: text ? ` ${text}` : '', tail: ` ${'─'.repeat(Math.max(0, width - used))}` }
 }
 
 // Every focusable item lights the same way: while the ring is on it, a
@@ -302,7 +303,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
 
   // A dim rule above each todo, outside every lit() box and keyed without
   // ring:, so it's never focusable and the arrow keys' order and the room kept
-  // around focusable items stay as they were.
+  // around focusable items stay as they were. A titled rule names the todo,
+  // so its row then leaves out the #N and title (see todoRows).
   const ruleWidth = Math.max(0, e.props.bodyColumns - 2 * PAD_X)
   const divider = (t: Todo, color: Color) => {
     if (dividers === 'none') return []
@@ -319,7 +321,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         <Text wrap="truncate-end">
           <Text dimColor>{p.lead}</Text>
           <Text color={color}>{p.num}</Text>
-          <Text dimColor>{p.text}{p.tail}</Text>
+          <Text color={color}>{p.title}</Text>
+          <Text dimColor>{p.tail}</Text>
         </Text>
       </Box>,
     ]
@@ -354,7 +357,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
               <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
                 <Text wrap="truncate-end">
                   <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-                  <Text color={gc}>{g}</Text> <Text weight="semibold">#{t.n}</Text> {t.title}
+                  <Text color={gc}>{g}</Text>
+                  {dividers === 'titled' ? (
+                    ''
+                  ) : (
+                    <Text color={gc}>
+                      {' '}
+                      <Text weight="semibold">#{t.n}</Text> {t.title}
+                    </Text>
+                  )}
                 </Text>
               </Button>
             </Box>

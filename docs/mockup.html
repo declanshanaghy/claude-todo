@@ -170,7 +170,7 @@ function setFocusMode(m, push){
   if(push){ const u=new URL(location.href); u.searchParams.set('focus', m); history.replaceState(null, '', u); }
 }
 // The todoDividers setting: ?dividers=titled|line|none (titled is the default).
-const DIVIDER_MODES = [['titled','a dim rule with the todo\'s number (in its status color) and title'],['line','a plain dim rule'],['none','no divider']];
+const DIVIDER_MODES = [['titled','a dim rule with the todo\'s number and title in its status color; the row below then shows just its toggle, mark and status'],['line','a plain dim rule'],['none','no divider']];
 let dividerMode = new URLSearchParams(location.search).get('dividers');
 if(!DIVIDER_MODES.some(m=>m[0]===dividerMode)) dividerMode = 'titled';
 function setDividerMode(m, push){
@@ -183,7 +183,7 @@ function setDividerMode(m, push){
 function dividerRow(t, gc){
   if(dividerMode==='none') return '';
   if(dividerMode==='line') return `<div class="row divider"><span class="fill"></span></div>`;
-  return `<div class="row divider">── <span class="${gc}">#${t.n}</span><span class="dt">${esc(t.title)}</span><span class="fill"></span></div>`;
+  return `<div class="row divider">── <span class="${gc}">#${t.n}</span><span class="dt ${gc}">${esc(t.title)}</span><span class="fill"></span></div>`;
 }
 const SPIN = ['◐','◓','◑','◒'];
 let spin = 0, uidN = 0;
@@ -561,7 +561,7 @@ function renderPane(){
     if(t.renaming){
       h += `<div class="row ind0"><span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span>&nbsp;#${t.n}&nbsp;<span class="inpwrap ${S.area==='pane'&&S.fid==='ren:'+t.id?'f':''}" data-fid="ren:${t.id}"><input class="inp" id="ren_${t.id}" value="${esc(t.title)}"></span></div>`;
     } else {
-      h += `<div class="row">${B('todo:'+t.id, `<span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span> <b>#${t.n}</b> ${esc(t.title)}`, 'grow')}&nbsp;${right}</div>`;
+      h += `<div class="row">${B('todo:'+t.id, `<span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span>${dividerMode==='titled' ? '' : ` <span class="${gc}"><b>#${t.n}</b> ${esc(t.title)}</span>`}`, 'grow')}&nbsp;${right}</div>`;
     }
     if(!t.expanded) continue;
     if(t.prompt) h += `<div class="row ind2 dim" style="white-space:normal">“${esc(t.prompt.length>90?t.prompt.slice(0,88)+'…':t.prompt)}”</div>`;

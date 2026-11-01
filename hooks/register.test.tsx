@@ -933,7 +933,8 @@ test('the header, the status line and the rows draw the same marks in the same o
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
     const row = await ui.find({ type: 'Button', key: `todo:${n}` })
     expect(JSON.stringify(row?.children)).toContain(JSON.stringify(MARK[s].color))
-    expect(row?.text).toContain(`${MARK[s].symbol} #${n}`)
+    // The titled divider above names it, so the row is just ▸ and the mark.
+    expect(row?.text).toBe(`▸ ${MARK[s].symbol}`)
   }
   expect(JSON.stringify((await ui.find({ type: 'Button', key: 'todo:1' }))?.children)).toContain(JSON.stringify(MARK.running.color))
   await ui.unmount()
@@ -1681,7 +1682,7 @@ async function dividerOf(ui: { find: (q: { type: string; key: string }) => Promi
   return { line: box.text, parts: texts.map(t => ({ text: own(t), props: t.props ?? {} })) }
 }
 
-test('a titled divider sits above each todo, sized to the pane, its number in the status color', async ($, on) => {
+test('a titled divider sits above each todo, sized to the pane, its number and title in the status color', async ($, on) => {
   engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles'), running(2, 'Ship it')]) })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1690,11 +1691,31 @@ test('a titled divider sits above each todo, sized to the pane, its number in th
   expect(d?.line).toBe(`── #1 Fix kitty tab titles ${'─'.repeat(68 - 27)}`)
   expect(d?.line.length).toBe(68)
   expect(d?.parts.find(p => p.text === '#1')?.props).toMatchObject({ color: 'inactive' })
+  expect(d?.parts.find(p => p.text === ' Fix kitty tab titles')?.props).toMatchObject({ color: 'inactive' })
   expect(d?.parts.find(p => p.text === '── ')?.props).toMatchObject({ dimColor: true })
   expect(d?.parts.find(p => p.text.endsWith('───'))?.props).toMatchObject({ dimColor: true })
-  expect((await dividerOf(ui, 2))?.parts.find(p => p.text === '#2')?.props).toMatchObject({ color: 'claude' })
+  const d2 = await dividerOf(ui, 2)
+  expect(d2?.parts.find(p => p.text === '#2')?.props).toMatchObject({ color: 'claude' })
+  expect(d2?.parts.find(p => p.text === ' Ship it')?.props).toMatchObject({ color: 'claude' })
+  // The rule names the todo, so its row doesn't again; it stays pressable.
+  const row = await ui.find({ type: 'Button', key: 'todo:1' })
+  expect(row?.text).toBe(`▸ ${MARK.pending.symbol}`)
+  await ui.press({ key: 'todo:1' })
+  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toBe(`▾ ${MARK.pending.symbol}`)
   await ui.unmount()
 })
+
+for (const mode of ['line', 'none'] as const) {
+  test(`todoDividers "${mode}" keeps the number and title on the row, in the status color`, { options: { todoDividers: mode } }, async ($, on) => {
+    engine(on, [], undefined, true, { db: seeded([running(2, 'Ship it')]) })
+    await start($)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const row = await ui.find({ type: 'Button', key: 'todo:2' })
+    expect(row?.text).toMatch(/^▸ . #2 Ship it$/)
+    expect(await ui.find({ type: 'Text', text: /^ #2 Ship it$/ })).toMatchObject({ props: { color: MARK.running.color } })
+    await ui.unmount()
+  })
+}
 
 test('a divider is never focusable: the arrows walk the same items and the rows keep their room', async ($, on) => {
   engine(on, [], undefined, true, { db: seeded([aTodo(1, 'First'), aTodo(2, 'Second')]) })
