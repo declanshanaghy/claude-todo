@@ -35,7 +35,7 @@ The state diagram in [architecture.md](architecture.md#a-todos-life) is drawn by
 
 1. Reads both machines:
    - the diagram: the `A --> B: label` lines of the `stateDiagram-v2` block in `architecture.md`;
-   - the code: `hooks/transitions.json`, a table of every move the code makes and where it happens. The code can't be read statically, because the moves are spread over handlers, hooks and `mcp__todo__update` reports. The table sits next to the code, but the mod never loads it.
+   - the code: `hooks/transitions.json`, the one table of the moves the code may make and where it makes them. The code can't be read statically, because the moves are spread over handlers, hooks and `mcp__todo__update` reports, so the table is enforced instead: every status write passes a guard that reads its mirror, `hooks/transitions.ts` (a hooks module can't import JSON), and refuses any other move. The script first checks the mirror is the JSON.
 2. Writes one TLA+ module holding both machines. `[*]` becomes `new` as a source and `gone` as a target. TLC starts each machine from every state, which gives what each state can reach, and it prints the transitions only one machine has.
 3. Reads TLC's state dump and reports:
    - each transition in only one machine;
@@ -56,11 +56,21 @@ node scripts/state-check.mjs
 
 - The script finds a JDK at `$JAVA_HOME/bin/java`, then Homebrew's `/opt/homebrew/opt/openjdk/bin/java` (or `/usr/local/...` on Intel), then `java` on `PATH`. It tries each with `-version`, because macOS's `/usr/bin/java` is a stub that fails without a JDK.
 - `tla2tools.jar` v1.7.4 is downloaded once into `.cache/tla/` (gitignored) and checked against a pinned SHA-256. The generated `TodoStates.tla` lands in `.cache/tla/run/` for reading.
-- When the code gains or loses a status move, update `hooks/transitions.json` in the same change.
+- When the code gains or loses a status move, update `hooks/transitions.json` in the same change and run `node scripts/transitions.mjs --write` to regenerate its mirror; until then the guard refuses the new move, and a test ("every status move the code makes is in hooks/transitions.json…") fails.
 
 ## Findings
 
-From the first run (2026-10-31), with nothing fixed:
+From the first run (2026-10-31). Todo #23 fixed every mismatch; the script now reports none:
+
+| Finding | Fixed by |
+|---|---|
+| `[*] → prompting` in the diagram, `[*] → pending → prompting` in the code | The diagram now has `[*] → pending` (＋ add) and `pending → prompting` (drafter spawned), which is what the code does |
+| `drafting → paused` and `drafting → failed` missing from the diagram | Added to the diagram as "prompt refused · resume started nothing" |
+| `done → failed`: a lone agent's end marked its todo done before anyone knew whether the work landed | `turn.complete` now keeps the todo running (with the answer's first line as its summary) until Claude reports done or failed; a refused turn still fails it at once. The move is gone from the table |
+| `mcp__todo__update` accepted any status from any state | It refuses a move the table doesn't allow with an error naming the allowed ones, and writes nothing. Every internal write passes the same guard in `editTodos`, which keeps the old status and warns |
+| Nothing kept the table honest | A test drives every move and checks the moves written to the database are exactly the table's (bar the self-loop and the expiry, which write nothing) |
+
+The original findings, as found:
 
 - `[*] → prompting` is in the diagram, but the code never makes it: `addTodo` writes `pending`, and the drafter's launch then moves it `pending → prompting`.
 - `[*] → pending` is in the code but not the diagram: every add, and the only path when the drafter can't spawn. The prose mentions it; the diagram doesn't.
@@ -77,5 +87,5 @@ From the first run (2026-10-31), with nothing fixed:
   - `actions/setup-java` (Temurin, any LTS) sets `JAVA_HOME`, which the script tries first;
   - `actions/cache` keyed on the jar version in the script, with the path `.cache/tla`, so the jar is fetched once;
   - `node scripts/state-check.mjs`.
-- **The findings first:** today it exits 1 on the findings above. Either fix them, by updating the diagram or the code and the table, or add an allowlist of accepted differences before it can gate merges.
-- **Keeping the table honest:** a test in `register.test.tsx` that drives each table row's action and asserts the status it lands in would stop `hooks/transitions.json` drifting from the code.
+- **The findings first:** done; it exits 0, so it can gate merges as it stands.
+- **Keeping the table honest:** done, by the guard and the test above; CI's "Transition table" job checks the mirror.

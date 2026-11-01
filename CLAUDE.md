@@ -39,7 +39,7 @@ SQLite through the `sqlite3` CLI, with all SQL in `hooks/db.ts`. One process run
 
 ## Developing
 
-- **Checks:** `npm run lint`, `npm run typecheck`, `claude plugin validate .`, `claude plugin test .`, `npm run coverage`. CI runs all of them.
+- **Checks:** `npm run lint`, `npm run typecheck`, `claude plugin validate .`, `claude plugin test .`, `npm run coverage`, `npm run transitions`. CI runs all of them. `node scripts/state-check.mjs` (needs a JDK) model-checks the state diagram against `hooks/transitions.json`; after editing that table, `node scripts/transitions.mjs --write` regenerates the guard's mirror.
 - **A fresh worktree** lacks the gitignored engine types: copy `.claude-plugin/types` in from the main checkout, and run `npm ci`.
 - **Test coverage list:** every behaviour gets a row in `docs/test-cases.md` (unique id, the covering test's title), and the "Coverage: X of Y" line must match the rows, or CI fails.
 - **Test kit quirks:** register each event hook once (put options on `engine()`'s `where` argument), and register hooks before the first `$` call. Drive timers with `mock.clock` and `ownClock: false`.

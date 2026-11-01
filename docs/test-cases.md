@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 190 of 194 cases (97.9%)** are covered by `claude plugin test .`.
+**Coverage: 199 of 203 cases (98%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -32,6 +32,12 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C21 | `/todo resume` refuses every state the chip isn't offered on (pending, done, in flight, stopped with nothing kept, paused in another session) in one line naming its status and the command that applies, and submits nothing | /todo resume refuses a todo the chip is not offered on, naming its status and the command that applies |
 | C22 | `/todo resume` with no match says so, and with no target answers with its usage | /todo resume refuses a todo the chip is not offered on, naming its status and the command that applies |
 | C23 | `/todo auto [<n\|title>]` is `/todo exec auto [<n\|title>]`; a bare `/todo exec` answers with its usage instead of running the first todo | /todo auto is short for /todo exec auto, with or without a target |
+| C24 | Every chip (exec, auto, rename, delete, reset, pause, stop, resume, refine, restart, leave, takeover, details) has a `/todo` verb of its name that, in every state whose row draws the chip, leads where the chip does (a confirming chip to its yes) | every chip has a /todo verb that does what the chip does wherever it is drawn, and refuses it everywhere else |
+| C25 | In every state whose row doesn't draw a chip, its verb refuses in one line naming the todo, changes nothing and submits nothing | every chip has a /todo verb that does what the chip does wherever it is drawn, and refuses it everywhere else |
+| C26 | A refusal names the todo's status and the verbs it does take; deleting a todo that ran, leaving one not just stopped, taking over one not elsewhere and acting on another session's todo each say why | a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so |
+| C27 | A chip verb with no target, no match or (rename) no number and title answers with its usage or the miss; rename to the same title says so | a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so |
+| C28 | Every chip verb is in TODO_VERBS, so `/todo <verb> …` runs the verb and never adds a todo titled after it | a chip verb is a verb, never a title: /todo <verb> runs it rather than adding a todo |
+| C29 | Stop, Delete and Takeover typed act at once, without the pane's question, and answer a confirmation the pane had open for that todo; Leave typed folds a just-stopped todo | a command acts without the question its chip asks, answering a confirmation the pane had open |
 
 ## The counts: the pane's header or the status line
 
@@ -131,11 +137,11 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| T1 | An agent's completed turn writes it done; a lone Agent's todo ends done with the answer's first line as summary | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
-| T2 | A refused turn writes the agent and its lone-Agent todo failed | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
-| T3 | An aborted turn (stopped outside the pane) stops the agent and its lone-Agent todo, keeping the task id for ⏵ Resume, and interrupts its open calls | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
+| T1 | An agent's completed turn writes it done; a lone Agent's todo stays running, with the answer's first line as summary, until Claude reports done or failed | an agent's turn ends it: a lone Agent's todo stays running until Claude reports, a refusal fails it, an abort stops it |
+| T2 | A refused turn writes the agent and its lone-Agent todo failed | an agent's turn ends it: a lone Agent's todo stays running until Claude reports, a refusal fails it, an abort stops it |
+| T3 | An aborted turn (stopped outside the pane) stops the agent and its lone-Agent todo, keeping the task id for ⏵ Resume, and interrupts its open calls | an agent's turn ends it: a lone Agent's todo stays running until Claude reports, a refusal fails it, an abort stops it |
 | T3a | An agent stopped outside the pane stops its lone-Agent todo and keeps its id to resume | an agent stopped outside the pane stops its lone-Agent todo, keeping its id to resume |
-| T4 | A Workflow agent's end doesn't end the Workflow's todo | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
+| T4 | A Workflow agent's end doesn't end the Workflow's todo | an agent's turn ends it: a lone Agent's todo stays running until Claude reports, a refusal fails it, an abort stops it |
 
 ## The mod's MCP tools
 
@@ -145,6 +151,9 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | M2 | Done or failed is toasted | mcp__todo__update reports a change and mcp__todo__list reads the backlog |
 | M3 | An unknown todo number answers as an error | mcp__todo__update reports a change and mcp__todo__list reads the backlog |
 | M4 | `mcp__todo__list` answers the backlog as JSON text | mcp__todo__update reports a change and mcp__todo__list reads the backlog |
+| M5 | `mcp__todo__update` refuses a status move hooks/transitions.json doesn't allow with an error naming the allowed moves, and writes none of the report | mcp__todo__update refuses a status move the table does not allow, naming the moves it does, and writes nothing |
+| M6 | Every internal status write passes the guard: a refused move keeps the old status, is said once, and the rest of the write stands | the guard keeps a todo's status when an internal move isn't in the table, saying so once, and the rest of the write stands |
+| M7 | The moves the code writes are exactly the table's (bar its self-loop and the expiry, which write nothing), and the guard refuses none of them | every status move the code makes is in hooks/transitions.json, and every move there is one the code makes |
 
 ## Storage
 

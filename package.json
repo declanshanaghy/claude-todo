@@ -5,7 +5,8 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc -p . --noEmit",
-    "coverage": "node scripts/coverage.mjs"
+    "coverage": "node scripts/coverage.mjs",
+    "transitions": "node scripts/transitions.mjs"
   },
   "devDependencies": {
     "eslint": "10.13.0",

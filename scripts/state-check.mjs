@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { mirrorText } from './transitions.mjs'
 
 const TLA_VERSION = 'v1.7.4'
 const TLA_URL = `https://github.com/tlaplus/tlaplus/releases/download/${TLA_VERSION}/tla2tools.jar`
@@ -45,6 +46,10 @@ function diagramEdges() {
 }
 
 function codeEdges() {
+  // The guard reads the mirror: a stale one would check a table the mod doesn't use.
+  if (readFileSync(join(root, 'hooks', 'transitions.ts'), 'utf8') !== mirrorText()) {
+    throw new Error('hooks/transitions.ts is not hooks/transitions.json: run node scripts/transitions.mjs --write')
+  }
   const table = JSON.parse(readFileSync(join(root, 'hooks', 'transitions.json'), 'utf8'))
   return { edges: table.transitions, unconstrained: table.unconstrained ?? [] }
 }

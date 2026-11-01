@@ -6,6 +6,7 @@ import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, sn
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
 import { DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
+import { type Chip, INFLIGHT, canMove, canResume, isOwnedElsewhere, moveRefusal, offers } from './moves'
 import { drawPane, focusOrder, rehome } from './pane'
 import { draftsPrompt, execPrompt, restartPrompt, resumePrompt } from './protocol'
 
@@ -95,7 +96,6 @@ const RESPONSE_MAX = 6000
 const TURN_MAX = 8000
 const RESERVED = new Set(['tool', 'tool_use_id', 'agentId', 'consent', 'requestMeta'])
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'url', 'query', 'description', 'path', 'prompt']
-export const INFLIGHT = new Set<Todo['status']>(['drafting', 'planning', 'running', 'paused'])
 const SYNC_MS = 2000
 // Each write retries this often when other sessions keep moving the list.
 const TRIES = 5
@@ -210,7 +210,12 @@ async function reload($: $, fresh = false) {
 // Every todo write is checked against the rev this copy stands at: when
 // another session moved the list since, the copy is re-read and `fn` runs
 // again. A todo this session puts in flight is stamped its owner.
-async function editTodos($: $, fn: (list: Todo[]) => Todo[]) {
+//
+// Every status move passes the guard: one hooks/transitions.json doesn't
+// allow (checked against the list as it stands, re-read or not) keeps the
+// old status while the rest of the edit stands, and a todo it may not remove
+// stays. Each refusal is said once (warn) and added to `refused`.
+async function editTodos($: $, fn: (list: Todo[]) => Todo[], refused: string[] = []) {
   if (await read($, fault)) {
     $.ui.toast(`todo is read-only: ${await read($, fault)}`)
     return false
@@ -221,22 +226,43 @@ async function editTodos($: $, fn: (list: Todo[]) => Todo[]) {
     for (let i = 0; i < TRIES; i++) {
       const before = await read($, todos)
       const r = await read($, rev)
+      const said: string[] = []
+      const raw = fn(before)
+      const kept = raw.flatMap(t => {
+        if (before.includes(t)) return [t]
+        const was = before.find(x => x.n === t.n)
+        const from = was?.status ?? '[*]'
+        if (canMove(from, t.status)) return [t]
+        said.push(moveRefusal(t.n, from, t.status))
+        return was ? [{ ...t, status: was.status }] : []
+      })
+      for (const was of before) {
+        if (raw.some(x => x.n === was.n) || canMove(was.status, '[*]')) continue
+        said.push(moveRefusal(was.n, was.status, '[*]'))
+        kept.push(was)
+      }
+      if (said.length > 0) kept.sort((x, y) => x.n - y.n)
       // A todo this session puts in flight is stamped its owner; one that turns
       // done, the time, which its time in the tree counts from.
       const stamp = (t: Todo): Todo =>
         t.status === 'done'
           ? t.doneAt === undefined ? { ...t, doneAt: now } : t
           : t.doneAt === undefined ? t : assign(t, { doneAt: undefined })
-      const after = fn(before).map(t =>
+      const after = kept.map(t =>
         before.includes(t) ? t : stamp(INFLIGHT.has(t.status) ? { ...t, owner: self } : t),
       )
       const put = after.filter(t => !before.includes(t))
       const del = before.filter(t => !after.some(x => x.n === t.n)).map(t => t.n)
-      if (put.length === 0 && del.length === 0) return true
-      if (await writeTodos($, at, d, r, put, del)) {
+      let isSaved = put.length === 0 && del.length === 0
+      if (!isSaved && (await writeTodos($, at, d, r, put, del))) {
         await update($, warned, () => '')
         await update($, todos, () => after)
         await update($, rev, () => r + 1)
+        isSaved = true
+      }
+      if (isSaved) {
+        for (const why of said) await warn($, why)
+        refused.push(...said)
         return true
       }
       await reload($)
@@ -427,18 +453,16 @@ async function sync($: $) {
 
 // ---------- state helpers ----------
 
+// Resolves undefined once written, else why not: the list couldn't be saved,
+// or the guard kept its status (both already said to the person).
 async function patchTodo($: $, n: number, fn: (t: Todo) => Todo) {
-  await editTodos($, list => list.map(t => (t.n === n ? fn(t) : t)))
+  const refused: string[] = []
+  const isSaved = await editTodos($, list => list.map(t => (t.n === n ? fn(t) : t)), refused)
   await syncStatus($)
+  return isSaved ? refused[0] : 'the todo list could not be saved'
 }
 
-// In flight in another live session: its task ids aren't this session's.
-// In flight in session `owner` other than `me`: its task ids aren't this
-// session's. A todo paused before it ever ran (paused for a new session) has
-// no run to take, so any session may start it.
-export const isOwnedElsewhere = (t: Todo, me: string) =>
-  INFLIGHT.has(t.status) && t.owner !== undefined && t.owner !== me && !(t.status === 'paused' && !t.hasRun)
-
+// In flight in another live session (see isOwnedElsewhere in moves.ts).
 async function isForeign($: $, t: Todo) {
   return isOwnedElsewhere(t, await $.session.id())
 }
@@ -489,15 +513,16 @@ async function openPane($: $, asked: boolean) {
 // takes the keys from the pane raises ui.close (the person's). That hook
 // keeps the pane and closes the dialog instead: the render alone never saw
 // the keys leave reliably, and a second Escape at the prompt cancelled the
-// running turn.
-export async function openDetail($: $, d: Detail, back?: string) {
+// running turn. Opened by /todo details, the pane takes the keys too: the
+// dialog closes as soon as the pane loses them.
+export async function openDetail($: $, d: Detail, back?: string, via: Via = 'chip') {
   const at = back ?? (await read($, ring))
   await update($, returnTo, () => at)
   await update($, unfolded, () => [])
   await update($, earlier, () => 0)
   await update($, detail, () => d)
   await syncStatus($)
-  await reopen($, { closeOnEscape: true })
+  await reopen($, via === 'command' ? { focus: true, closeOnEscape: true } : { closeOnEscape: true })
 }
 
 // Opens the pane again with its usual options plus `extra`; each open sets
@@ -612,6 +637,11 @@ export async function toggleView($: $, v: View | 'all') {
   await patchUi($, u => assign(u, { views: nextView(viewIn(u), v), view: undefined }))
 }
 
+// How an action was asked for. A chip's press moves the pane's ring and
+// says what it did in a toast; a /todo verb answers in its own text and
+// leaves the keys with the prompt.
+export type Via = 'chip' | 'command'
+
 async function focus($: $, key: string) {
   // The engine skips this plugin's own ui.focus hook for its own call, so the
   // ring is noted here, and put back if the move is refused.
@@ -627,7 +657,10 @@ async function focus($: $, key: string) {
 
 // Every first word `/todo` treats as a verb; any other word starts a title.
 // A new verb goes here, or `/todo <verb>` would add it as a todo.
-export const TODO_VERBS = ['', 'list', 'show', 'noshow', 'add', 'exec', 'auto', 'resume'] as const
+export const TODO_VERBS = [
+  '', 'list', 'show', 'noshow', 'add', 'exec', 'auto', 'resume',
+  'pause', 'stop', 'refine', 'restart', 'reset', 'delete', 'takeover', 'rename', 'leave', 'details',
+] as const
 
 export async function addTodo($: $, title: string) {
   const clean = title.trim()
@@ -861,11 +894,6 @@ const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
 // (paused for a new session, say), which has no run to resume.
 const isRunnable = (t: Todo) => RUNNABLE.has(t.status) || (t.status === 'paused' && !t.hasRun)
 
-// What ⏵ Resume is offered for, in the pane and by /todo resume: a paused
-// todo, or a stopped or failed one with an agent to wake or work it kept.
-export const canResume = (t: Todo) =>
-  t.status === 'paused' || ((t.status === 'stopped' || t.status === 'failed') && (t.taskId !== undefined || t.isAgentGone === true))
-
 // Why /todo resume can't take `t`, and the command that does apply.
 function resumeRefusal(t: Todo) {
   const at = `#${t.n} is ${t.status}`
@@ -881,6 +909,82 @@ function resumeRefusal(t: Todo) {
       return stillPrompting(t.n)
     default:
       return `${at}: already in flight; pause or stop it in the pane (/todo show).`
+  }
+}
+
+// ---------- a /todo verb for every chip ----------
+
+export const USAGE = 'Usage: /todo [show] · /todo noshow · /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title> · /todo pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title>'
+
+// The chips with a /todo verb of their own name beyond exec, auto and resume,
+// which have theirs above. Each acts through the function its chip calls,
+// once offers() (moves.ts) says the todo's row offers that chip.
+const CHIP_VERBS: readonly Chip[] = ['pause', 'stop', 'refine', 'restart', 'reset', 'delete', 'takeover', 'rename', 'leave', 'details']
+const isChipVerb = (v: string): v is Chip => (CHIP_VERBS as readonly string[]).includes(v)
+
+// Why `verb` can't take `t`: the chip isn't on its row now. `on` is what the
+// row does offer, so the answer names the commands that apply.
+function chipRefusal(t: Todo, verb: Chip, on: readonly Chip[]) {
+  const at = `#${t.n} is ${t.status}`
+  if (on.includes('takeover')) return `${at} in another session.`
+  if (verb === 'takeover') return `${at}, not in flight in another session: nothing to take over.`
+  if (verb === 'delete' && on.includes('rename')) return `#${t.n} has run: only a todo that never ran can be deleted.`
+  if (verb === 'leave' && on.includes('refine')) return `#${t.n} wasn't just stopped: nothing to leave.`
+  return `${at}, so /todo ${verb} doesn't apply; it takes ${on.map(v => `/todo ${v} ${t.n}`).join(' · ')}.`
+}
+
+// One of CHIP_VERBS typed: `words` are the todo (and, for rename, its number
+// then the new title). A command is already an explicit request, so the
+// verbs whose chips ask first (Stop, Delete, Takeover) act at once.
+async function chipCommand($: $, verb: Chip, words: readonly string[]) {
+  const isRename = verb === 'rename'
+  const usage = `Usage: /todo ${verb} ${isRename ? '<n> <new title>' : '<n|title>'}`
+  const target = isRename ? (words[0] ?? '') : words.join(' ')
+  const title = words.slice(1).join(' ').trim()
+  if (target === '' || (isRename && (!/^#?\d+$/.test(target) || title === ''))) return usage
+  const t = await findTodo($, target)
+  if (!t) return `No todo matches "${target}".`
+  const on = offers(t, await $.session.id(), (await read($, ui)).justStopped)
+  if (!on.includes(verb)) return chipRefusal(t, verb, on)
+  // A confirmation the pane was asking for this todo is answered by the command.
+  await patchUi($, u => (u.confirm?.n === t.n ? { ...u, confirm: null } : u))
+  // Refine and Restart submit a prompt, which a command's own hook can't (it
+  // would wait on the turn the command holds): they start from a timer once
+  // it answered, if the todo still offers them then.
+  const later = (go: (now: Todo) => Promise<unknown>) => {
+    $.clock.after(0, () => {
+      void (async () => {
+        const now = (await read($, todos)).find(x => x.n === t.n)
+        if (now && offers(now, await $.session.id(), (await read($, ui)).justStopped).includes(verb)) await go(now)
+      })()
+    })
+  }
+  switch (verb) {
+    case 'pause':
+      return haltTodo($, t, 'paused', 'command')
+    case 'stop':
+      return haltTodo($, t, 'stopped', 'command')
+    case 'refine':
+      later(now => execTodo($, now, true))
+      return `Refining #${t.n} ${t.title}: answer the prompt question in the chat.`
+    case 'restart':
+      later(now => restartTodo($, now))
+      return `Restarting #${t.n} ${t.title} from scratch with its current prompt.`
+    case 'reset':
+      return resetTodo($, t)
+    case 'delete':
+      return deleteTodo($, t, 'command')
+    case 'takeover':
+      return takeOver($, t, 'command')
+    case 'rename':
+      return renameTodo($, t.n, title, 'command')
+    case 'leave':
+      return leaveTodo($, t.n)
+    default:
+      // details: the dialog in the pane, which takes the keys while it shows.
+      await patchUi($, u => ({ ...u, isHidden: false }))
+      await openDetail($, { kind: 'todo', n: t.n }, undefined, 'command')
+      return `☰ #${t.n} ${t.title}: its details are in the pane; Esc goes back.`
   }
 }
 
@@ -942,8 +1046,10 @@ export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
     $.ui.toast(why)
     return why
   }
+  // A move the guard refuses (the todo moved on meanwhile) starts nothing.
+  const held = await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
+  if (held !== undefined) return held
   if (refine) await clearRun($, t.n)
-  await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
   await patchUi($, u => ({
     ...u,
     expanded: u.expanded.includes(`t${t.n}`) ? u.expanded : [...u.expanded, `t${t.n}`],
@@ -956,8 +1062,12 @@ export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
 }
 
 export async function restartTodo($: $, t: Todo) {
+  if (!canMove(t.status, 'drafting')) {
+    $.ui.toast(moveRefusal(t.n, t.status, 'drafting'))
+    return
+  }
   await clearRun($, t.n)
-  await patchTodo($, t.n, x => assign(x, { status: 'drafting', taskId: undefined, runId: undefined }))
+  if ((await patchTodo($, t.n, x => assign(x, { status: 'drafting', taskId: undefined, runId: undefined }))) !== undefined) return
   await patchUi($, u => ({ ...u, justStopped: u.justStopped.filter(x => x !== t.n) }))
   if ((await submit($, t, restartPrompt(t, await read($, cpuCap)))) !== undefined) return
   $.ui.toast(`↻ restarting #${t.n}`)
@@ -972,24 +1082,28 @@ async function settleAgents($: $, n: number, to: 'paused' | 'stopped') {
   await editCalls($, l => l.map((c): Call => (live.has(c.agentId) && c.state === 'run' ? { ...c, state: 'interrupted' } : c)))
 }
 
-export async function haltTodo($: $, t: Todo, to: 'paused' | 'stopped') {
-  if (await isForeign($, t)) {
-    $.ui.toast(`#${t.n} is running in another session`)
-    return
+// Resolves what it did, or why it didn't.
+export async function haltTodo($: $, t: Todo, to: 'paused' | 'stopped', via: Via = 'chip') {
+  const say = (text: string) => {
+    if (via === 'chip') $.ui.toast(text)
+    return text
   }
+  if (await isForeign($, t)) return say(`#${t.n} is ${t.status} in another session.`)
+  if (!canMove(t.status, to)) return say(moveRefusal(t.n, t.status, to))
   if (t.taskId) {
     const r = await $.tool.call({ tool: 'TaskStop', task_id: t.taskId })
     if (r.deny !== undefined) $.ui.toast(`TaskStop refused: ${r.deny}`)
   }
   await settleAgents($, t.n, to)
-  await patchTodo($, t.n, x => ({ ...x, status: to }))
+  const held = await patchTodo($, t.n, x => ({ ...x, status: to }))
+  if (held !== undefined) return held
   if (to === 'stopped') {
-    await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped, t.n] }))
-    await focus($, `act:${t.n}:refine`)
-  } else {
+    await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped.filter(x => x !== t.n), t.n] }))
+    if (via === 'chip') await focus($, `act:${t.n}:refine`)
+  } else if (via === 'chip') {
     await focus($, `act:${t.n}:resume`)
   }
-  $.ui.toast(to === 'paused' ? `⏸ #${t.n} paused` : `■ #${t.n} stopped`)
+  return say(to === 'paused' ? `⏸ #${t.n} paused` : `■ #${t.n} stopped`)
 }
 
 // The worktrees the todo's agents left, found by agent id (or the todo's own
@@ -1039,9 +1153,13 @@ async function digestOf($: $, t: Todo) {
 // has Claude start a fresh agent on the work it kept. The todo turns running
 // only once Claude reports something is: a resume that starts nothing leaves
 // it as it was.
-export async function resumeTodo($: $, t: Todo) {
+export async function resumeTodo($: $, t: Todo, via: Via = 'chip') {
   if (await isForeign($, t)) {
-    $.ui.toast(`#${t.n} is paused in another session`)
+    $.ui.toast(`#${t.n} is ${t.status} in another session.`)
+    return
+  }
+  if (!canMove(t.status, 'drafting')) {
+    $.ui.toast(moveRefusal(t.n, t.status, 'drafting'))
     return
   }
   // Paused before it ever ran: there's no run to pick up, so it starts as
@@ -1057,43 +1175,70 @@ export async function resumeTodo($: $, t: Todo) {
   }
   await patchUi($, u => ({ ...u, justStopped: u.justStopped.filter(x => x !== t.n) }))
   // In the chat's hands until it reports: no second ⏵ Resume meanwhile.
-  await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
+  if ((await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))) !== undefined) return
   const ctx = { kept: await keptWork($, t), digest: await digestOf($, t), canWake: t.isAgentGone !== true && t.taskId !== undefined }
   if ((await submit($, t, resumePrompt(t, ctx))) !== undefined) return
-  await focus($, `todo:${t.n}`)
+  if (via === 'chip') await focus($, `todo:${t.n}`)
   $.ui.toast(`▶ resuming #${t.n}`)
 }
 
 // Claims a todo another session put in flight. Its task there isn't stopped
 // (its ids are that session's): the todo is marked stopped here, to restart.
-export async function takeOver($: $, t: Todo) {
+// Resolves what it did, or why it didn't.
+export async function takeOver($: $, t: Todo, via: Via = 'chip') {
+  const say = (text: string) => {
+    if (via === 'chip') $.ui.toast(text)
+    return text
+  }
+  if (!canMove(t.status, 'stopped')) return say(moveRefusal(t.n, t.status, 'stopped'))
   await settleAgents($, t.n, 'stopped')
   // Its agent and run were the other session's: ⏵ Resume here starts a fresh
   // agent on the worktree it kept.
-  await patchTodo($, t.n, x => assign(x, { status: 'stopped', taskId: undefined, runId: undefined, owner: undefined, isAgentGone: true }))
-  await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped, t.n] }))
-  await focus($, `act:${t.n}:refine`)
-  $.ui.toast(`#${t.n} taken over`)
+  const held = await patchTodo($, t.n, x => assign(x, { status: 'stopped', taskId: undefined, runId: undefined, owner: undefined, isAgentGone: true }))
+  if (held !== undefined) return held
+  await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped.filter(x => x !== t.n), t.n] }))
+  if (via === 'chip') await focus($, `act:${t.n}:refine`)
+  return say(`#${t.n} taken over: stopped here; its run in the other session isn't stopped`)
 }
 
-export async function deleteTodo($: $, t: Todo) {
-  await editTodos($, l => l.filter(x => x.n !== t.n))
+// Resolves what it did, or why it didn't.
+export async function deleteTodo($: $, t: Todo, via: Via = 'chip') {
+  const say = (text: string) => {
+    if (via === 'chip') $.ui.toast(text)
+    return text
+  }
+  const refused: string[] = []
+  const isSaved = await editTodos($, l => l.filter(x => x.n !== t.n), refused)
   await patchUi($, u => ({ ...u, confirm: null }))
   await syncStatus($)
-  await focus($, 'add')
-  $.ui.toast(`✕ #${t.n} deleted`)
+  if (!isSaved || refused.length > 0) return refused[0] ?? 'the todo list could not be saved'
+  if (via === 'chip') await focus($, 'add')
+  return say(`✕ #${t.n} deleted`)
 }
 
-export async function renameTodo($: $, n: number, title: string) {
+// Resolves what it did.
+export async function renameTodo($: $, n: number, title: string, via: Via = 'chip') {
   const clean = title.trim()
   const was = (await read($, todos)).find(t => t.n === n)
   // A new title makes its drafts stale: they go, and it is drafted again.
-  if (clean && was && clean !== was.title) {
+  const isNew = clean !== '' && was !== undefined && clean !== was.title
+  if (isNew) {
     await patchTodo($, n, t => assign(t, { title: clean, drafts: undefined }))
     queueDrafts($, n)
   }
   await patchUi($, u => ({ ...u, renaming: null }))
-  await focus($, `todo:${n}`)
+  if (via === 'chip') await focus($, `todo:${n}`)
+  return isNew ? `✎ #${n} renamed ${clean}: its prompts are drafted again` : `#${n} is already called that.`
+}
+
+// ✓ Leave: a todo just stopped folds away, and leaves the view if it hides it.
+export async function leaveTodo($: $, n: number) {
+  await patchUi($, x => ({
+    ...x,
+    justStopped: x.justStopped.filter(m => m !== n),
+    expanded: collapse(x.expanded, `t${n}`),
+  }))
+  return `✓ #${n} left`
 }
 
 export async function askConfirm($: $, n: number, kind: Confirm) {
@@ -1107,10 +1252,13 @@ export async function cancelConfirm($: $, n: number, kind: Confirm) {
   await focus($, `act:${n}:${kind}`)
 }
 
-export async function setTodoStatus($: $, n: number, status: Todo['status']) {
-  // Reset takes a todo out of the chat's hands: a prompt a Stop held goes too.
-  await update($, queued, l => l.filter(q => q.n !== n))
-  await patchTodo($, n, t => ({ ...t, status }))
+// ↺ Reset: a todo in the chat's hands goes back to pending, or to stopped
+// once it has run. A prompt a Stop held goes too. Resolves what it did, or
+// why it didn't.
+export async function resetTodo($: $, t: Todo) {
+  const status = t.hasRun ? 'stopped' : 'pending'
+  await update($, queued, l => l.filter(q => q.n !== t.n))
+  return (await patchTodo($, t.n, x => ({ ...x, status }))) ?? `↺ #${t.n} reset to ${status}`
 }
 
 async function findTodo($: $, arg: string) {
@@ -1282,7 +1430,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
-      description: 'Per-directory todos: /todo add <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title> · /todo show · /todo noshow',
+      description:
+        'Per-directory todos: /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume|pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title> · /todo show · /todo noshow',
     })
     await $.tool.register({
       name: 'update',
@@ -1426,7 +1575,8 @@ export const register: Register = (on, options) => {
       if (!t.hasRun && t.status === 'paused') return { text: execNote(t, false) }
       return { text: `Resuming #${t.n} ${t.title}: Claude picks its work up in the chat.` }
     }
-    return { text: 'Usage: /todo [show] · /todo noshow · /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title>' }
+    if (isChipVerb(verb)) return { text: await chipCommand($, verb, rest) }
+    return { text: USAGE }
   })
 
   on('tool.call', { tool: 'mcp__todo__update' as never }, async ($, e) => {
@@ -1442,7 +1592,12 @@ export const register: Register = (on, options) => {
     const list = await read($, todos)
     const t = list.find(x => x.n === a.n)
     if (!t) return { result: `No todo #${a.n}.`, isError: true as const }
-    await patchTodo($, t.n, x => ({
+    // A status move hooks/transitions.json doesn't allow is refused whole,
+    // naming the moves that are, so Claude can send what applies.
+    if (a.status && !canMove(t.status, a.status)) {
+      return { result: `${moveRefusal(t.n, t.status, a.status)} Nothing was written.`, isError: true as const }
+    }
+    const held = await patchTodo($, t.n, x => ({
       ...x,
       ...(a.status ? { status: a.status } : {}),
       ...(a.prompt ? { prompt: a.prompt } : {}),
@@ -1452,6 +1607,8 @@ export const register: Register = (on, options) => {
       ...(a.landed ? { landed: a.landed } : {}),
       hasRun: x.hasRun || a.status === 'running',
     }))
+    // Moved meanwhile (another session's write) to where the move isn't allowed.
+    if (held !== undefined) return { result: held, isError: true as const }
     if (a.status === 'done' || a.status === 'failed') $.ui.toast(statusToast(t.n, a.status))
     const now = (await read($, todos)).find(x => x.n === t.n)
     return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
@@ -1628,11 +1785,15 @@ export const register: Register = (on, options) => {
       } else if (node?.status === 'running') {
         const failed = 'reason' in e && e.reason === 'refusal'
         await editAgents($, l => l.map((a): AgentNode => (a.agentId === id ? { ...a, status: failed ? 'failed' : 'done' } : a)))
-        // A lone background Agent's end is the todo's end; the model's later
-        // mcp__todo__update may still replace the summary.
+        // A lone background Agent's end isn't yet the todo's: whether its work
+        // landed is Claude's to report (protocol step 6), so the todo stays
+        // running until it does, with the answer's first line as a summary
+        // that report may replace. A refusal can't have landed anything: its
+        // todo fails at once.
         const t = (await read($, todos)).find(x => x.n === node.todoN)
         if (t?.mode === 'agent' && t.taskId === id && t.status === 'running') {
-          await patchTodo($, t.n, x => ({ ...x, status: failed ? 'failed' : 'done', summary: cut(firstLine(e.answer), 80) }))
+          const summary = cut(firstLine(e.answer), 80)
+          await patchTodo($, t.n, x => (failed ? { ...x, status: 'failed', summary } : { ...x, summary }))
         }
       }
     }

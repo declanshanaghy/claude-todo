@@ -1,0 +1,164 @@
+// Written by `node scripts/transitions.mjs --write` from hooks/transitions.json,
+// the one table of allowed Todo.status moves; never edit it by hand. That
+// script, run without --write, checks the two are identical (CI runs it).
+import type { TodoStatus } from '../types'
+
+// [*] is before the todo exists (from) or after it is removed (to).
+export type End = TodoStatus | '[*]'
+export type Move = { from: End; to: End; by: string; at: string }
+
+export const TABLE: { about: string; transitions: Move[] } = {
+  "about": "Every Todo.status move the code may make: the one table of allowed moves. The mod's guard (editTodos and mcp__todo__update in register.tsx) reads its mirror, TABLE in hooks/transitions.ts, as a hooks module can't import JSON; node scripts/transitions.mjs checks the two are identical, and scripts/state-check.mjs model-checks this table against the diagram in docs/architecture.md. [*] is before the todo exists (from) or after it is removed (to). A write that keeps the status is never a move.",
+  "transitions": [
+    {
+      "from": "[*]",
+      "to": "pending",
+      "by": "＋ add",
+      "at": "register.tsx addTodo"
+    },
+    {
+      "from": "pending",
+      "to": "prompting",
+      "by": "drafter spawned (＋ add, ✎ Rename)",
+      "at": "register.tsx launchDrafts"
+    },
+    {
+      "from": "prompting",
+      "to": "prompting",
+      "by": "✎ Rename",
+      "at": "register.tsx launchDrafts"
+    },
+    {
+      "from": "prompting",
+      "to": "pending",
+      "by": "drafts stored / drafter ended / sync tick",
+      "at": "register.tsx storeDrafts, unprompt, settlePrompting"
+    },
+    {
+      "from": "pending",
+      "to": "drafting",
+      "by": "▶ Exec · ⚡ Auto · 🔥 Fire · /todo exec",
+      "at": "register.tsx execTodo"
+    },
+    {
+      "from": "stopped",
+      "to": "drafting",
+      "by": "✨ Refine · ↻ Restart · ⏵ Resume · /todo exec, refine, restart, resume",
+      "at": "register.tsx execTodo, restartTodo, resumeTodo"
+    },
+    {
+      "from": "failed",
+      "to": "drafting",
+      "by": "✨ Refine · ↻ Restart · ⏵ Resume · /todo exec, refine, restart, resume",
+      "at": "register.tsx execTodo, restartTodo, resumeTodo"
+    },
+    {
+      "from": "paused",
+      "to": "drafting",
+      "by": "⏵ Resume · /todo resume (▶ Exec if it never ran)",
+      "at": "register.tsx resumeTodo, execTodo"
+    },
+    {
+      "from": "drafting",
+      "to": "planning",
+      "by": "Claude reports multi-step",
+      "at": "protocol.ts step 5 → mcp__todo__update"
+    },
+    {
+      "from": "drafting",
+      "to": "running",
+      "by": "Claude reports simple or resumed / Agent launched",
+      "at": "protocol.ts step 4, resume step 3; register.tsx tool.call (Agent)"
+    },
+    {
+      "from": "planning",
+      "to": "running",
+      "by": "plan approved / Workflow launched",
+      "at": "protocol.ts step 5d; register.tsx tool.call (Workflow)"
+    },
+    {
+      "from": "running",
+      "to": "paused",
+      "by": "⏸ Pause · /todo pause",
+      "at": "register.tsx haltTodo"
+    },
+    {
+      "from": "running",
+      "to": "stopped",
+      "by": "■ Stop · /todo stop · agent aborted outside the pane · ⇄ Takeover · Claude reports stopped",
+      "at": "register.tsx haltTodo, turn.complete, takeOver; protocol.ts step 6"
+    },
+    {
+      "from": "paused",
+      "to": "stopped",
+      "by": "■ Stop · /todo stop · ⇄ Takeover · Claude reports stopped",
+      "at": "register.tsx haltTodo, takeOver; protocol.ts step 6"
+    },
+    {
+      "from": "running",
+      "to": "done",
+      "by": "Claude reports landed",
+      "at": "protocol.ts step 6 → mcp__todo__update"
+    },
+    {
+      "from": "running",
+      "to": "failed",
+      "by": "lone agent refused / Claude reports not landed",
+      "at": "register.tsx turn.complete; protocol.ts step 6"
+    },
+    {
+      "from": "drafting",
+      "to": "pending",
+      "by": "↺ Reset · /todo reset (never ran) · question dismissed · prompt refused",
+      "at": "register.tsx resetTodo, submit; protocol.ts"
+    },
+    {
+      "from": "planning",
+      "to": "pending",
+      "by": "↺ Reset · /todo reset (never ran) · question dismissed",
+      "at": "register.tsx resetTodo; protocol.ts"
+    },
+    {
+      "from": "drafting",
+      "to": "stopped",
+      "by": "↺ Reset · /todo reset (has run) · ⇄ Takeover · prompt refused · resume started nothing",
+      "at": "register.tsx resetTodo, takeOver, submit; protocol.ts resume step 3"
+    },
+    {
+      "from": "planning",
+      "to": "stopped",
+      "by": "↺ Reset · /todo reset (has run) · ⇄ Takeover",
+      "at": "register.tsx resetTodo, takeOver"
+    },
+    {
+      "from": "drafting",
+      "to": "failed",
+      "by": "prompt refused · resume started nothing",
+      "at": "register.tsx submit; protocol.ts resume step 3"
+    },
+    {
+      "from": "drafting",
+      "to": "paused",
+      "by": "prompt refused · resume started nothing",
+      "at": "register.tsx submit; protocol.ts resume step 3"
+    },
+    {
+      "from": "prompting",
+      "to": "[*]",
+      "by": "✕ Delete · /todo delete",
+      "at": "register.tsx deleteTodo"
+    },
+    {
+      "from": "pending",
+      "to": "[*]",
+      "by": "✕ Delete · /todo delete (never ran)",
+      "at": "register.tsx deleteTodo"
+    },
+    {
+      "from": "done",
+      "to": "[*]",
+      "by": "expires",
+      "at": "register.tsx expire"
+    }
+  ]
+}

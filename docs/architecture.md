@@ -82,8 +82,8 @@ A todo is always in one of nine states. `MARK` in `hooks/marks.tsx` gives each o
 %%{init: {"themeVariables": {"fontSize": "20px"}, "state": {"nodeSpacing": 60, "rankSpacing": 70}}}%%
 stateDiagram-v2
   direction TB
-  [*] --> prompting: ＋ add
-  pending --> prompting: ✎ Rename
+  [*] --> pending: ＋ add
+  pending --> prompting: drafter spawned (＋ add, ✎ Rename)
   prompting --> prompting: ✎ Rename
   prompting --> pending: drafts ready / drafter gone
 
@@ -96,8 +96,8 @@ stateDiagram-v2
   paused --> drafting: ⏵ Resume
   running --> stopped: ■ Stop
   paused --> stopped: ■ Stop
-  running --> done: landed
-  running --> failed: didn't land
+  running --> done: Claude reports landed
+  running --> failed: Claude reports not landed
 
   stopped --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
   failed --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
@@ -106,15 +106,17 @@ stateDiagram-v2
   planning --> pending: ↺ Reset (never ran)
   drafting --> stopped: ↺ Reset (has run)
   planning --> stopped: ↺ Reset (has run)
+  drafting --> paused: prompt refused · resume started nothing
+  drafting --> failed: prompt refused · resume started nothing
 
   prompting --> [*]: ✕ Delete
   pending --> [*]: ✕ Delete (never ran)
   done --> [*]: expires
 ```
 
-Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would.
+Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would. Every other chip has a verb of its own name too (`/todo pause 3`, `/todo rename 3 <new title>`; see [Buttons by state](#buttons-by-state)). A dropped prompt (`drafting → paused/failed/pending/stopped`) puts the todo back where it was. A lone Agent's end leaves its todo running: only Claude knows whether the work landed, and reports done or failed.
 
-`node scripts/state-check.mjs` model-checks this diagram against the moves the code makes (`hooks/transitions.json`) with TLA+'s TLC; [state-validation.md](state-validation.md) has why that tool, how to run it, and what it found.
+`hooks/transitions.json` is the one table of the moves a todo may make. Every status write goes through one guard (`editTodos` in `hooks/register.tsx`), which reads the table's mirror in `hooks/transitions.ts` (a hooks module can't import JSON; `node scripts/transitions.mjs` checks the two are identical and `--write` regenerates the mirror). A move the table doesn't allow keeps the old status, says so once, and lets the rest of the write stand; `mcp__todo__update` answers such a move with an error naming the moves that are allowed, and writes nothing. A test drives every move and checks the code makes exactly the table's moves. `node scripts/state-check.mjs` model-checks this diagram against the table with TLA+'s TLC; [state-validation.md](state-validation.md) has why that tool, how to run it, and what it found.
 
 | State | Mark | Meaning | Who moves it on |
 |---|---|---|---|
@@ -122,7 +124,7 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 | pending | ● | Ready to run: never run (or run, then reset before it started again) | You |
 | drafting | ✎ | Claude is writing or refining the prompt, or resuming | Claude, via `mcp__todo__update` |
 | planning | ◇ | Multi-step: plan-mode questions and the execution tree | Claude |
-| running | ▶ (spins) | An Agent or Workflow is working | The agent's end |
+| running | ▶ (spins) | An Agent or Workflow is working | Claude's report once it ends (done, failed or stopped); an abort or refusal at once |
 | paused | ⏸ | Halted with its run kept, so Resume picks up where it was | You |
 | stopped | ■ | Halted for good; its worktree and branch are kept | You |
 | done | ✓ | Landed (or committed, with no remote) | Expires after the keep period |
@@ -144,6 +146,8 @@ Each button is filled with the color of the state it leads to (the launchers in 
 | stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ☰ Details, all on one row | drafting · drafting · drafting · collapses it · call browser |
 | done | ☰ Details | call browser |
 | in flight in another session | ⇄ Takeover · ☰ Details | confirm → stopped here · call browser |
+
+Every chip is also a `/todo` verb of its own name taking `<n|title>` (`/todo rename <n> <new title>` takes the number, then the title): `exec`, `auto`, `rename`, `delete`, `reset`, `pause`, `stop`, `resume`, `refine`, `restart`, `leave`, `takeover`, `details`. The row and the verb read the same `offers()` (`hooks/moves.ts`) and call the same action function, so a verb works exactly where its chip is drawn; anywhere else it answers in one line with the todo's status and the verbs that do apply, and changes nothing. `exec` and `auto` keep their wider reach (a stopped or failed todo too). A verb whose chip asks first (Stop, Delete, Takeover) acts at once, since typing it is already the explicit request, and answers any confirmation the pane had open for that todo. A verb that submits a prompt (refine, restart, as exec and resume) does so from a timer once the command answered; `details` opens the dialog with the pane holding the keys, and Esc goes back.
 
 The confirmations:
 

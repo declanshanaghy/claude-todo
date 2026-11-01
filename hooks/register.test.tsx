@@ -5,7 +5,10 @@ import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
 import { CHIP_SYMBOL, DIVIDER, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 import { clampLines, headParts } from './pane'
+import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
+import { TODO_VERBS } from './register'
+import { TABLE } from './transitions'
 
 const PANE = {
   plugin: 'todo',
@@ -239,6 +242,9 @@ type T$ = Parameters<TestBody>[0]
 
 const start = ($: T$) => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 const todo = ($: T$, args: string) => $.command.run({ command: 'todo', args } as never)
+// Hands todo #n to the chat, as ▶ Exec does, so a launch may take it running:
+// the guard refuses pending → running.
+const inChat = ($: T$, n: number) => $.tool.call({ tool: 'mcp__todo__update', n, status: 'drafting' } as never)
 // A todo row as the database holds it; a missing one fails the test.
 const todoAt = (db: Db, n: number, dir = '/proj') => {
   const t = db.todos[dir]?.[n]
@@ -395,6 +401,7 @@ test('M3: a tagged Agent links its spawn and its tool calls show under it', asyn
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'a.md\nb.md', stderr: '' }, text: 'a.md\nb.md' }))
   await start($)
   await todo($, 'add Count md files')
+  await inChat($, 1)
 
   await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:1] Count md files', prompt: 'count', subagent_type: 'general-purpose' } as never)
   await $.agent.spawn({ prompt: 'count', description: '[todo:1] Count md files', tool_use_id: 'tu1' } as never)
@@ -432,6 +439,7 @@ test('M5: Stop asks first, keeps the todo, and offers what next', async ($, on) 
   })
   await start($)
   await todo($, 'add Count md files')
+  await inChat($, 1)
   await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:1] Count', prompt: 'count', subagent_type: 'general-purpose' } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -473,6 +481,7 @@ test('M4: Pause stops the task, Resume asks Claude to continue it', async ($, on
   })
   await start($)
   await todo($, 'add Migrate statusline')
+  await inChat($, 1)
   await $.tool.call({ tool: 'Workflow', tool_use_id: 'tu1', script: "export const meta = { name: 'todo-1-statusline', description: 'x' }" } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1681,12 +1690,14 @@ test('a Workflow named todo-N- links, recording its mode, task, run and script',
   on('tool.call', { tool: 'Workflow' }, () => ({ result: { status: 'async_launched', taskId: 'task9', runId: 'wf_abc', scriptPath: '/tmp/s.js' } }))
   await start($)
   await todo($, 'add Migrate statusline')
+  await inChat($, 1)
   await $.tool.call({ tool: 'Workflow', tool_use_id: 'tu1', script: 'export const meta = { name: "todo-1-statusline" }' } as never)
   expect(todoAt(db, 1)).toMatchObject({ mode: 'workflow', status: 'running', taskId: 'task9', runId: 'wf_abc', scriptPath: '/tmp/s.js', hasRun: true, toolUseIds: ['tu1'], owner: 's1' })
 })
 
 test('a resumed Workflow links by its resumeFromRunId, keeping what the result leaves out', async ($, on) => {
-  const db = seeded([aTodo(1, 'Migrate', { status: 'paused', hasRun: true, mode: 'workflow', taskId: 'task9', runId: 'wf_abc', scriptPath: '/tmp/s.js', toolUseIds: ['tu1'], owner: 's1' })])
+  // ⏵ Resume has put it in the chat's hands.
+  const db = seeded([aTodo(1, 'Migrate', { status: 'drafting', hasRun: true, mode: 'workflow', taskId: 'task9', runId: 'wf_abc', scriptPath: '/tmp/s.js', toolUseIds: ['tu1'], owner: 's1' })])
   engine(on, [], undefined, true, { db })
   on('tool.call', { tool: 'Workflow' }, () => ({ result: { status: 'async_launched', taskId: 'task10' } }))
   await start($)
@@ -1944,7 +1955,7 @@ test('Delete removes the row and puts the ring on the add input', async ($, on) 
 
 // ---------- a turn's end ----------
 
-test("an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it", async ($, on) => {
+test("an agent's turn ends it: a lone Agent's todo stays running until Claude reports, a refusal fails it, an abort stops it", async ($, on) => {
   const db = seeded(
     [running(1, 'Done one'), running(2, 'Refused one'), running(3, 'Aborted one'), running(4, 'Workflow', { mode: 'workflow', taskId: 'task9' })],
     [agentNode('ag1', 1), agentNode('ag2', 2), agentNode('ag3', 3), agentNode('ag4', 4, { kind: 'workflow' })],
@@ -1956,7 +1967,11 @@ test("an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails
   await turnDone($, 'ag3', '', { isAborted: true })
   await turnDone($, 'ag4', 'wave 1 done')
   expect(agentAt(db, 'ag1').status).toBe('done')
-  expect(todoAt(db, 1)).toMatchObject({ status: 'done', summary: 'Counted 12 md files.' })
+  // Whether its work landed is Claude's to say (protocol step 6): until then
+  // the todo runs on, the answer's first line kept as its summary.
+  expect(todoAt(db, 1)).toMatchObject({ status: 'running', summary: 'Counted 12 md files.' })
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'failed', summary: "didn't land: checks fail" } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'failed', summary: "didn't land: checks fail" })
   expect(agentAt(db, 'ag2').status).toBe('failed')
   expect(todoAt(db, 2).status).toBe('failed')
   expect(agentAt(db, 'ag3').status).toBe('stopped')
@@ -1973,6 +1988,7 @@ test('mcp__todo__update reports a change and mcp__todo__list reads the backlog',
   const { db } = engine(on, [], undefined, true, { toasts })
   await start($)
   await todo($, 'add Count md files')
+  await inChat($, 1)
   const set = await $.tool.call({ tool: 'mcp__todo__update', n: 1, prompt: 'count them', mode: 'agent', status: 'running' } as never)
   expect(set.result).toBe('#1 Count md files: running')
   expect(set.isError).toBeFalsy()
@@ -2165,6 +2181,9 @@ test('drafts that arrive once a todo is running are kept without touching its ru
   await start($)
   await todo($, 'add Fix kitty tab titles')
   await clock.settle()
+  // Its drafter ended with none, so it was started; drafts come in late.
+  await turnDone($, 'dr1', 'Nothing yet.')
+  await inChat($, 1)
   await $.tool.call({ tool: 'mcp__todo__update', n: 1, prompt: 'mine', mode: 'agent', status: 'running' } as never)
   await storeDrafts($, 1, '1.1')
   expect(todoAt(db, 1)).toMatchObject({ status: 'running', prompt: 'mine', drafts: DRAFTS })
@@ -3750,4 +3769,212 @@ test('a held prompt the host refuses for another reason puts the todo back as it
   await clock.advance(1)
   expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', taskId: 'ag1' })
   expect(toasts).toContain("#1 didn't start: a hook refused it")
+})
+
+// ---------- a /todo verb for every chip ----------
+
+// Every chip a todo's row can draw, each a /todo verb of the same name.
+const CHIP_VERBS: Chip[] = ['exec', 'auto', 'rename', 'delete', 'reset', 'pause', 'stop', 'resume', 'refine', 'restart', 'leave', 'takeover', 'details']
+// What the yes of a chip's confirmation leads to: its command acts at once.
+const CONFIRMED: Record<string, Lead> = { deleteyes: 'removed', stopyes: 'stopped', takeyes: 'stopped' }
+
+test('every chip has a /todo verb that does what the chip does wherever it is drawn, and refuses it everywhere else', { timeoutMs: 60_000 }, async ($, on) => {
+  // The rows of the chip table a command can reach: a confirmation is the
+  // pane's own question, and a command never asks it.
+  const rows = BY_STATE.filter(r => r.before === undefined || r.before.join(' ') === 'stop stopyes')
+  const presses = rows.flatMap(r => CHIP_VERBS.map(verb => ({ r, verb })))
+  const db = seeded(presses.map(({ r }, i) => r.todo(i + 1)))
+  const submitted: string[] = []
+  const openedWith: { id: string; focus?: boolean; closeOnEscape?: boolean }[] = []
+  engine(on, submitted, undefined, false, { db, openedWith })
+  const clock = mock.clock(on, { now: 1000 })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  await start($)
+  for (const [i, { r, verb }] of presses.entries()) {
+    const n = i + 1
+    // Just stopped: the command stops it as the chip would.
+    if (r.before) await todo($, `stop ${n}`)
+    const was = todoAt(db, n).status
+    const asked = submitted.length
+    const said = (await todo($, verb === 'rename' ? `rename ${n} Renamed` : `${verb} ${n}`)).text ?? ''
+    await clock.settle()
+    const at = `${r.state} → /todo ${verb}`
+    const chip = r.chips[verb]
+    if (chip === undefined) {
+      // exec and auto also start a stopped or failed todo (their own rules).
+      if (verb === 'exec' || verb === 'auto') continue
+      expect(`${at}: ${new RegExp(`^#${n}(?!\\d)`).test(said)}`).toBe(`${at}: true`)
+      expect(`${at}: ${todoAt(db, n).status}, ${submitted.length - asked} submitted`).toBe(`${at}: ${was}, 0 submitted`)
+      continue
+    }
+    const lead = typeof chip === 'object' ? CONFIRMED[chip.confirm.find(k => k in CONFIRMED) ?? ''] : chip
+    if (lead === 'removed') expect(`${at}: ${String(db.todos['/proj']?.[n] === undefined)}`).toBe(`${at}: true`)
+    else if (lead === 'browser') expect(`${at}: ${JSON.stringify(openedWith.at(-1))}`).toBe(`${at}: ${JSON.stringify({ id: 'todo', focus: true, closeOnEscape: true })}`)
+    else if (verb === 'rename') expect(`${at}: ${todoAt(db, n).title}`).toBe(`${at}: Renamed`)
+    else expect(`${at}: ${JSON.stringify(todoAt(db, n).status)}`).toBe(`${at}: ${JSON.stringify(lead)}`)
+  }
+})
+
+test('a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so', async ($, on) => {
+  const db = seeded([
+    aTodo(1, 'Waiting'),
+    aTodo(2, 'Again', { hasRun: true }),
+    running(3, 'Runs'),
+    aTodo(4, 'Halted', { status: 'stopped', hasRun: true }),
+    running(5, 'Elsewhere', { owner: 'other' }),
+    aTodo(6, 'Drafting', { status: 'drafting', owner: 's1' }),
+  ])
+  engine(on, [], undefined, false, { db })
+  mock.clock(on, { now: 1000 })
+  await start($)
+  const said = async (args: string) => (await todo($, args)).text
+  expect(await said('pause 1')).toBe('#1 is pending, so /todo pause doesn\'t apply; it takes /todo exec 1 · /todo auto 1 · /todo rename 1 · /todo delete 1 · /todo details 1.')
+  expect(await said('reset 3')).toBe('#3 is running, so /todo reset doesn\'t apply; it takes /todo pause 3 · /todo stop 3 · /todo details 3.')
+  expect(await said('stop 6')).toBe('#6 is drafting, so /todo stop doesn\'t apply; it takes /todo reset 6.')
+  expect(await said('delete 2')).toBe('#2 has run: only a todo that never ran can be deleted.')
+  expect(await said('leave 4')).toBe("#4 wasn't just stopped: nothing to leave.")
+  expect(await said('takeover 3')).toBe('#3 is running, not in flight in another session: nothing to take over.')
+  expect(await said('pause 5')).toBe('#5 is running in another session.')
+  expect(await said('pause nothing-like-it')).toBe('No todo matches "nothing-like-it".')
+  expect(await said('stop')).toBe('Usage: /todo stop <n|title>')
+  // rename takes the number, then the new title.
+  expect(await said('rename 1')).toBe('Usage: /todo rename <n> <new title>')
+  expect(await said('rename Waiting Better')).toBe('Usage: /todo rename <n> <new title>')
+  expect(await said('rename 1 Waiting')).toBe('#1 is already called that.')
+  expect(await said('rename #1 Better title')).toBe('✎ #1 renamed Better title: its prompts are drafted again')
+  expect(todoAt(db, 1).title).toBe('Better title')
+  expect(todoAt(db, 3).status).toBe('running')
+})
+
+test('a chip verb is a verb, never a title: /todo <verb> runs it rather than adding a todo', async ($, on) => {
+  const db = seeded([running(1, 'Runs')])
+  engine(on, [], undefined, false, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  mock.clock(on, { now: 1000 })
+  await start($)
+  for (const verb of CHIP_VERBS) expect(`${verb}: ${String((TODO_VERBS as readonly string[]).includes(verb))}`).toBe(`${verb}: true`)
+  expect((await todo($, 'pause 1')).text).toBe('⏸ #1 paused')
+  expect((await todo($, 'stop runs')).text).toBe('■ #1 stopped')
+  for (const verb of CHIP_VERBS.filter(v => v !== 'exec' && v !== 'auto')) await todo($, `${verb} 99`)
+  expect(titles(db, '/proj')).toEqual(['1 Runs'])
+})
+
+test('a command acts without the question its chip asks, answering a confirmation the pane had open', async ($, on) => {
+  const db = seeded([running(1, 'Runs'), aTodo(2, 'Waiting'), running(3, 'Elsewhere', { owner: 'other' })])
+  engine(on, [], undefined, false, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:stop' })
+  expect(await ui.find({ type: 'Button', key: 'act:1:keep' })).toBeDefined()
+  expect((await todo($, 'stop 1')).text).toBe('■ #1 stopped')
+  // The question is answered: the row offers what next, Leave among it.
+  expect(await ui.find({ type: 'Button', key: 'act:1:keep' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:leave' })).toBeDefined()
+  expect((await todo($, 'leave 1')).text).toBe('✓ #1 left')
+  expect((await todo($, 'delete 2')).text).toBe('✕ #2 deleted')
+  expect(db.todos['/proj']?.[2]).toBeUndefined()
+  expect((await todo($, 'takeover 3')).text).toBe("#3 taken over: stopped here; its run in the other session isn't stopped")
+  expect(todoAt(db, 3)).toMatchObject({ status: 'stopped', isAgentGone: true })
+  expect(todoAt(db, 3).owner).toBeUndefined()
+  await ui.unmount()
+})
+
+// ---------- the guard: hooks/transitions.json ----------
+
+test('mcp__todo__update refuses a status move the table does not allow, naming the moves it does, and writes nothing', async ($, on) => {
+  const db = seeded([aTodo(1, 'Waiting'), running(2, 'Runs')])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const r = await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'done', summary: 'landed' } as never)
+  expect(r).toMatchObject({
+    result: "#1 can't go from pending to done: from pending it can only go to prompting, drafting, removed. Nothing was written.",
+    isError: true,
+  })
+  expect(todoAt(db, 1).status).toBe('pending')
+  expect(todoAt(db, 1).summary).toBeUndefined()
+  expect(movesFrom('done')).toEqual(['[*]'])
+  const late = await $.tool.call({ tool: 'mcp__todo__update', n: 2, status: 'drafting' } as never)
+  expect(late.isError).toBe(true)
+  // An allowed move still lands.
+  const ok = await $.tool.call({ tool: 'mcp__todo__update', n: 2, status: 'done', summary: 'landed' } as never)
+  expect(ok.isError).toBeFalsy()
+  expect(todoAt(db, 2)).toMatchObject({ status: 'done', summary: 'landed' })
+})
+
+test("the guard keeps a todo's status when an internal move isn't in the table, saying so once, and the rest of the write stands", async ($, on) => {
+  const toasts: string[] = []
+  const db = seeded([aTodo(1, 'Waiting')])
+  engine(on, [], undefined, true, { db, toasts })
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag1' } }))
+  await start($)
+  // Launched outside the protocol: pending → running isn't a move.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:1] Waiting', prompt: 'p', subagent_type: 'general-purpose' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'pending', taskId: 'ag1', mode: 'agent', toolUseIds: ['tu1'] })
+  expect(toasts.filter(x => x.startsWith("todo: #1 can't go from pending to running"))).toHaveLength(1)
+})
+
+test('every status move the code makes is in hooks/transitions.json, and every move there is one the code makes', { timeoutMs: 30_000 }, async ($, on) => {
+  // What each todo write moved, read from the scripts as they reach the database.
+  const made = new Set<string>()
+  const db = seeded([
+    aTodo(2, 'Cycle', { status: 'drafting', hasRun: true, owner: 's1', mode: 'agent', taskId: 'ag2' }),
+    running(3, 'Stop me'),
+    running(4, 'Fail me'),
+    aTodo(5, 'Reset me', { status: 'drafting', owner: 's1' }),
+    aTodo(6, 'Plan me', { status: 'planning', owner: 's1' }),
+    aTodo(7, 'Plan again', { status: 'planning', hasRun: true, owner: 's1' }),
+    aTodo(8, 'Drafting elsewhere', { status: 'prompting', owner: 'other', promptingAt: Date.now() }),
+    aTodo(9, 'Delete me'),
+  ])
+  const sql = (op: Op, d: Db) => {
+    if (op.kind !== 'todos') return undefined
+    const had = d.todos[op.dir] ?? {}
+    for (const t of op.put) made.add(`${(had[t.n] as Todo | undefined)?.status ?? '[*]'} → ${t.status}`)
+    for (const n of op.del) made.add(`${(had[n] as Todo | undefined)?.status ?? '[*]'} → [*]`)
+    return undefined
+  }
+  const { clock, toasts } = drafterEngine(on, { db, sql })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  await start($)
+  const report = (n: number, status: Todo['status']) => $.tool.call({ tool: 'mcp__todo__update', n, status } as never)
+  const run = async (args: string) => {
+    await todo($, args)
+    await clock.settle()
+  }
+  // Added, drafted, run through a plan to done.
+  await run('add Fresh one')
+  await turnDone($, 'dr1', JSON.stringify({ n: 10, key: '10.1', drafts: DRAFTS }))
+  await run('exec 10')
+  await report(10, 'planning')
+  await report(10, 'running')
+  await report(10, 'done')
+  // Around the cycle: running, paused, resumed, failed, refined, reset,
+  // restarted, a resume that started nothing, stopped.
+  await report(2, 'running')
+  await run('pause 2')
+  await run('resume 2')
+  await report(2, 'failed')
+  await run('refine 2')
+  await run('reset 2')
+  await run('restart 2')
+  await report(2, 'paused')
+  await run('stop 2')
+  await run('stop 3')
+  await report(4, 'failed')
+  await run('reset 5')
+  await run('reset 6')
+  await run('reset 7')
+  await run('delete 8')
+  await run('delete 9')
+  expect(toasts.filter(x => x.includes("can't go from"))).toEqual([])
+  // A write that keeps the status isn't a move; done → [*] is the tree
+  // hiding a done todo, never a write.
+  const table = new Set(TABLE.transitions.map(m => `${m.from} → ${m.to}`))
+  const quiet = new Set(['prompting → prompting', 'done → [*]'])
+  const moves = [...made].filter(m => m.split(' → ')[0] !== m.split(' → ')[1])
+  expect(moves.filter(m => !table.has(m))).toEqual([])
+  expect([...table].filter(m => !quiet.has(m) && !made.has(m))).toEqual([])
 })

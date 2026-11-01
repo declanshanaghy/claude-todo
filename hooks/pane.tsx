@@ -3,24 +3,23 @@ import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-c
 import type { AgentNode, Call, PaneUi, Todo, Turn } from '../types'
 import { clean } from './detail'
 import { DIVIDER, SUMMARY, type Tone, markOf, markText, statusChip, statusGlyph, tally, viewOf, viewToggle } from './marks'
+import { type Chip, offers } from './moves'
 import {
   addTodo,
   askConfirm,
-  canResume,
-  isOwnedElsewhere,
   cancelConfirm,
-  collapse,
   deleteTodo,
   execTodo,
   fireBlock,
   fireNext,
   haltTodo,
+  leaveTodo,
   openDetail,
   patchUi,
   renameTodo,
+  resetTodo,
   restartTodo,
   resumeTodo,
-  setTodoStatus,
   takeOver,
   toggle,
   toggleView,
@@ -262,16 +261,39 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         </Box>,
       ]
     }
-    // In flight in another session: its task ids aren't this one's to pause.
-    if (isOwnedElsewhere(t, me)) {
-      return [
-        <Box gap={1}>
-          <Text dimColor>{t.status} in another session</Text>
-          {btn('takeover', 'Takeover', () => askConfirm($, t.n, 'takeover'), 'stopped')}
-          {details}
-        </Box>,
-      ]
+    // What the row offers comes from offers() (moves.ts), which the /todo
+    // verbs check too, so a chip and its command can't disagree. Each chip's
+    // fill is the color of the status it leads to.
+    const make: Record<Chip, () => JSX.Element> = {
+      // Exec and Auto start a run (through drafting), so both wear running's fill.
+      exec: () => btn('exec', 'Exec', () => execTodo($, t, false), 'running'),
+      auto: () => btn('auto', 'Auto', () => execTodo($, t, false, true), 'running'),
+      rename: () => btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n }))),
+      delete: () => btn('delete', 'Delete', () => askConfirm($, t.n, 'delete'), 'danger'),
+      reset: () => btn('reset', 'Reset', () => resetTodo($, t)),
+      pause: () => btn('pause', 'Pause', () => haltTodo($, t, 'paused'), 'paused'),
+      stop: () => btn('stop', 'Stop', () => askConfirm($, t.n, 'stop'), 'stopped'),
+      resume: () => btn('resume', 'Resume', () => resumeTodo($, t), 'running'),
+      refine: () => btn('refine', 'Refine', () => execTodo($, t, true), 'drafting'),
+      restart: () => btn('restart', 'Restart', () => restartTodo($, t), 'drafting'),
+      leave: () => btn('leave', 'Leave', () => leaveTodo($, t.n)),
+      // In flight in another session: its task ids aren't this one's to pause.
+      takeover: () => btn('takeover', 'Takeover', () => askConfirm($, t.n, 'takeover'), 'stopped'),
+      details: () => details,
     }
+    const on = offers(t, me, u.justStopped)
+    // A hint leads the row where the todo is out of this pane's hands.
+    const hint = on.includes('takeover')
+      ? `${t.status} in another session`
+      : t.status === 'drafting' || t.status === 'planning'
+        ? queued.includes(t.n)
+          ? 'queued: starts after your next message'
+          : t.status === 'planning'
+            ? 'planning in the chat…'
+            : t.hasRun
+              ? 'continuing in the chat…'
+              : 'answer the prompt question in the chat…'
+        : ''
     if (c === 'delete') {
       return [
         <Text color="error">Delete "#{t.n} {t.title}"?</Text>,
@@ -281,81 +303,13 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         </Box>,
       ]
     }
-    switch (t.status) {
-      case 'prompting':
-      case 'pending': {
-        // Prompting, its drafter is still writing: nothing may start it yet, so
-        // Exec and Auto are left out until its drafts turn it pending. The
-        // level-1 hint says why.
-        const isHeld = t.status === 'prompting'
-        return [
-          <Box gap={1}>
-            {/* Exec and Auto start a run (through drafting), so both wear running's fill. */}
-            {!isHeld && btn('exec', 'Exec', () => execTodo($, t, false), 'running')}
-            {!isHeld && btn('auto', 'Auto', () => execTodo($, t, false, true), 'running')}
-            {btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
-            {!t.hasRun && btn('delete', 'Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
-            {details}
-          </Box>,
-        ]
-      }
-      case 'drafting':
-      case 'planning':
-        return [
-          <Box gap={1}>
-            <Text dimColor>
-              {queued.includes(t.n)
-                ? 'queued: starts after your next message'
-                : t.status === 'planning'
-                  ? 'planning in the chat…'
-                  : t.hasRun
-                      ? 'continuing in the chat…'
-                      : 'answer the prompt question in the chat…'}
-            </Text>
-            {btn('reset', 'Reset', () => setTodoStatus($, t.n, t.hasRun ? 'stopped' : 'pending'))}
-          </Box>,
-        ]
-      case 'running':
-        return [
-          <Box gap={1}>
-            {btn('pause', 'Pause', () => haltTodo($, t, 'paused'), 'paused')}
-            {btn('stop', 'Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
-            {details}
-          </Box>,
-        ]
-      case 'paused':
-        return [
-          <Box gap={1}>
-            {btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
-            {btn('stop', 'Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
-            {details}
-          </Box>,
-        ]
-      case 'stopped':
-      case 'failed': {
-        const fresh = u.justStopped.includes(t.n)
-        // One row, like every state's: carry on first, then start over, then
-        // put it away, Details last.
-        return [
-          <Box gap={1}>
-            {canResume(t) && btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
-            {btn('refine', 'Refine', () => execTodo($, t, true), 'drafting')}
-            {btn('restart', 'Restart', () => restartTodo($, t), 'drafting')}
-            {fresh &&
-              btn('leave', 'Leave', async () => {
-                await patchUi($, x => ({
-                  ...x,
-                  justStopped: x.justStopped.filter(n => n !== t.n),
-                  expanded: collapse(x.expanded, `t${t.n}`),
-                }))
-              })}
-            {details}
-          </Box>,
-        ]
-      }
-      case 'done':
-        return [<Box gap={1}>{details}</Box>]
-    }
+    // One row, whatever the state: carry on, start over, put away, Details last.
+    return [
+      <Box gap={1}>
+        {hint ? <Text dimColor>{hint}</Text> : ''}
+        {on.map(k => make[k]())}
+      </Box>,
+    ]
   }
 
   // The columns a lit item's content has: the body less its padding and the
