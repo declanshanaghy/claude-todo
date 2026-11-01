@@ -80,6 +80,8 @@ A dev copy loaded with `--plugin-dir` gets no `/config` row, so use the environm
 
 ## How it works
 
+[Architecture](docs/architecture.md) has the diagrams: how the pieces fit, where state lives, how writes from parallel sessions stay safe, how a todo runs, and how parallel todos land.
+
 - **Scope.** Todos belong to a directory: the repo the session is in, else your home directory. Every session there, now or later, shares one list. If a session moves to another repo (`/cd`, a worktree move), the pane switches to that repo's list.
 - **Storage.** Todos, their agents, and every tool call those agents made (input, response, timing, outcome, and the session that recorded it) live in one SQLite file in Claude Code's plugin data folder. It's shared by every session and by both the installed and a dev copy of the mod, so a restarted session can still browse past runs. The mod drives it through the `sqlite3` CLI (see `hooks/db.ts`). A todo write names the list revision it was based on. If another session changed the list in between, the write is refused inside the same transaction, and the mod re-reads and applies the change again, so no edit is lost. The pane re-reads only when the file changes.
 - **Ownership.** A todo in flight (drafting, planning, running, paused) belongs to the session that launched it. Other sessions show it, won't pause or resume it (its task ids aren't theirs), and offer **⇄ Take over** instead. Nothing is taken over automatically, so a session waking from sleep keeps its work.
