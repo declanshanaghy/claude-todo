@@ -258,7 +258,9 @@ test('M1: /todo add stores a title-only todo and the pane lists it', async ($, o
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /cap 6 agents/ }))?.text).toBe('cap 6 agents')
+  // The header carries 🔥 Fire where the cap used to be; the cap isn't drawn.
+  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeUndefined()
   expect(submitted).toHaveLength(0)
   await ui.unmount()
 })
@@ -995,7 +997,7 @@ test('the header shows the session title at its right in the prompt bar color, f
   await $.classic.SessionStart({ source: 'resume', session_title: 'Fix the pane' })
   // In the prompt bar's border color, at the header's right end, Todos at its left.
   expect(await titleOf(ui)).toEqual({ text: 'Fix the pane', isLast: true, first: 'Todos 0 · ▶0 ⏸0 ■0 ✓0 ○0' })
-  expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeUndefined()
 
   // A rename reaches the next prompt's event; a hook's title wins over it.
   await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'Renamed' })

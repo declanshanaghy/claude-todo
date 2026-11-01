@@ -577,7 +577,7 @@ function renderPane(){
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span>${tallyHtml(c)}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
   const fire = S.browse ? '' : B('fire', `<span class="fill">🔥 Fire</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
-  document.getElementById('panecap').innerHTML = `${fire}cap ${CAP} agents`;
+  document.getElementById('panecap').innerHTML = fire;
   if(S.browse){
     body.innerHTML = renderBrowser();
     const pane=document.getElementById('pane'); pane.classList.toggle('has-focus', S.area==='pane');

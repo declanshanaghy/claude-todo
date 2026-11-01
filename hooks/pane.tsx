@@ -375,11 +375,9 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         </Box>
         {/* 🔥 Fire is `/todo exec auto` with no target: the next pending todo,
             in auto mode. It launches into running, so it wears running's
-            color, dimmed while nothing is pending or the cap is full. */}
-        {fault ? '' : <Box flexShrink={0} marginRight={1}>{chip('fire', '🔥 Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
-        <Box flexShrink={0}>
-          <Text dimColor>cap {cap} agents</Text>
-        </Box>
+            color, dimmed while nothing is pending or the cap is full; the cap
+            itself is only told when a press is refused, not drawn. */}
+        {fault ? '' : <Box flexShrink={0}>{chip('fire', '🔥 Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
         {/* The engine's frame takes only a plain tab label, drawn while more
             than one pane is open, so the title rides the header's right end in
             the prompt bar's border color, cut short before it wraps. */}
