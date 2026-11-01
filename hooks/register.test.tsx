@@ -307,6 +307,13 @@ test('every protocol puts the work on its own worktree branch and lands it only 
     // Its own worktree, commits as it goes, the checks before landing.
     expect(text).toContain('Work only in your own git worktree')
     expect(text).toContain('Commit as you go')
+    // One squashed, re-checked, well-described commit per todo.
+    expect(text).toContain('git reset --soft $(git merge-base HEAD origin/<base>)')
+    expect(text).toContain('Run every check again on the rebased commit')
+    expect(text).toContain('git commit --amend')
+    expect(text).toContain('"<area>: <what it does, imperative>"')
+    expect(text).toContain('One todo lands as one commit')
+    expect(text).toMatch(/Todo: #[123]"/)
     expect(text).toContain("run the project's own checks")
     // Parallel todos: rebase onto the base, resolve keeping both sides, retry; never force.
     expect(text).toContain('git rebase origin/<base>')

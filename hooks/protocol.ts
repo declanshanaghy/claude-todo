@@ -9,20 +9,24 @@ const TAG_RULES = (n: number) => `Linking rules (the todo pane tracks work by th
 - Report every status change with the mcp__todo__update tool.`
 
 // Every todo works on its own branch in its own worktree, commits as it goes,
-// and lands on the base branch only once the project's checks pass. Parallel
-// todos meet at the push: whoever lands second rebases onto the first and
-// resolves the conflicts, so no todo's work is lost and none is forced.
-const GIT_RULES = `Git rules: copy them, with <base> filled in, into the prompt of every agent that changes files.
+// and lands on the base branch as one squashed commit, rebased onto whatever
+// other todos landed meanwhile and checked again, so each commit on the base
+// passes on its own (bisectable) and says what it did and why. Parallel todos
+// meet at the push: whoever lands second rebases onto the first and resolves
+// the conflicts, so no todo's work is lost and none is forced.
+const GIT_RULES = (n: number) => `Git rules: copy them, with <base> filled in, into the prompt of every agent that changes files.
 - Work only in your own git worktree, on its own branch; never edit, commit in or check out anything in the main checkout. A worktree starts at <base>'s last commit, so uncommitted changes in the main checkout aren't in it.
-- Commit as you go: one commit per coherent step, its message saying what and why, ending with your usual commit attribution trailer. Never finish with work uncommitted.
+- Commit as you go on your branch: small work-in-progress commits are fine there, since they're squashed before landing. Never finish with work uncommitted.
 - Validate: run the project's own checks (what its README, package scripts or CI workflow run: tests, lint, typecheck, build). Fix what fails and commit the fixes. If they can't be made to pass, stop: land nothing, and report the failing check.
-- Land, only once the checks pass:
-  1. git fetch origin, then git rebase origin/<base>.
-  2. A conflict usually means another todo running in parallel changed the same files. Read its side (git log -p origin/<base> -- <file>) and resolve keeping both changes' intent; never drop theirs to keep yours. Continue the rebase, run the checks again, and commit any fixes.
-  3. git push origin HEAD:<base>. Rejected because <base> moved (another todo landed first)? Go back to 1.
-  4. A conflict you can't resolve with confidence, or checks that fail after the rebase: git rebase --abort, push nothing, and report the conflicting files and your branch, which keeps the work.
+- Land, only once the checks pass. Other todos will have landed since you started, so:
+  1. Squash: git fetch origin, then git reset --soft $(git merge-base HEAD origin/<base>) and git commit with the landing message below. Your branch is now one commit.
+  2. git rebase origin/<base>. A conflict usually means another todo running in parallel changed the same files. Read its side (git log -p origin/<base> -- <file>) and resolve keeping both changes' intent; never drop theirs to keep yours. Continue the rebase.
+  3. Run every check again on the rebased commit. Fix anything by amending that one commit (git commit --amend), so what lands passes on its own.
+  4. git push origin HEAD:<base>. Rejected because <base> moved (another todo landed first)? git fetch origin and go back to 2.
+  5. A conflict you can't resolve with confidence, or checks that fail after the rebase: git rebase --abort, push nothing, and report the conflicting files and your branch, which keeps the work.
   Never force-push, and push nothing but HEAD:<base>. With no origin remote, commit only and say so.
-- Report back: your branch, its commits, each check run and its result, and whether it landed (the pushed commit's hash) or why not.`
+- The landing message: a summary line of at most 72 characters, "<area>: <what it does, imperative>"; a blank line; why it was needed and what changed, wrapped at 72 columns; the checks it passed; then the line "Todo: #${n}", then your usual commit attribution trailer. One todo lands as one commit: no merge, fixup or work-in-progress commits on <base>.
+- Report back: your branch, the landed commit's hash and summary line, each check run and its result, and whether it landed or why not.`
 
 const RUN_STEPS = (t: Todo, cap: number) => `Base branch: before launching, run git branch --show-current in the main checkout; that branch is <base>. If git status there shows uncommitted changes, tell the user in one line that the todo won't see them, then go on.
 3. Classify the final prompt:
@@ -44,7 +48,7 @@ const RUN_STEPS = (t: Todo, cap: number) => `Base branch: before launching, run 
 6. When the background task's completion notification arrives, call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. status is "done" only if the work landed (or there's no remote and it's committed); otherwise "failed", with a summary saying why and where the work is. Once it landed, remove its worktree (git worktree remove) and delete its local branch; a failed todo keeps both. A notification that says it was stopped (by the user or by Claude) means status "stopped", with a summary of where its work is; never leave the todo "running".
 If the user dismisses a question at any point, call mcp__todo__update {n: ${t.n}, status: "${t.hasRun ? 'stopped' : 'pending'}"} and stop.
 
-${GIT_RULES}
+${GIT_RULES(t.n)}
 
 ${TAG_RULES(t.n)}`
 
@@ -92,7 +96,7 @@ ${wake}
 3. Call mcp__todo__update {n: ${t.n}, status: "running"} only once the agent or run is actually going again. If neither 1 nor 2 started anything, call mcp__todo__update {n: ${t.n}, status: "${t.status}", summary: "resume failed: <why>"} and stop.
 4. On its completion notification call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}: "done" only if the work landed; "stopped" if it was stopped; else "failed" saying why and where the work is. Once it landed, remove its worktree and every kept worktree above, and delete their local branches.
 
-${GIT_RULES}
+${GIT_RULES(t.n)}
 
 ${TAG_RULES(t.n)}`
 }

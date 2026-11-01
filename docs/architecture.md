@@ -104,20 +104,21 @@ Each todo works on its own branch and never touches your checkout. Two todos tha
 
 ```mermaid
 flowchart TD
-  C["Checks pass on the todo's branch"] --> F["git fetch · git rebase origin/base"]
+  C["Checks pass on the todo's branch"] --> S["git fetch · squash the branch<br/>into one commit (Todo: #N)"]
+  S --> F["git rebase origin/base"]
   F --> X{Conflict?}
-  X -- no --> V["Run the checks again"]
+  X -- no --> V["Run every check again on that commit;<br/>fixes amend it"]
   X -- yes --> R["Read the other side's commits;<br/>resolve keeping both intents"]
   R --> OK{Resolved with confidence?}
   OK -- yes --> V
   OK -- no --> A["git rebase --abort · push nothing ·<br/>todo failed, branch kept"]
   V --> P["git push origin HEAD:base"]
   P --> J{Rejected?}
-  J -- "yes: another todo landed first" --> F
+  J -- "yes: another todo landed first" --> G["git fetch"] --> F
   J -- no --> D["Done: worktree and branch removed"]
 ```
 
-Nothing ever force-pushes. In a Workflow, the writers each commit on their own branch and only the final merge agent lands.
+Nothing ever force-pushes. Each todo lands as exactly one commit that passed every check on its own, so the base branch's history stays bisectable: work-in-progress commits stay on the todo's branch. In a Workflow, the writers each commit on their own branch and only the final merge agent squashes and lands.
 
 ## Upgrading from 0.2
 
