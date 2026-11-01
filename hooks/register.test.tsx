@@ -302,13 +302,40 @@ test('M1: the pane input adds a todo', async ($, on) => {
   await ui.unmount()
 })
 
+test('an added todo opens one level deep, from the pane or /todo add; todos already there stay folded', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Already here')]) })
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag1' } }))
+  on('agent.spawn', () => ({ model: 'm', agentId: 'ag1' }))
+  // `t4` is open before #4 exists: adding #4 keeps that one id.
+  const held = legacyState(on, { ui: { expanded: ['t4'], confirm: null, renaming: null, justStopped: [], isHidden: false } })
+  const open = () => ((held('ui') as { value?: { expanded?: string[] } }).value?.expanded ?? [])
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
+
+  await ui.input({ key: 'add', text: 'Count md files' })
+  await todo($, 'add Fix kitty tab titles')
+  await todo($, 'add Reused number')
+  expect(open()).toEqual(['t4', 't2', 't3'])
+  // Level 1: its chips row and hint, as a press on the row would show.
+  for (const n of [2, 3, 4]) expect(await ui.find({ type: 'Button', key: `act:${n}:exec` })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
+
+  // Level 2 stays closed: the subtasks line shows, its subtasks don't.
+  await inChat($, 3)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:3] Fix kitty tab titles', prompt: 'fix', subagent_type: 'general-purpose' } as never)
+  await $.agent.spawn({ prompt: 'fix', description: '[todo:3] Fix kitty tab titles', tool_use_id: 'tu1' } as never)
+  expect(await ui.find({ type: 'Button', key: 'subs:3' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'ag:ag1' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('M2: Exec submits the exec protocol and marks the todo drafting', async ($, on) => {
   const submitted: string[] = []
   engine(on, submitted)
   await start($)
   await todo($, 'add Fix kitty tab titles')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:exec' })
 
   expect(submitted).toHaveLength(1)
@@ -325,13 +352,11 @@ test('Auto drafts the one best prompt and runs it with no questions, planning mu
   await todo($, 'add Fix kitty tab titles')
   await todo($, 'add Count md files')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   const chip = await ui.find({ type: 'Button', key: 'act:1:auto' })
   expect(chip?.props['label']).toBe('Auto')
   const fill = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
   expect(fill?.props['backgroundColor']).toBe(MARK.running.color)
   await ui.press({ key: 'act:1:auto' })
-  await ui.press({ key: 'todo:2' })
   await ui.press({ key: 'act:2:exec' })
 
   const [auto, asked] = submitted as [string, string]
@@ -442,7 +467,6 @@ test('M3: a tagged Agent links its spawn and its tool calls show under it', asyn
   await $.tool.call({ tool: 'Bash', tool_use_id: 'c1', command: 'ls *.md', agentId: 'ag1' } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Button', key: 'act:1:pause' })).toBeDefined()
   // Level 1 sums the subtasks on one line; the subtask rows wait behind it.
   expect(await ui.find({ type: 'Button', key: 'subs:1', text: '▸ 1 subtask · 0 done · 1 call' })).toBeDefined()
@@ -477,7 +501,6 @@ test('M5: Stop asks first, keeps the todo, and offers what next', async ($, on) 
   await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: '[todo:1] Count', prompt: 'count', subagent_type: 'general-purpose' } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:stop' })
   expect(await ui.find({ type: 'Button', key: 'act:1:keep' })).toBeDefined()
   expect(stopped).toHaveLength(0)
@@ -494,7 +517,6 @@ test('M6: Delete is pre-exec only and confirms first', async ($, on) => {
   await start($)
   await todo($, 'add Fix kitty tab titles')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:delete' })
   expect(await ui.find({ type: 'Button', key: 'act:1:cancel' })).toBeDefined()
   await ui.press({ key: 'act:1:deleteyes' })
@@ -519,7 +541,6 @@ test('M4: Pause stops the task, Resume asks Claude to continue it', async ($, on
   await $.tool.call({ tool: 'Workflow', tool_use_id: 'tu1', script: "export const meta = { name: 'todo-1-statusline', description: 'x' }" } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:pause' })
   expect(stopped).toEqual(['task9'])
   await ui.press({ key: 'act:1:resume' })
@@ -558,7 +579,6 @@ test('M3: Esc (the pane losing the keys) closes the call browser', async ($, on)
   await $.agent.spawn({ prompt: 'count', description: '[todo:1] Count', tool_use_id: 'tu1' } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
   await ui.unmount()
@@ -762,7 +782,6 @@ test('a dropped exec prompt puts the todo back and says why', async ($, on) => {
   await start($)
   await todo($, 'add Fix focus ring')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:exec' })
   expect(todoAt(db, 1).status).toBe('pending')
   expect(toasts).toContain("#1 didn't start: a hook refused it")
@@ -784,7 +803,6 @@ test('every focusable item lights the same border while the ring is on it, and k
     $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element, origin: { kind: 'person' } })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   // The person tabs across an input, a todo row and an action chip.
   for (const key of ['add', 'todo:1', 'act:1:rename']) {
     await tab(key)
@@ -815,7 +833,6 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
     $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: Math.max(0, by), by, bodyRows, contentRows: 40, origin: { kind: 'person' } })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'todo:1', origin: { kind: 'person' } })
   // Down walks into #1's actions, past the window's height, and the window stays put.
   expect((await arrow(1)).deny).toBeDefined()
@@ -1324,7 +1341,6 @@ test('the status line counts todos by status and clears with the last one', asyn
   await todo($, 'add One')
   expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:delete' })
   await ui.press({ key: 'act:1:deleteyes' })
   expect(statuses.at(-1)).toBeUndefined()
@@ -1623,7 +1639,6 @@ test('the dialog covers the header, so the status line counts until it closes', 
   await start($)
   await todo($, 'add One')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:details' })
   expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   await ui.unmount()
@@ -2002,7 +2017,6 @@ test('Rename stores the new title and puts the ring back on the row', async ($, 
   await start($)
   await todo($, 'add Old title')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:rename' })
   await ui.input({ key: 'ren:1', text: '  New title ' })
   expect(todoAt(db, 1).title).toBe('New title')
@@ -2064,7 +2078,6 @@ test("a Workflow's agents link by its call and nested ones through their parent,
   expect(db.agents['ag3']).toBeUndefined()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'subs:1' })
   expect(await ui.find({ type: 'Text', text: /wave 1/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /wave 2/ })).toBeDefined()
@@ -2271,7 +2284,6 @@ test('Delete removes the row and puts the ring on the add input', async ($, on) 
   await start($)
   await todo($, 'add Scratch')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:delete' })
   await ui.press({ key: 'act:1:cancel' })
   expect(await isLit(ui, 'act:1:delete')).toBe(true)
@@ -2404,7 +2416,6 @@ test('adding a todo spawns a small read-only drafter in the background, whose dr
 
   // Level 1 hints that they're ready.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Text', text: ' 3 drafts: ▶ Exec asks, ⚡/🔥 take the 1st' })).toBeDefined()
   // Its drafts are its prompt's stand-in: no "no prompt yet" beside them.
   expect(await ui.find({ type: 'Text', text: /no prompt yet/ })).toBeUndefined()
@@ -2431,7 +2442,6 @@ test('Exec offers the stored drafts without drafting, Auto takes the first, Refi
   await storeDrafts($, 1, '1.1')
   await storeDrafts($, 2, '2.2', [{ label: 'Count', prompt: 'Count the md files.' }, ...DRAFTS.slice(1)])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:exec' })
   expect(await todo($, 'exec auto 2')).toMatchObject({ text: expect.stringContaining('takes the best drafted prompt') })
   await clock.settle()
@@ -2462,7 +2472,6 @@ test('a rename clears the drafts and drafts again; drafts the old drafter sends 
   await clock.settle()
   await storeDrafts($, 1, '1.1')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:rename' })
   await ui.input({ key: 'ren:1', text: 'New title' })
   expect(todoAt(db, 1)).toMatchObject({ title: 'New title' })
@@ -2490,7 +2499,6 @@ test("a drafter's answer stores its drafts only under its own launch's key, and 
   await todo($, 'add Old title')
   await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:rename' })
   await ui.input({ key: 'ren:1', text: 'New title' })
   await ui.unmount()
@@ -2531,7 +2539,6 @@ test("a todo is prompting from its drafter's spawn until its drafts are stored, 
   expect(await ui.find({ type: 'Button', key: 'view:prompting' })).toBeDefined()
   const row = await ui.find({ type: 'Button', key: 'todo:1' })
   expect(row?.text.endsWith(` ${MARK.prompting.symbol}`)).toBe(true)
-  await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Text', text: /no prompt yet: drafting prompts…/ })).toBeDefined()
   for (const k of ['exec', 'auto']) expect(await ui.find({ type: 'Button', key: `act:1:${k}` })).toBeUndefined()
   expect(await ui.find({ type: 'Button', key: 'act:1:rename' })).toBeDefined()
@@ -2621,7 +2628,6 @@ test('a prompting todo can be renamed, staying prompting under its new drafter, 
   await todo($, 'add Unwanted')
   await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:rename' })
   await ui.input({ key: 'ren:1', text: 'New title' })
   await clock.settle()
@@ -2634,7 +2640,6 @@ test('a prompting todo can be renamed, staying prompting under its new drafter, 
   await storeDrafts($, 1, '1.3')
   expect(todoAt(db, 1)).toMatchObject({ status: 'pending', drafts: DRAFTS })
 
-  await ui.press({ key: 'todo:2' })
   await ui.press({ key: 'act:2:delete' })
   await ui.press({ key: 'act:2:deleteyes' })
   expect(db.todos['/proj']?.[2]).toBeUndefined()
@@ -3983,9 +3988,11 @@ async function step($: T$, turnId: string, index: number, agentId?: string) {
     if (r.done) return r.value
   }
 }
-const browse = async ($: T$, surface: 'terminal' | 'desktop' = 'terminal', agentId = 'ag1') => {
+// A todo `launched` added is open already, as every added todo is; a seeded
+// one is folded until pressed.
+const browse = async ($: T$, surface: 'terminal' | 'desktop' = 'terminal', agentId = 'ag1', isAdded = false) => {
   const ui = await $.ui.mount({ ...PANE, surface })
-  await ui.press({ key: 'todo:1' })
+  if (!isAdded) await ui.press({ key: 'todo:1' })
   await transcript(ui, 1, agentId)
   return ui
 }
@@ -4007,7 +4014,7 @@ test("an agent's turns are kept beside its calls and read in time order", async 
   expect(kept.map(r => r.kind ?? 'call')).toEqual(['turn', 'call', 'turn'])
   expect(kept[0]).toEqual({ kind: 'turn', id: 'turn:tA:0', agentId: 'ag1', text: 'Counting the **markdown** files first.', startedAt: expect.any(Number) })
 
-  const ui = await browse($)
+  const ui = await browse($, 'terminal', 'ag1', true)
   const all = (await ui.findAll({})).map(x => `${x.type}:${x.text}`)
   const at = (re: RegExp) => all.findIndex(x => re.test(x))
   expect(at(/^Markdown:Counting/)).toBeGreaterThan(-1)
@@ -4118,7 +4125,7 @@ test('a Read of a picture keeps a reference, not its bytes, and draws it as a th
 
   expect(callAt(db, 'r1').images).toEqual([{ name: 'shot.png', path: '/proj/shot.png', bytes: 2048, mediaType: 'image/png' }])
   expect(JSON.stringify(db.calls)).not.toContain(PNG)
-  const ui = await browse($)
+  const ui = await browse($, 'terminal', 'ag1', true)
   await clock.advance(1)
   expect(await ui.find({ type: 'Image', key: 'img:r1:0' })).toMatchObject({
     props: { source: { file: '/proj/shot.png', format: 'png' }, columns: 24, rows: 8, alt: 'shot.png · 2 KB' },
@@ -4161,7 +4168,7 @@ test("a result's image block is spooled beside the database and made a PNG thumb
   expect(JSON.stringify(db.calls)).not.toContain(PNG)
   expect(runs.some(r => r[0] === 'sips')).toBe(false)
 
-  const ui = await browse($)
+  const ui = await browse($, 'terminal', 'ag1', true)
   // Until its PNG is made the alt text stands in.
   expect(await ui.find({ type: 'Text', text: /▣ mcp__web__shot image 1\.jpg/ })).toBeDefined()
   await clock.advance(1)
@@ -4276,7 +4283,6 @@ test('the run protocol never leaves a stopped todo running', async ($, on) => {
   await start($)
   await todo($, 'add Anything')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:exec' })
   expect(submitted.at(-1)).toContain('A notification that says it was stopped (by the user or by Claude) means status "stopped"')
   await ui.unmount()

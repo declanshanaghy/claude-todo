@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 222 of 226 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 223 of 227 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -41,6 +41,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C29 | Stop, Delete and Takeover typed act at once, without the pane's question, and answer a confirmation the pane had open for that todo; Leave typed folds a just-stopped todo | a command acts without the question its chip asks, answering a confirmation the pane had open |
 | C30 | `/todo help` and `/todo ?` answer with every verb of the dispatcher's own table and its meaning, then the pane keys, one non-blank line each, none over 80 columns | /todo help and /todo ? list every verb then the pane keys, one short line each |
 | C31 | `help` and `?`, in any case and with words after, always answer with help and never become a todo title; other bare titles (`helpful hints`) are still added | help and ? are never a todo title: in any case and with words after, /todo answers with help and adds nothing |
+| C32 | A todo added through the pane's input or `/todo add` opens one level deep (prompt, chips, subtasks line) with its subtasks folded; todos already in the list stay folded, and an id already open isn't added twice | an added todo opens one level deep, from the pane or /todo add; todos already there stay folded |
 
 ## The counts: the pane's header or the status line
 

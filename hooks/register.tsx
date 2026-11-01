@@ -758,6 +758,9 @@ export async function addTodo($: $, title: string) {
   await syncStatus($)
   // A refused write has already said why.
   if (!isSaved) return null
+  // A new todo shows its first level (prompt, chips, subtasks line) at once;
+  // its subtasks and their turns stay folded.
+  await patchUi($, u => (u.expanded.includes(`t${n}`) ? u : { ...u, expanded: [...u.expanded, `t${n}`] }))
   $.ui.toast(`＋ added #${n}`)
   queueDrafts($, n)
   return n
