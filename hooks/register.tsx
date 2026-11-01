@@ -658,12 +658,53 @@ async function focus($: $, key: string) {
   }
 }
 
+// Every /todo verb, how it's typed and what it does, one line each. The
+// dispatcher's verb words and /todo help both come from this table, so a new
+// verb goes here (or `/todo <verb>` would add it as a todo) and the help
+// can't drift from the commands that exist. `also` are the verb's other words.
+export const VERBS: readonly { verb: string; also?: readonly string[]; use: string; means: string }[] = [
+  { verb: 'show', also: ['', 'list'], use: '/todo [show|list]', means: 'open and focus the pane' },
+  { verb: 'noshow', use: '/todo noshow', means: 'close the pane until /todo show' },
+  { verb: 'add', use: '/todo [add] <title>', means: 'store a todo; add only before a verb word' },
+  { verb: 'exec', use: '/todo exec [auto] <n|title>', means: 'run a todo; auto asks nothing' },
+  { verb: 'auto', use: '/todo auto [<n|title>]', means: 'exec auto, by default the next pending' },
+  { verb: 'resume', use: '/todo resume <n|title>', means: 'pick a paused or stopped todo up' },
+  { verb: 'pause', use: '/todo pause <n|title>', means: 'pause a running todo' },
+  { verb: 'stop', use: '/todo stop <n|title>', means: 'stop a todo and keep it' },
+  { verb: 'refine', use: '/todo refine <n|title>', means: 'pick a new prompt, then restart' },
+  { verb: 'restart', use: '/todo restart <n|title>', means: 'run again with the same prompt' },
+  { verb: 'reset', use: '/todo reset <n|title>', means: 'put a stuck todo back to pending or stopped' },
+  { verb: 'delete', use: '/todo delete <n|title>', means: 'remove a todo that never ran' },
+  { verb: 'takeover', use: '/todo takeover <n|title>', means: "take another session's todo over" },
+  { verb: 'rename', use: '/todo rename <n> <new title>', means: 'retitle a todo, drafting again' },
+  { verb: 'leave', use: '/todo leave <n|title>', means: 'leave a just-stopped todo as it is' },
+  { verb: 'details', use: '/todo details <n|title>', means: 'its prompt, runs and agents in the pane' },
+  { verb: 'help', also: ['?'], use: '/todo help|?', means: 'this list' },
+]
+
 // Every first word `/todo` treats as a verb; any other word starts a title.
-// A new verb goes here, or `/todo <verb>` would add it as a todo.
-export const TODO_VERBS = [
-  '', 'list', 'show', 'noshow', 'add', 'exec', 'auto', 'resume',
-  'pause', 'stop', 'refine', 'restart', 'reset', 'delete', 'takeover', 'rename', 'leave', 'details',
+export const TODO_VERBS: readonly string[] = VERBS.flatMap(v => [v.verb, ...(v.also ?? [])])
+
+const isHelp = (word: string) => VERBS.some(v => v.verb === 'help' && [v.verb, ...(v.also ?? [])].includes(word.toLowerCase()))
+
+// The pane's keys, after the verbs in /todo help.
+const PANE_KEYS = [
+  ['ctrl+x tab', 'move the keys into the pane'],
+  ['tab/arrows', 'move the focus ring'],
+  ['enter', 'press what the ring is on'],
+  ['esc', 'hand the keys back to the prompt'],
 ] as const
+
+// The widest a /todo answer's line gets, as a run's one-line summary does.
+const ANSWER_COLUMNS = 80
+
+// /todo help: one line per verb, then one per pane key, each cut to fit.
+export const HELP = [
+  ...VERBS.map(v => `${v.use.padEnd(30)}${v.means}`),
+  ...PANE_KEYS.map(([key, does]) => `${`pane: ${key}`.padEnd(30)}${does}`),
+]
+  .map(line => cut(line, ANSWER_COLUMNS))
+  .join('\n')
 
 export async function addTodo($: $, title: string) {
   const clean = title.trim()
@@ -917,7 +958,7 @@ function resumeRefusal(t: Todo) {
 
 // ---------- a /todo verb for every chip ----------
 
-export const USAGE = 'Usage: /todo [show] · /todo noshow · /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume <n|title> · /todo pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title>'
+export const USAGE = `Usage: ${VERBS.map(v => v.use).join(' · ')}`
 
 // The chips with a /todo verb of their own name beyond exec, auto and resume,
 // which have theirs above. Each acts through the function its chip calls,
@@ -1434,7 +1475,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'todo',
       description:
-        'Per-directory todos: /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume|pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title> · /todo show · /todo noshow',
+        'Per-directory todos: /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume|pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title> · /todo show · /todo noshow · /todo help',
     })
     await $.tool.register({
       name: 'update',
@@ -1519,7 +1560,10 @@ export const register: Register = (on, options) => {
     // A first word that is no verb makes the whole args a title: `/todo Fix
     // kitty` is `/todo add Fix kitty`. A title that starts with a verb word
     // still needs the `add`.
-    const isBare = !(TODO_VERBS as readonly string[]).includes(said)
+    // Help in any case (`/todo Help`, `/todo ?`) is help, never a todo titled
+    // after it: whoever typed it was asking how, not adding.
+    if (isHelp(said)) return { text: HELP }
+    const isBare = !TODO_VERBS.includes(said)
     // `/todo auto …` is short for `/todo exec auto …`.
     const verb = isBare ? 'add' : said === 'auto' ? 'exec' : said
     const rest = isBare ? [said, ...words] : said === 'auto' ? ['auto', ...words] : words
@@ -1795,7 +1839,7 @@ export const register: Register = (on, options) => {
         // todo fails at once.
         const t = (await read($, todos)).find(x => x.n === node.todoN)
         if (t?.mode === 'agent' && t.taskId === id && t.status === 'running') {
-          const summary = cut(firstLine(e.answer), 80)
+          const summary = cut(firstLine(e.answer), ANSWER_COLUMNS)
           await patchTodo($, t.n, x => (failed ? { ...x, status: 'failed', summary } : { ...x, summary }))
         }
       }

@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 203 of 207 cases (98.1%)** are covered by `claude plugin test .`.
+**Coverage: 205 of 209 cases (98.1%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -38,6 +38,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C27 | A chip verb with no target, no match or (rename) no number and title answers with its usage or the miss; rename to the same title says so | a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so |
 | C28 | Every chip verb is in TODO_VERBS, so `/todo <verb> …` runs the verb and never adds a todo titled after it | a chip verb is a verb, never a title: /todo <verb> runs it rather than adding a todo |
 | C29 | Stop, Delete and Takeover typed act at once, without the pane's question, and answer a confirmation the pane had open for that todo; Leave typed folds a just-stopped todo | a command acts without the question its chip asks, answering a confirmation the pane had open |
+| C30 | `/todo help` and `/todo ?` answer with every verb of the dispatcher's own table and its meaning, then the pane keys, one non-blank line each, none over 80 columns | /todo help and /todo ? list every verb then the pane keys, one short line each |
+| C31 | `help` and `?`, in any case and with words after, always answer with help and never become a todo title; other bare titles (`helpful hints`) are still added | help and ? are never a todo title: in any case and with words after, /todo answers with help and adds nothing |
 
 ## The counts: the pane's header or the status line
 

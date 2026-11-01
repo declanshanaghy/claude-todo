@@ -7,7 +7,7 @@ import { CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, status
 import { clampLines, headParts } from './pane'
 import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
-import { TODO_VERBS } from './register'
+import { HELP, TODO_VERBS, VERBS } from './register'
 import { TABLE } from './transitions'
 
 const PANE = {
@@ -3998,11 +3998,38 @@ test('a chip verb is a verb, never a title: /todo <verb> runs it rather than add
   on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
   mock.clock(on, { now: 1000 })
   await start($)
-  for (const verb of CHIP_VERBS) expect(`${verb}: ${String((TODO_VERBS as readonly string[]).includes(verb))}`).toBe(`${verb}: true`)
+  for (const verb of CHIP_VERBS) expect(`${verb}: ${String(TODO_VERBS.includes(verb))}`).toBe(`${verb}: true`)
   expect((await todo($, 'pause 1')).text).toBe('⏸ #1 paused')
   expect((await todo($, 'stop runs')).text).toBe('■ #1 stopped')
   for (const verb of CHIP_VERBS.filter(v => v !== 'exec' && v !== 'auto')) await todo($, `${verb} 99`)
   expect(titles(db, '/proj')).toEqual(['1 Runs'])
+})
+
+test('/todo help and /todo ? list every verb then the pane keys, one short line each', async ($, on) => {
+  const { db } = engine(on, [], undefined, true)
+  await start($)
+  const lines = String((await todo($, 'help')).text).split('\n')
+  expect((await todo($, '?')).text).toBe(lines.join('\n'))
+  // One line per verb in the dispatcher's own table, in its order, then the keys.
+  expect(lines).toHaveLength(VERBS.length + 4)
+  for (const [i, v] of VERBS.entries()) expect(lines[i]?.startsWith(v.use)).toBe(true)
+  expect(lines.slice(-4).map(l => l.split(/\s{2,}/)[0])).toEqual(['pane: ctrl+x tab', 'pane: tab/arrows', 'pane: enter', 'pane: esc'])
+  for (const line of lines) {
+    expect(line.trim()).not.toBe('')
+    expect(line.length <= 80).toBe(true)
+  }
+  expect(HELP).toBe(lines.join('\n'))
+  expect(titles(db, '/proj')).toEqual([])
+})
+
+test('help and ? are never a todo title: in any case and with words after, /todo answers with help and adds nothing', async ($, on) => {
+  const { db } = engine(on, [], undefined, true)
+  await start($)
+  for (const said of ['help', 'HELP', 'Help me', '?', '? what now', '  help  ']) expect((await todo($, said)).text).toBe(HELP)
+  expect(titles(db, '/proj')).toEqual([])
+  // Any other bare title is still added as before.
+  expect((await todo($, 'helpful hints')).text).toBe('Added #1 helpful hints')
+  expect(titles(db, '/proj')).toEqual(['1 helpful hints'])
 })
 
 test('a command acts without the question its chip asks, answering a confirmation the pane had open', async ($, on) => {

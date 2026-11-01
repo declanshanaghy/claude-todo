@@ -43,6 +43,7 @@ Or declare it in your settings so every machine picks it up:
 | `/todo pause 1`, `stop`, `refine`, `restart`, `reset`, `delete`, `takeover`, `leave`, `details` (each with a number or title fragment), `/todo rename 1 <new title>` | Every chip in the pane is also a verb of its own name, so anything you can press you can type. A verb works exactly where its chip is drawn, through the same code, so the two can't disagree; anywhere else it answers in one line with the todo's status and the verbs that do apply. Stop, Delete and Takeover ask first in the pane, but typing them is already the explicit request, so the command acts at once |
 | `/todo show` (or bare `/todo`, `/todo list`) | Opens and focuses the pane, or tells you why it can't be placed |
 | `/todo noshow` | Closes the pane and keeps it closed for the rest of the session, until `/todo show` |
+| `/todo help` (or `/todo ?`) | Answers with every verb and what it does, one line each, then the pane's keys. The list comes from the table the command dispatches on, so it can't miss a verb; `help` and `?` (in any case) are never stored as a title |
 
 ![Adding todos from the prompt and from the pane](docs/screenshots/m1-add.png)
 *Adding: `/todo add` and the pane's input both store just a title.*
