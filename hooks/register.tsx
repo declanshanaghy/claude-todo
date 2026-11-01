@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, Draft, Drafting, ImageRef, Kept, PaneUi, Todo, Turn, View, Waiting } from '../types'
+import type { AgentNode, Call, Confirm, Detail, Draft, Drafting, ImageRef, Kept, PaneUi, Queued, Todo, Turn, View, Waiting } from '../types'
 import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
@@ -57,6 +57,9 @@ const ui = atom(
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
 const spin = atom({ plugin: 'todo', key: 'spin' } as const, 0)
 const detail = atom({ plugin: 'todo', key: 'detail' } as const, null as Detail)
+// Prompts the host refused because the session was stopped: each goes in
+// after the person's next message, with what to restore if it's refused then.
+const queued = atom({ plugin: 'todo', key: 'queued' } as const, [] as Queued[])
 // What held the pane's focus ring when the dialog opened: Escape puts it back.
 const returnTo = atom({ plugin: 'todo', key: 'returnTo' } as const, null as string | null)
 // Whether a surface draws the pane now. Its header summary or, while it isn't
@@ -722,14 +725,43 @@ async function clearRun($: $, n: number) {
 
 // ---------- actions (pane buttons and /todo) ----------
 
-// A plugin's prompt can be dropped (a Stop standing after an interrupt, a
-// hook's refusal): the todo goes back to how `t` had it, and the drop says why.
+// What submit answers for a prompt held until the person's next message.
+const QUEUED = 'queued'
+
+// The host refuses a plugin's prompt after a Stop until the person sends
+// input of their own: that refusal is a wait, not a failure.
+const isStopStanding = (why: string) => /nobody has sent input|stop stands/i.test(why)
+
+// A plugin's prompt can be dropped. One refused only because the session was
+// stopped is held, the todo staying in hand, and goes in after the person's
+// next message (flushQueued). Any other drop (a hook's refusal, a limit) puts
+// the todo back to how `t` had it, and says why.
 async function submit($: $, t: Todo, text: string) {
   const r = await $.prompt.submit({ text })
   if (r.drop === undefined) return undefined
+  if (isStopStanding(r.drop)) {
+    const entry = { n: t.n, text, status: t.status, ...(t.taskId !== undefined ? { taskId: t.taskId } : {}), ...(t.runId !== undefined ? { runId: t.runId } : {}) }
+    await update($, queued, l => [...l.filter(q => q.n !== t.n), entry])
+    $.ui.toast(`#${t.n} queued: it starts after your next message`)
+    return QUEUED
+  }
   await patchTodo($, t.n, x => assign(x, { status: t.status, taskId: t.taskId, runId: t.runId }))
   $.ui.toast(`#${t.n} didn't start: ${r.drop}`)
   return r.drop
+}
+
+// Sends the prompts a Stop held, once the person has sent input. One whose
+// todo left the chat's hands meanwhile (Reset, another session) is dropped.
+async function flushQueued($: $) {
+  const waiting = await read($, queued)
+  if (waiting.length === 0) return
+  await update($, queued, () => [])
+  for (const q of waiting) {
+    const t = (await read($, todos)).find(x => x.n === q.n)
+    if (t?.status !== 'drafting') continue
+    // A refusal now reverts to what the todo was before it was queued.
+    await submit($, assign(t, { status: q.status, taskId: q.taskId, runId: q.runId }), q.text)
+  }
 }
 
 const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
@@ -795,6 +827,7 @@ export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
     return execNote(t, auto, true)
   }
   const drop = await submit($, t, execPrompt(t, await read($, cpuCap), refine, auto))
+  if (drop === QUEUED) return `Queued #${t.n} ${t.title}: it starts after your next message.`
   if (drop !== undefined) return `#${t.n} didn't start: ${drop}`
   return execNote(t, auto)
 }
@@ -946,6 +979,8 @@ export async function cancelConfirm($: $, n: number, kind: Confirm) {
 }
 
 export async function setTodoStatus($: $, n: number, status: Todo['status']) {
+  // Reset takes a todo out of the chat's hands: a prompt a Stop held goes too.
+  await update($, queued, l => l.filter(q => q.n !== n))
   await patchTodo($, n, t => ({ ...t, status }))
 }
 
@@ -1426,6 +1461,17 @@ export const register: Register = (on, options) => {
     return r
   }).catch((_, e, next) => next(e))
 
+  // The person's own prompt lifts a standing Stop: send what it held, from a
+  // timer, since a prompt submitted from inside this hook would wait on it.
+  on('prompt.submit', async ($, e, next) => {
+    const r = await next(e)
+    const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+    if (isPerson && r.drop === undefined && (await read($, queued)).length > 0) {
+      $.clock.after(0, () => void flushQueued($).catch(() => undefined))
+    }
+    return r
+  }).catch((_, e, next) => next(e))
+
   on('ui.focus', async ($, e, next) => {
     const r = await next(e)
     if (r.deny === undefined && e.component === 'Pane' && e.requestId === PANE) {
@@ -1475,6 +1521,7 @@ export const register: Register = (on, options) => {
     }
     const gone = new Set(await read($, expired))
     return drawPane($, e, {
+      queued: (await read($, queued)).map(q => q.n),
       me: await read($, me),
       fault: await read($, fault),
       // The ring shows only while the pane holds the keys.

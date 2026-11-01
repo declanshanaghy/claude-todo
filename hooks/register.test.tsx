@@ -222,7 +222,8 @@ function engine(
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', (_, e) => (where.toasts?.push(e.text), { value: undefined }))
   on('prompt.submit', (_, e) => {
-    if (where.drop !== undefined) return { drop: where.drop }
+    // The host's refusals here are of plugins' prompts; the person's own go in.
+    if (where.drop !== undefined && e.origin.kind !== 'composer') return { drop: where.drop }
     submitted.push(e.text)
     return { text: e.text }
   })
@@ -714,14 +715,14 @@ test('without sqlite3 the pane says why and stays read-only, keeping 0.2 todos i
 
 test('a dropped exec prompt puts the todo back and says why', async ($, on) => {
   const toasts: string[] = []
-  const { db } = engine(on, [], undefined, true, { drop: 'a Stop stands', toasts })
+  const { db } = engine(on, [], undefined, true, { drop: 'a hook refused it', toasts })
   await start($)
   await todo($, 'add Fix focus ring')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:exec' })
   expect(todoAt(db, 1).status).toBe('pending')
-  expect(toasts).toContain("#1 didn't start: a Stop stands")
+  expect(toasts).toContain("#1 didn't start: a hook refused it")
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeDefined()
   await ui.unmount()
 })
@@ -1624,13 +1625,13 @@ test('a dropped restart puts the stopped todo back, run ids and all', async ($, 
 test('a dropped resume puts the paused todo back', async ($, on) => {
   const toasts: string[] = []
   const db = seeded([running(1, 'Count', { status: 'paused' })])
-  engine(on, [], undefined, true, { db, toasts, drop: 'a Stop stands' })
+  engine(on, [], undefined, true, { db, toasts, drop: 'a hook refused it' })
   await start($)
   const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:resume' })
   expect(todoAt(db, 1)).toMatchObject({ status: 'paused', taskId: 'ag1' })
-  expect(toasts).toContain("#1 didn't start: a Stop stands")
+  expect(toasts).toContain("#1 didn't start: a hook refused it")
   expect(toasts).not.toContain('▶ resuming #1')
   await ui.unmount()
 })
@@ -3090,4 +3091,81 @@ test('every state draws its actions on one row, and the pane has no blank lines'
   expect(await ui.find({ type: 'Text', text: /What next/ })).toBeUndefined()
   expect(blankRows(tree)).toEqual([])
   await ui.unmount()
+})
+
+// ---------- a Stop holds plugin prompts until the person types ----------
+
+test('an exec the host refuses after a Stop is held, and goes in after the person\'s next message', async ($, on) => {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  const db = seeded([aTodo(1, 'Count'), aTodo(2, 'Other')])
+  const where: Parameters<typeof engine>[4] = { db, toasts, drop: 'the session was stopped and nobody has sent input since' }
+  engine(on, submitted, undefined, false, where)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'exec 1')
+  // /todo exec submits once the command has answered.
+  await clock.advance(1)
+  expect(submitted).toEqual([])
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect(toasts).toContain('#1 queued: it starts after your next message')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /queued: starts after your next message/ })).toBeDefined()
+  await ui.unmount()
+
+  // The person types: the Stop is lifted, and the held prompt goes in.
+  delete where.drop
+  await $.prompt.submit({ text: 'carry on', origin: { kind: 'composer' } } as never)
+  await clock.advance(1)
+  expect(submitted.filter(x => x.startsWith('[todo] Execute todo #1'))).toHaveLength(1)
+  // Sent once: a later message sends nothing more.
+  await $.prompt.submit({ text: 'and again', origin: { kind: 'composer' } } as never)
+  await clock.advance(1)
+  expect(submitted.filter(x => x.startsWith('[todo] Execute todo #1'))).toHaveLength(1)
+})
+
+test('Reset drops a held prompt, and a prompt from a plugin or a notification doesn\'t lift the hold', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([aTodo(1, 'Count'), aTodo(2, 'Other')])
+  const where: Parameters<typeof engine>[4] = { db, drop: 'the session was stopped and nobody has sent input since' }
+  engine(on, submitted, undefined, false, where)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await todo($, 'exec 1')
+  await todo($, 'exec 2')
+  await clock.advance(1)
+  delete where.drop
+  // Not the person: nothing is sent.
+  await $.prompt.submit({ text: 'done', origin: { kind: 'task-notification' } } as never)
+  await clock.advance(1)
+  expect(submitted.filter(x => x.startsWith('[todo]'))).toEqual([])
+  // Reset #2: only #1 goes in.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'act:2:reset' })
+  await ui.unmount()
+  expect(todoAt(db, 2).status).toBe('pending')
+  await $.prompt.submit({ text: 'go', origin: { kind: 'composer' } } as never)
+  await clock.advance(1)
+  expect(submitted.filter(x => x.startsWith('[todo]')).map(x => /#(\d+)/.exec(x)?.[1])).toEqual(['1'])
+})
+
+test('a held prompt the host refuses for another reason puts the todo back as it was before it was queued', async ($, on) => {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  const db = seeded([aTodo(1, 'Count', { status: 'stopped', hasRun: true, taskId: 'ag1', mode: 'agent', prompt: 'p' })])
+  const where: Parameters<typeof engine>[4] = { db, toasts, drop: 'the session was stopped and nobody has sent input since' }
+  engine(on, submitted, undefined, false, where)
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'view:all' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:restart' })
+  await ui.unmount()
+  expect(todoAt(db, 1).status).toBe('drafting')
+  where.drop = 'a hook refused it'
+  await $.prompt.submit({ text: 'go', origin: { kind: 'composer' } } as never)
+  await clock.advance(1)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', taskId: 'ag1' })
+  expect(toasts).toContain("#1 didn't start: a hook refused it")
 })

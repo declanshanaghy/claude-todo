@@ -50,6 +50,10 @@ export type Drafting = { key: string; agentId?: string; at: number }
 // back if its prompt is dropped.
 export type Waiting = { auto: boolean; was: TodoStatus }
 
+// A prompt the host refused because the session was stopped, held until the
+// person's next message, with the todo's state before it went into the chat.
+export type Queued = { n: number; text: string; status: TodoStatus; taskId?: string; runId?: string }
+
 // A worktree a todo's agent left behind, found by its agent id in git.
 export type Kept = { agentId: string; name: string; path: string; branch: string }
 
@@ -161,6 +165,7 @@ declare module 'claude-code' {
       spin: number
       detail: Detail
       returnTo: string | null
+      queued: Queued[]
       // Whether a surface draws the pane now; the status line counts while not.
       placed: boolean
       // The key of the element the pane's focus ring is on.

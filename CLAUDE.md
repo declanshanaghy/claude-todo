@@ -24,6 +24,8 @@ The tests enforce 1–4. A new element or state needs a test there too.
 - **A render never writes state.** Write from a handler, a hook, or `$.clock.after(0, …)`.
 - **The mod's own `$.ui.focus` call skips its own `ui.focus` hook.** Note the ring before calling it. In tests that call has no implementation and throws.
 - **Esc always hands the keys back to the prompt.** The dialog takes them back with `$.ui.open({ focus: true })`.
+- **After a Stop, the host refuses a plugin's `$.prompt.submit` until the person types** ("the session was stopped and nobody has sent input since"). `submit` holds the prompt, and the `prompt.submit` hook sends it after their next message. Never treat that refusal as a failure.
+- **A prompt submitted from inside a hook waits on that hook's own turn.** Submit from `$.clock.after(0, …)`.
 - **Arrow keys scroll a pane taller than its window.** The `ui.scroll` hook turns ±1 arrows into ring moves.
 - **The host aborts a hook's in-flight `$.process.run` when the turn or agent it serves ends.** Database errors must stay non-fatal (`warn`). Only a missing `sqlite3` or data folder makes the pane read-only (`fail`).
 - **`$.ui.status` takes plain text only.**

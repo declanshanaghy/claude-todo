@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 161 of 164 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 164 of 167 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -41,6 +41,9 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
+| E10 | A prompt the host refuses after a Stop (nobody has typed since) is held: the todo stays in hand, its row and a toast say it's queued, and it goes in once after the person's next message | an exec the host refuses after a Stop is held, and goes in after the person's next message |
+| E11 | Reset drops a held prompt; a plugin's or a notification's prompt doesn't release the hold | Reset drops a held prompt, and a prompt from a plugin or a notification doesn't lift the hold |
+| E12 | A held prompt refused again for another reason puts the todo back as it was before it was queued | a held prompt the host refuses for another reason puts the todo back as it was before it was queued |
 | E1 | ▶ Exec submits the exec protocol and marks the todo drafting | M2: Exec submits the exec protocol and marks the todo drafting |
 | E1a | Exec, restart and resume all carry the git rules: own worktree branch, commit as it goes, the project's checks before landing, rebase onto `origin/<base>` resolving parallel todos' conflicts by keeping both sides, retry a rejected push, never force-push, abort and keep the branch on an unresolvable conflict; a lone Agent runs with `isolation: "worktree"` and a Workflow's merge agent is the only one that pushes | every protocol puts the work on its own worktree branch and lands it only after the checks pass |
 | E1c | ⚡ Auto (in the running color) submits the auto protocol: Claude drafts the one best prompt and records it with no AskUserQuestion, and plans multi-step work on stated defaults with no plan mode or approval; plain Exec still asks | Auto drafts the one best prompt and runs it with no questions, planning multi-step work on defaults |

@@ -28,6 +28,8 @@ import {
 
 // What the render hook in register.tsx read from $.state for this draw.
 export type PaneData = {
+  // The todos whose prompt waits for the person's next message.
+  queued: number[]
   // This session's id, to tell its in-flight todos from another session's.
   me: string
   // Why the database can't be used, when it can't.
@@ -215,7 +217,7 @@ export function ringBox({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, ring:
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, turns, u, cap, f, sessionTitle, waiting }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, sessionTitle, waiting }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -290,13 +292,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           <Box gap={1}>
             <Text dimColor>
-              {t.status === 'planning'
-                ? 'planning in the chat…'
-                : waiting.includes(t.n)
-                  ? 'waiting for prompt drafts…'
-                  : t.hasRun
-                    ? 'continuing in the chat…'
-                    : 'answer the prompt question in the chat…'}
+              {queued.includes(t.n)
+                ? 'queued: starts after your next message'
+                : t.status === 'planning'
+                  ? 'planning in the chat…'
+                  : waiting.includes(t.n)
+                    ? 'waiting for prompt drafts…'
+                    : t.hasRun
+                      ? 'continuing in the chat…'
+                      : 'answer the prompt question in the chat…'}
             </Text>
             {btn('reset', 'Reset', () => setTodoStatus($, t.n, t.hasRun ? 'stopped' : 'pending'))}
           </Box>,
