@@ -237,14 +237,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
 
   // An action chip fills with the color of the status it moves the todo into
   // (marks.tsx), so the buttons, rows and summaries share one palette.
-  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral', isDimmed = false) =>
+  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'stay', isDimmed = false) =>
     lit(key, statusChip(els, key, label, onPress, tone, isDimmed))
 
   const open = new Set(u.expanded)
   const agentView = e.props.view as { agentId?: string } | undefined
 
   const actions = (t: Todo) => {
-    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => chip(`act:${t.n}:${k}`, label, onPress, tone)
+    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'stay') => chip(`act:${t.n}:${k}`, label, onPress, tone)
     const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }), 'details')
     const c = u.confirm?.n === t.n ? u.confirm.kind : null
     if (c === 'stop') {
@@ -272,7 +272,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       // Exec and Auto start a run (through drafting), so both wear running's fill.
       exec: () => btn('exec', 'Exec', () => execTodo($, t, false), 'running'),
       auto: () => btn('auto', 'Auto', () => execTodo($, t, false, true), 'running'),
-      rename: () => btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n }))),
+      rename: () => btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n })), 'edit'),
       delete: () => btn('delete', 'Delete', () => askConfirm($, t.n, 'delete'), 'danger'),
       reset: () => btn('reset', 'Reset', () => resetTodo($, t)),
       pause: () => btn('pause', 'Pause', () => haltTodo($, t, 'paused'), 'paused'),

@@ -85,20 +85,33 @@ export const tallyText = (list: readonly Todo[]) => tally(list).map(tallyMark).j
 export const statusToast = (n: number, s: TodoStatus) => `${MARK[s].symbol} #${n} ${s}`
 
 // The rules the tree draws (a single ─ between todos, a double ═ above the
-// first todo and the hidden footer): one dim line in
-// the theme's subtle color, the same grey the neutral chips wear, so it parts
-// the todos without reading as a status.
+// first todo and the hidden footer): one dim line in the theme's subtle grey,
+// so it parts the todos without reading as a status or as a button.
 export const DIVIDER: Color = 'subtle'
 
 // A chip's tone: the status its action moves the todo into, `danger` for one
-// that destroys it (Delete), `details` for ☰ Details, or `neutral` for any
-// other chip that changes no status.
-export type Tone = TodoStatus | 'danger' | 'details' | 'neutral'
+// that destroys it (Delete), `details` for ☰ Details, `edit` for ✎ Rename, or
+// `stay` for any other chip that changes no status (↺ Reset, ✓ Leave, ↩
+// Keep/Cancel/Back, ↗ Full transcript).
+export type Tone = TodoStatus | 'danger' | 'details' | 'edit' | 'stay'
 
-// Details moves no status, so it wears a teal of its own instead of the
-// neutral grey. The theme's one true teal is planMode, which planning's mark
-// owns, so it takes ide, the theme's nearest distinct cyan.
-const TONE: Record<'danger' | 'details' | 'neutral', Color> = { danger: 'error', details: 'ide', neutral: 'subtle' }
+// Grey and dim mean disabled, so an enabled chip never wears them: these are
+// the theme's greys, which only a dimmed chip (statusChip's isDimmed), the
+// divider and pending's mark may use. The tones below avoid them all.
+export const GREYS: readonly Color[] = ['subtle', 'inactive', 'promptBorder']
+
+// The chips that move no status still each wear a color, so none reads as
+// disabled. Details takes ide, the theme's nearest distinct cyan, as planning's
+// mark owns its one true teal (planMode). Rename takes fastMode's vivid orange,
+// Edit's own color, apart from every status. The rest share rainbow_violet's
+// mauve, which no status, Delete or Details uses. All are theme keys that every
+// theme defines, so the pane follows /theme.
+const TONE: Record<'danger' | 'details' | 'edit' | 'stay', Color> = {
+  danger: 'error',
+  details: 'ide',
+  edit: 'fastMode',
+  stay: 'rainbow_violet',
+}
 
 export const toneColor = (tone: Tone): Color => (tone in TONE ? TONE[tone as keyof typeof TONE] : MARK[tone as TodoStatus].color)
 
@@ -165,13 +178,14 @@ export const CHIP_SYMBOL: Readonly<Record<string, string>> = {
 // out instead. A persistent header control (🔥 Fire) is never hidden: while
 // it can't act it is dimmed, dropping the fill for dim text in its tone's
 // color, and stays pressable, so the ring still reaches it and a press says
-// why.
+// why. Dim is the only disabled look: an enabled chip always fills with a
+// tone's color, and no tone is grey (GREYS).
 export const statusChip = (
   { Text, Button }: Pick<ElementTable, 'Text' | 'Button'>,
   key: string,
   label: string,
   onPress: () => unknown,
-  tone: Tone = 'neutral',
+  tone: Tone = 'stay',
   isDimmed = false,
 ) =>
   isDimmed ? (

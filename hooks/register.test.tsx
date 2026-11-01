@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { CHIP_SYMBOL, DIVIDER, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
+import { CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 import { clampLines, headParts } from './pane'
 import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
@@ -3190,17 +3190,21 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
   for (const n of [1, 2, 3, 4, 5, 6, 7]) await ui.press({ key: `todo:${n}` })
   // Exec and Resume start a run; Pause, Stop and Takeover halt it; Refine and
   // Restart draft it again; Delete destroys it; the rest change no status.
-  await check(1, { exec: 'running', rename: 'neutral', delete: 'danger', details: 'details' })
+  await check(1, { exec: 'running', rename: 'edit', delete: 'danger', details: 'details' })
   await check(2, { pause: 'paused', stop: 'stopped', details: 'details' })
   await check(3, { resume: 'running', stop: 'stopped', details: 'details' })
   await check(4, { refine: 'drafting', restart: 'drafting', resume: 'running', details: 'details' })
-  await check(5, { reset: 'neutral' })
+  await check(5, { reset: 'stay' })
   await check(6, { takeover: 'stopped', details: 'details' })
   await check(7, { details: 'details' })
-  // Details moves no status, but wears a teal of its own, not the neutral grey
-  // and no status's color.
+  // Details, Rename and the rest that move no status each wear a color of
+  // their own: no status's color, and not each other's.
   expect(toneColor('details')).toBe('ide')
-  expect(toneColor('details')).not.toBe(toneColor('neutral'))
+  expect(toneColor('edit')).toBe('fastMode')
+  expect(toneColor('stay')).toBe('rainbow_violet')
+  const own = (['details', 'edit', 'stay', 'danger'] as const).map(toneColor)
+  expect(new Set(own).size).toBe(own.length)
+  for (const m of Object.values(MARK)) for (const c of [toneColor('details'), toneColor('edit'), toneColor('stay')]) expect(m.color).not.toBe(c)
   for (const m of Object.values(MARK)) expect(m.color).not.toBe(toneColor('details'))
   // The chips share the rows' palette: Resume and a running row are one color.
   expect(toneColor('running')).toBe(MARK.running.color)
@@ -3210,14 +3214,92 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
   expect(MARK.stopped.color).toBe(STOP_RED)
   expect(MARK.stopped.color).not.toBe(MARK.failed.color)
   expect(MARK.stopped.color).not.toBe(toneColor('danger'))
-  // A confirmation's go-ahead is the status it leads to; its way out is neutral.
+  // A confirmation's go-ahead is the status it leads to; its way out stays.
   await ui.press({ key: 'act:2:stop' })
-  await check(2, { stopyes: 'stopped', keep: 'neutral' })
+  await check(2, { stopyes: 'stopped', keep: 'stay' })
   expect((await fill('act:2:stopyes')).color).toBe(MARK.stopped.color)
   await ui.press({ key: 'act:6:takeover' })
-  await check(6, { takeyes: 'stopped', cancel: 'neutral' })
+  await check(6, { takeyes: 'stopped', cancel: 'stay' })
   await ui.press({ key: 'act:1:delete' })
-  await check(1, { deleteyes: 'danger', cancel: 'neutral' })
+  await check(1, { deleteyes: 'danger', cancel: 'stay' })
+  await ui.unmount()
+})
+
+// Every chip drawn: its label, whether it is dimmed (disabled), and its fill.
+const chipsDrawn = async (ui: { findAll: (q: { type: string }) => Promise<Found[]> }) =>
+  (await ui.findAll({ type: 'Button' })).flatMap(b => {
+    const text = (b.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null && 'props' in c)
+    const label = b.props?.['label']
+    if (b.props?.['plain'] !== true || text?.props?.['weight'] !== 'semibold' || typeof label !== 'string') return []
+    const isDimmed = b.props['dimColor'] === true
+    return [{ label, isDimmed, fill: text.props['backgroundColor'], isDimText: text.props['dimColor'] === true }]
+  })
+
+test('an enabled chip is never grey or dim, in any state: only a disabled one is', async ($, on) => {
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  const db = seeded(
+    [
+      aTodo(1, 'Waiting'),
+      running(2, 'Runs'),
+      running(3, 'Waits', { status: 'paused' }),
+      aTodo(4, 'Stopped one', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'p', taskId: 'ag4' }),
+      aTodo(5, 'Drafting', { status: 'drafting', owner: 's1' }),
+      running(6, 'Elsewhere', { owner: 'other' }),
+      aTodo(7, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }),
+      aTodo(8, 'Broke', { status: 'failed', hasRun: true, prompt: 'p' }),
+      running(9, 'Runs too'),
+    ],
+    [agentNode('ag2', 2)],
+  )
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const seen = new Set<string>()
+  const sweep = async (ui: { findAll: (q: { type: string }) => Promise<Found[]> }) => {
+    for (const c of await chipsDrawn(ui)) {
+      seen.add(c.label)
+      if (c.isDimmed) continue
+      // Enabled: a fill in a tone's color, never a grey and never dim text.
+      expect(`${c.label}: ${String(c.fill)}`).not.toMatch(/: undefined$/)
+      expect(`${c.label}: ${String(c.fill)}`).not.toMatch(new RegExp(`: (${GREYS.join('|')})$`))
+      expect(`${c.label}: dim ${String(c.isDimText)}`).toBe(`${c.label}: dim false`)
+    }
+  }
+  const ui = await mountAll($)
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9]) await ui.press({ key: `todo:${n}` })
+  await ui.press({ key: 'subs:2' })
+  await ui.press({ key: 'ag:ag2' })
+  await sweep(ui)
+  // Each confirmation, then a stop's what-next row with ✓ Leave.
+  await ui.press({ key: 'act:1:delete' })
+  await sweep(ui)
+  await ui.press({ key: 'act:1:cancel' })
+  await ui.press({ key: 'act:6:takeover' })
+  await sweep(ui)
+  await ui.press({ key: 'act:6:cancel' })
+  await ui.press({ key: 'act:9:stop' })
+  await sweep(ui)
+  await ui.press({ key: 'act:9:stopyes' })
+  await sweep(ui)
+  expect(await ui.find({ type: 'Button', key: 'act:9:leave' })).toBeDefined()
+  await ui.unmount()
+  // The way back from a transcript.
+  const back = await $.ui.mount({ ...PANE, props: { ...PANE.props, view: { agentId: 'ag2' } }, surface: 'terminal' })
+  await sweep(back)
+  await back.unmount()
+  // Every chip was reached, so none escaped the sweep.
+  expect([...seen].sort()).toEqual(Object.keys(CHIP_SYMBOL).sort())
+  // And no tone a chip can wear while enabled is a grey: only pending's mark,
+  // which no chip leads to, is.
+  for (const t of ['danger', 'details', 'edit', 'stay', 'running', 'paused', 'stopped', 'drafting'] as const) expect(GREYS).not.toContain(toneColor(t))
+})
+
+test('a disabled chip keeps its own muted look: dimmed, no fill, its tone in dim text', async ($, on) => {
+  const db = seeded([aTodo(1, 'Stopped one', { status: 'stopped', hasRun: true, prompt: 'p' })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await mountAll($)
+  const [fire] = (await chipsDrawn(ui)).filter(c => c.label === 'Fire')
+  expect(fire).toEqual({ label: 'Fire', isDimmed: true, fill: undefined, isDimText: true })
   await ui.unmount()
 })
 
