@@ -54,16 +54,26 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .btn.f:not(.chip) *{color:var(--term)!important}
 /* Action chips mirror statusChip() in hooks/marks.tsx: a filled label whose fill is
    the mark color of the status the action moves the todo into (tone-<status>, the
-   same colors as MARK below), danger and failed = the theme's error red, stopped = a true red, details = its own ide teal-blue
-   (Details moves no status), edit = fastMode's orange (Rename), stay = rainbow_violet's mauve
-   (Reset, Leave, Keep/Cancel/Back, Full transcript). An enabled chip is never grey: only a
-   dimmed (disabled) one is muted. The focus
+   same colors as MARK below), danger = Delete's rose, details = its own cyan (Details
+   moves no status), edit = Rename's lime, stay = a magenta (Reset, Leave,
+   Keep/Cancel/Back, Full transcript). Every color is raw hex, its own hue 30° apart
+   round the wheel (stopped a pure red), with pending's grey the one exception, which
+   no chip fills with. --tf is each tone's focused twin, the same hue halfway to white:
+   a chip under the ring or the pointer brightens to it rather than going black.
+   An enabled chip is never grey: only a dimmed (disabled) one is muted. The focus
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
+:root{--s-stopped:#ff0000;--f-stopped:#ff8080;--s-failed:#f1a355;--f-failed:#f8d1aa;--s-paused:#f1f155;--f-paused:#f8f8aa;--s-edit:#a3f155;--f-edit:#d1f8aa;
+  --s-running:#55f155;--f-running:#aaf8aa;--s-planning:#55f1a3;--f-planning:#aaf8d1;--s-details:#55f1f1;--f-details:#aaf8f8;--s-drafting:#55a3f1;--f-drafting:#aad1f8;
+  --s-prompting:#5555f1;--f-prompting:#aaaaf8;--s-done:#a355f1;--f-done:#d1aaf8;--s-stay:#f155f1;--f-stay:#f8aaf8;--s-danger:#f155a3;--f-danger:#f8aad1;--s-pending:#8b919c;--f-pending:#c5c8ce}
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
-.chip{--tone:var(--violet)}.chip.tone-stay{--tone:var(--violet)}.chip.tone-edit{--tone:var(--fastmode)}.chip.tone-danger{--tone:var(--error)}.chip.tone-details{--tone:var(--ide)}
-.chip.tone-prompting{--tone:var(--periwinkle)}.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
-.chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--error)}
+.chip{--tone:var(--s-stay);--tf:var(--f-stay)}.chip.tone-stay{--tone:var(--s-stay);--tf:var(--f-stay)}.chip.tone-edit{--tone:var(--s-edit);--tf:var(--f-edit)}.chip.tone-danger{--tone:var(--s-danger);--tf:var(--f-danger)}.chip.tone-details{--tone:var(--s-details);--tf:var(--f-details)}
+.chip.tone-prompting{--tone:var(--s-prompting);--tf:var(--f-prompting)}.chip.tone-pending{--tone:var(--s-pending);--tf:var(--f-pending)}.chip.tone-drafting{--tone:var(--s-drafting);--tf:var(--f-drafting)}.chip.tone-planning{--tone:var(--s-planning);--tf:var(--f-planning)}.chip.tone-running{--tone:var(--s-running);--tf:var(--f-running)}
+.chip.tone-paused{--tone:var(--s-paused);--tf:var(--f-paused)}.chip.tone-stopped{--tone:var(--s-stopped);--tf:var(--f-stopped)}.chip.tone-done{--tone:var(--s-done);--tf:var(--f-done)}.chip.tone-failed{--tone:var(--s-failed);--tf:var(--f-failed)}
+/* The status marks and row titles, in MARK's colors. */
+.st-prompting{color:var(--s-prompting)}.st-pending{color:var(--s-pending)}.st-drafting{color:var(--s-drafting)}.st-planning{color:var(--s-planning)}.st-running{color:var(--s-running)}.st-paused{color:var(--s-paused)}.st-stopped{color:var(--s-stopped)}.st-done{color:var(--s-done)}.st-failed{color:var(--s-failed)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
+/* Under the pointer (each chip's own hover) or the ring: the tone's focused twin, never black. */
+.chip:not(.off):hover .fill,.chip.f:not(.off) .fill{background:var(--tf);color:var(--inv)}
 /* A chip's word on hover (withTip/tipLabel in hooks/marks.tsx): an absolute label that takes no row,
    on the row above the chip (below for the header's), shifted left near the pane's right edge; quiet:
    plain italic text, no fill. The header's status toggles reveal their status's word the same way. */
@@ -76,8 +86,8 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .clamp1{white-space:normal;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 /* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
 .chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
-/* current: Claude Code inverts the focused element, so the fill becomes text color */
-.fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
+/* current: the ring's inversion alone, which statusChip pre-inverts, so the focused chip brightens */
+.fm-current .chip.f .fill{background:var(--tf);color:var(--inv)}
 /* uniform / both: one neutral fill; only the focused chip turns orange + bold */
 .fm-uniform .chip .fill,.fm-both .chip .fill{background:var(--subtle);font-weight:400}
 .fm-uniform .chip.f .fill,.fm-both .chip.f .fill{background:var(--orange);font-weight:700}
@@ -535,8 +545,8 @@ function press(fid){
 
 /* ---------- pane render ---------- */
 // MARK in hooks/marks.tsx: one symbol and color per status, for rows, header, status line and chips.
-const MARK={prompting:['◔','pw'],pending:['●','dim'],drafting:['✎','bl'],planning:['◇','te'],running:['▶','gr'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','ma'],failed:['✗','er']};
-function glyph(st){ if(st==='running'||st==='run') return [SPIN[spin],'gr']; return MARK[st] || ({queued:['◌','faint'],ok:['✓','gr']})[st] || ['?','dim']; }
+const MARK={prompting:['◔','st-prompting'],pending:['●','st-pending'],drafting:['✎','st-drafting'],planning:['◇','st-planning'],running:['▶','st-running'],paused:['⏸','st-paused'],stopped:['■','st-stopped'],done:['✓','st-done'],failed:['✗','st-failed']};
+function glyph(st){ if(st==='running'||st==='run') return [SPIN[spin],'st-running']; return MARK[st] || ({queued:['◌','faint'],ok:['✓','gr']})[st] || ['?','dim']; }
 // tallySummary(): the header's colored counts, in SUMMARY's order.
 // Views: each status in the header is a toggle for its own rows. Default view: running, prompting, pending, failed.
 // drafting and planning count as running (they're the start of a run). Done sorts last when shown.
@@ -547,7 +557,7 @@ const tallyHtml = c => VIEWS.map(st=>`<span class="${MARK[st][1]}">${MARK[st][0]
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
 // Filled action chip, toned like hooks/marks.tsx: the status the action leads to
 // (running, paused, stopped, drafting…), 'danger' for Delete, 'details' for
-// Details (its own teal, as it moves no status), 'edit' for Rename, or 'stay'.
+// Details (its own cyan, as it moves no status), 'edit' for Rename, or 'stay'.
 // A chip draws only its symbol (CHIP there); the word is its label, its hover label, and with
 // `does` the todo's hint line while the ring is on it.
 const CHIP={Exec:['▶','run it, picking or writing its prompt first'],Auto:['⚡','run it on its first draft, asking nothing'],Fire:['🔥','auto-run the lowest-numbered pending todo'],Rename:['✎','give the todo a new title'],Refine:['✨','rework its prompt in the chat, then run it'],Restart:['↻','run it again from a fresh start'],Resume:['⏵','pick its run up where it left off'],Pause:['⏸','halt it, keeping its run to resume'],Stop:['■','execution halts; the todo is kept'],Delete:['✕','remove the todo for good'],Takeover:['⇄',"it's marked stopped here; its run in the other session isn't stopped"],Details:['☰','browse its prompt, subtasks and calls'],Reset:['↺','take it back from the chat'],Keep:['↩','leave it as it is'],Cancel:['↩','leave it as it is'],Back:['↩','back to the list'],Leave:['✓','fold it away as it is'],'Full transcript':['↗','open every turn and call of the subtask']};
@@ -666,8 +676,8 @@ function renderPane(){
     // other line, so level 1 keeps its size.
     const on = S.area==='pane' && S.fid && S.fid.startsWith(`act:${t.id}:`) ? LABELS[S.fid] : undefined;
     if(on) h += `<div class="row ind2 chiphint"><b>${CHIP[on][0]} ${esc(on)}</b><span class="dim">: ${esc(CHIP[on][1])}</span></div>${t.prompt?`<div class="row ind2 dim clamp1">“${esc(t.prompt)}”</div>`:''}`;
-    else h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts: ▶ Exec asks, ⚡/🔥 take the 1st</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
-    if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="ma">✓ ${esc(t.summary)}</span></div>`;
+    else h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="st-prompting">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts: ▶ Exec asks, ⚡/🔥 take the 1st</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
+    if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="st-done">✓ ${esc(t.summary)}</span></div>`;
     h += acts;
     if(t.agents.length){
       const calls=t.agents.reduce((n,a)=>n+a.calls.filter(c=>!c.say).length,0);

@@ -2,36 +2,44 @@ import type { Color, ElementTable } from 'claude-code'
 
 import type { Todo, TodoStatus, View } from '../types'
 
-// The mod's one palette. Every status has one symbol and one theme color, and
-// everything that names a status reads them from here: the todo and agent
-// rows, the todo header lines, the pane's header summary, the status line, the
-// done/failed toasts, and the action chips, which fill with the color of the
-// status they move the todo into. Nothing else hard-codes a status color, so
-// no two places can drift.
-export type Mark = { symbol: string; color: Color }
+// The mod's one palette. Every status has one symbol, one color and that
+// color's focused twin, and everything that names a status reads them from
+// here: the todo and agent rows, the todo header lines, the pane's header
+// summary, the status line, the done/failed toasts, and the action chips,
+// which fill with the color of the status they move the todo into. Nothing
+// else hard-codes a status color, so no two places can drift.
+//
+// The colors are raw hex, not theme keys: the theme's keys cluster (three
+// greens, two reds) and have no lighter twin of each, so the hues couldn't be
+// spread evenly. So the statuses and the chip tones below sit 30° apart round
+// the color wheel, every one at 85% saturation and 64% lightness but stopped,
+// a pure red. A raw hex color is a Color the engine paints as is. `focus` is
+// the same hue with its lightness raised halfway to white: what a chip under
+// the focus ring or the pointer brightens to (statusChip).
+export type Mark = { symbol: string; color: Color; focus: Color }
 
-// Stopped's red. The theme has no red but `error`, which failed and Delete
-// wear, so a stopped todo would read as a failed one. A raw hex color is a
-// Color the engine paints as is (Text's color and backgroundColor alike), so
-// stopped, its ■ Stop chips and its header toggle all share this true red.
+// Stopped's red, pure, so a stopped todo never reads as a failed one: stopped,
+// its ■ Stop chips and its header toggle all share it.
 export const STOP_RED: Color = '#ff0000'
 
 export const MARK: Record<TodoStatus, Mark> = {
   // Added, its background drafter still writing its prompt drafts: the
   // circle filling in toward pending's full one, in a color of its own, as
-  // nothing may start it yet.
-  prompting: { symbol: '◔', color: 'remember' },
-  pending: { symbol: '●', color: 'inactive' },
-  drafting: { symbol: '✎', color: 'suggestion' },
-  planning: { symbol: '◇', color: 'planMode' },
+  // nothing may start it yet. 240°.
+  prompting: { symbol: '◔', color: '#5555f1', focus: '#aaaaf8' },
+  // The palette's one grey, which no chip ever fills with (GREYS).
+  pending: { symbol: '●', color: '#8b919c', focus: '#c5c8ce' },
+  drafting: { symbol: '✎', color: '#55a3f1', focus: '#aad1f8' }, // 210°
+  planning: { symbol: '◇', color: '#55f1a3', focus: '#aaf8d1' }, // 150°
   // A row spins instead while it runs (SPIN), in this color. Green, as Exec,
-  // Auto, Fire and Resume start a run and their chips share it.
-  running: { symbol: '▶', color: 'success' },
-  paused: { symbol: '⏸', color: 'warning' },
-  stopped: { symbol: '■', color: STOP_RED },
-  // Landed on the base branch: the merged color, so it never reads as running.
-  done: { symbol: '✓', color: 'merged' },
-  failed: { symbol: '✗', color: 'error' },
+  // Auto, Fire and Resume start a run and their chips share it. 120°.
+  running: { symbol: '▶', color: '#55f155', focus: '#aaf8aa' },
+  paused: { symbol: '⏸', color: '#f1f155', focus: '#f8f8aa' }, // 60°
+  stopped: { symbol: '■', color: STOP_RED, focus: '#ff8080' }, // 0°
+  // Landed on the base branch: a purple, 150° from running's green, so a done
+  // row never reads as a running one. 270°.
+  done: { symbol: '✓', color: '#a355f1', focus: '#d1aaf8' },
+  failed: { symbol: '✗', color: '#f1a355', focus: '#f8d1aa' }, // 30°
 }
 
 // Claude Code's own spinner, which a running row draws in place of ▶.
@@ -96,24 +104,28 @@ export const DIVIDER: Color = 'subtle'
 export type Tone = TodoStatus | 'danger' | 'details' | 'edit' | 'stay'
 
 // Grey and dim mean disabled, so an enabled chip never wears them: these are
-// the theme's greys, which only a dimmed chip (statusChip's isDimmed), the
-// divider and pending's mark may use. The tones below avoid them all.
-export const GREYS: readonly Color[] = ['subtle', 'inactive', 'promptBorder']
+// the theme's greys and pending's, which only a dimmed chip (statusChip's
+// isDimmed), the divider and pending's mark may use. The tones below avoid
+// them all.
+export const GREYS: readonly Color[] = ['subtle', 'inactive', 'promptBorder', MARK.pending.color]
 
-// The chips that move no status still each wear a color, so none reads as
-// disabled. Details takes ide, the theme's nearest distinct cyan, as planning's
-// mark owns its one true teal (planMode). Rename takes fastMode's vivid orange,
-// Edit's own color, apart from every status. The rest share rainbow_violet's
-// mauve, which no status, Delete or Details uses. All are theme keys that every
-// theme defines, so the pane follows /theme.
-const TONE: Record<'danger' | 'details' | 'edit' | 'stay', Color> = {
-  danger: 'error',
-  details: 'ide',
-  edit: 'fastMode',
-  stay: 'rainbow_violet',
+// The chips that move no status still each wear a hue of their own, on the
+// same wheel as the statuses, so none reads as disabled: Rename a lime (90°),
+// Details a cyan (180°), the rest a magenta (300°), and Delete a rose (330°),
+// apart from failed's orange and stopped's red.
+const TONE: Record<'danger' | 'details' | 'edit' | 'stay', Pick<Mark, 'color' | 'focus'>> = {
+  danger: { color: '#f155a3', focus: '#f8aad1' },
+  details: { color: '#55f1f1', focus: '#aaf8f8' },
+  edit: { color: '#a3f155', focus: '#d1f8aa' },
+  stay: { color: '#f155f1', focus: '#f8aaf8' },
 }
 
-export const toneColor = (tone: Tone): Color => (tone in TONE ? TONE[tone as keyof typeof TONE] : MARK[tone as TodoStatus].color)
+const toneOf = (tone: Tone) => (tone in TONE ? TONE[tone as keyof typeof TONE] : MARK[tone as TodoStatus])
+
+export const toneColor = (tone: Tone): Color => toneOf(tone).color
+
+// A tone's focused twin: the same hue, lighter.
+export const toneFocus = (tone: Tone): Color => toneOf(tone).focus
 
 // ---------- widgets, for any surface that embeds the palette ----------
 
@@ -231,6 +243,15 @@ export const withTip = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, key: 
 // color, and stays pressable, so the ring still reaches it and a press says
 // why. Dim is the only disabled look: an enabled chip always fills with a
 // tone's color, and no tone is grey (GREYS).
+//
+// The engine inverts a Button under the focus ring or the pointer, which
+// would swap the fill with the dark text and turn the chip black. So the chip
+// the ring is on (`isFocused`), and any chip while the pointer is on it (its
+// `hover`, which the nearest keyed Box scopes: withTip's, holding this chip
+// and its label alone), is drawn already inverted, in its tone's focused
+// color. Inverting it again changes nothing, so it brightens either way.
+export const lifted = (tone: Tone) => ({ inverse: true, color: toneFocus(tone), backgroundColor: 'inverseText' as Color })
+
 export const statusChip = (
   { Text, Button }: Pick<ElementTable, 'Text' | 'Button'>,
   key: string,
@@ -238,6 +259,7 @@ export const statusChip = (
   onPress: () => unknown,
   tone: Tone = 'stay',
   isDimmed = false,
+  isFocused = false,
 ) =>
   isDimmed ? (
     <Button key={key} label={label} plain dimColor onPress={() => void onPress()}>
@@ -247,8 +269,14 @@ export const statusChip = (
     </Button>
   ) : (
     <Button key={key} label={label} plain onPress={() => void onPress()}>
-      <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText">
-        {` ${CHIP_SYMBOL[label] ?? label} `}
-      </Text>
+      {isFocused ? (
+        <Text weight="semibold" {...lifted(tone)}>
+          {` ${CHIP_SYMBOL[label] ?? label} `}
+        </Text>
+      ) : (
+        <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText" hover={lifted(tone)}>
+          {` ${CHIP_SYMBOL[label] ?? label} `}
+        </Text>
+      )}
     </Button>
   )

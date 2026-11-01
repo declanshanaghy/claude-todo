@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { CHIP, CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
+import { CHIP, CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor, toneFocus } from './marks'
 import { clampLines, headParts } from './pane'
 import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
@@ -1455,7 +1455,7 @@ test('the header, the status line and the rows draw the same marks in the same o
   const ui = await mountAll($)
   const header = await headerMarks(ui)
   expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
-  expect(header.map(m => m.color)).toEqual(['success', 'remember', 'inactive', 'error', 'warning', STOP_RED, 'merged'])
+  expect(header.map(m => m.color)).toEqual(['#55f155', '#5555f1', '#8b919c', '#f1a355', '#f1f155', STOP_RED, '#a355f1'])
   expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
   // Each row's glyph is its status's mark; a running row spins in its color.
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending'], [7, 'prompting']] as const) {
@@ -3218,12 +3218,14 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
     const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
     const label = chip?.props['label']
     const drawn = (text as { children?: unknown[] } | undefined)?.children?.join('')
-    return { label: typeof label === 'string' ? label : '', drawn, color: text?.props['backgroundColor'] }
+    // The chip under the ring is drawn inverted in its tone's focused twin.
+    const isLit = text?.props['inverse'] === true
+    return { label: typeof label === 'string' ? label : '', drawn, isLit, color: isLit ? text.props['color'] : text?.props['backgroundColor'] }
   }
   const check = async (n: number, expected: Record<string, Tone>) => {
     for (const [k, tone] of Object.entries(expected)) {
-      const { label, drawn, color } = await fill(`act:${n}:${k}`)
-      expect(`${k}: ${String(color)}`).toBe(`${k}: ${toneColor(tone)}`)
+      const { label, drawn, isLit, color } = await fill(`act:${n}:${k}`)
+      expect(`${k}: ${String(color)}`).toBe(`${k}: ${isLit ? toneFocus(tone) : toneColor(tone)}`)
       // The label names it in a word; the chip draws only its symbol, a cell
       // of fill either side.
       expect(label).toMatch(/^\p{L}{1,9}$/u)
@@ -3242,16 +3244,16 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
   await check(7, { details: 'details' })
   // Details, Rename and the rest that move no status each wear a color of
   // their own: no status's color, and not each other's.
-  expect(toneColor('details')).toBe('ide')
-  expect(toneColor('edit')).toBe('fastMode')
-  expect(toneColor('stay')).toBe('rainbow_violet')
+  expect(toneColor('details')).toBe('#55f1f1')
+  expect(toneColor('edit')).toBe('#a3f155')
+  expect(toneColor('stay')).toBe('#f155f1')
   const own = (['details', 'edit', 'stay', 'danger'] as const).map(toneColor)
   expect(new Set(own).size).toBe(own.length)
   for (const m of Object.values(MARK)) for (const c of [toneColor('details'), toneColor('edit'), toneColor('stay')]) expect(m.color).not.toBe(c)
   for (const m of Object.values(MARK)) expect(m.color).not.toBe(toneColor('details'))
   // The chips share the rows' palette: Resume and a running row are one color.
   expect(toneColor('running')).toBe(MARK.running.color)
-  expect(MARK.running.color).toBe('success')
+  expect(MARK.running.color).toBe('#55f155')
   // ■ Stop fills in stopped's own true red, which failed and Delete don't share.
   expect((await fill('act:2:stop')).color).toBe(MARK.stopped.color)
   expect(MARK.stopped.color).toBe(STOP_RED)
@@ -3275,7 +3277,8 @@ const chipsDrawn = async (ui: { findAll: (q: { type: string }) => Promise<Found[
     const label = b.props?.['label']
     if (b.props?.['plain'] !== true || text?.props?.['weight'] !== 'semibold' || typeof label !== 'string') return []
     const isDimmed = b.props['dimColor'] === true
-    return [{ label, isDimmed, fill: text.props['backgroundColor'], isDimText: text.props['dimColor'] === true }]
+    const fill = text.props['inverse'] === true ? text.props['color'] : text.props['backgroundColor']
+    return [{ label, isDimmed, fill, isDimText: text.props['dimColor'] === true }]
   })
 
 test('an enabled chip is never grey or dim, in any state: only a disabled one is', async ($, on) => {
@@ -3472,6 +3475,89 @@ test('no two actions share a chip symbol, apart from the safe way back out of a 
     owners.set(sym, key)
   }
   expect(CHIP_SYMBOL['Exec']).not.toBe(CHIP_SYMBOL['Resume'])
+})
+
+// A chip's Text as drawn, and as it draws under the pointer.
+const chipText = async (ui: { find: (q: { type: string; key: string }) => Promise<Found | undefined> }, key: string) => {
+  const chip = await ui.find({ type: 'Button', key })
+  const text = (chip?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null && 'props' in c)
+  return { props: text?.props ?? {}, hover: ((text as { hover?: Record<string, unknown> } | undefined)?.hover ?? text?.props?.['hover']) as Record<string, unknown> | undefined }
+}
+// The fill a style shows: an inverted run shows its color as the fill.
+const fillOf = (st: Record<string, unknown> | undefined) => (st?.['inverse'] === true ? st['color'] : st?.['backgroundColor'])
+
+test('a focused or hovered chip brightens to its own tone\'s lighter twin, never black', async ($, on) => {
+  const db = seeded([aTodo(1, 'Waiting'), running(2, 'Runs')])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'todo:2' })
+  const focus = (element: string) => $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element, origin: { kind: 'person' } })
+  const chips: [string, Tone][] = [
+    ['act:1:exec', 'running'],
+    ['act:1:rename', 'edit'],
+    ['act:1:delete', 'danger'],
+    ['act:1:details', 'details'],
+    ['act:2:pause', 'paused'],
+    ['act:2:stop', 'stopped'],
+  ]
+  for (const [key, tone] of chips) {
+    // At rest: its tone's fill, and under the pointer, already inverted in the
+    // tone's focused color, so the engine's own inversion keeps it bright.
+    const rest = await chipText(ui, key)
+    expect(`${key}: ${String(fillOf(rest.props))}`).toBe(`${key}: ${toneColor(tone)}`)
+    expect(rest.hover).toEqual({ inverse: true, color: toneFocus(tone), backgroundColor: 'inverseText' })
+    // Under the ring: drawn the same way, inverted in the focused color.
+    await focus(key)
+    const lit = await chipText(ui, key)
+    expect(lit.props['inverse']).toBe(true)
+    expect(`${key}: ${String(fillOf(lit.props))}`).toBe(`${key}: ${toneFocus(tone)}`)
+    expect(lit.props['backgroundColor']).toBe('inverseText')
+    // Neither is ever a dark fill, and the others stay at rest.
+    for (const st of [lit.props, rest.hover]) expect(String(fillOf(st))).not.toMatch(/^(inverseText|#000000|black)$/)
+    for (const [other, t] of chips) if (other !== key) expect(fillOf((await chipText(ui, other)).props)).toBe(toneColor(t))
+  }
+  // The hover sits on the chip's own Text, inside its keyed tip: Box, so it
+  // lights that chip alone; the tip label beside it stays unfilled.
+  const tip = (await ui.find({ type: 'Box', key: 'tip:act:1:exec' })) as Found | undefined
+  expect(JSON.stringify(tip?.children)).toContain('"inverse":true')
+  expect((await tipOf(ui, 'act:1:exec'))?.hover).toEqual({ display: 'flex' })
+  await ui.unmount()
+})
+
+// A hex color's hue in degrees, and its HSL lightness.
+const hsl = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const d = max - min
+  const h = d === 0 ? NaN : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return { hue: Math.round(h * 60) % 360, light: (max + min) / 2, sat: d }
+}
+
+test('every status and tone has its own color and focused twin, spread evenly round the wheel', () => {
+  const tones: Tone[] = [...(Object.keys(MARK) as Tone[]), 'danger', 'details', 'edit', 'stay']
+  const all = tones.flatMap(t => [toneColor(t), toneFocus(t)]).map(String)
+  for (const c of all) expect(c).toMatch(/^#[0-9a-f]{6}$/)
+  expect(new Set(all).size).toBe(all.length)
+  // Pending is the one grey; every other entry sits on its own hue, 30° apart.
+  const hued = tones.filter(t => t !== 'pending')
+  const hues = hued.map(t => hsl(String(toneColor(t))).hue).sort((a, b) => a - b)
+  expect(hues).toEqual(Array.from({ length: 12 }, (_, i) => i * 30))
+  expect(GREYS).toContain(MARK.pending.color)
+  expect(hsl(String(MARK.pending.color)).sat).toBeLessThan(0.1)
+  // Each focused twin is its own hue, lighter.
+  for (const t of hued) {
+    const [base, lit] = [hsl(String(toneColor(t))), hsl(String(toneFocus(t)))]
+    expect(`${t}: ${lit.hue}`).toBe(`${t}: ${base.hue}`)
+    expect(lit.light).toBeGreaterThan(base.light + 0.1)
+  }
+  expect(hsl(String(toneFocus('pending'))).light).toBeGreaterThan(hsl(String(MARK.pending.color)).light + 0.1)
+  // Stopped is pure red, and done sits well away from running's green.
+  expect(MARK.stopped.color).toBe('#ff0000')
+  const gap = Math.abs(hsl(String(MARK.done.color)).hue - hsl(String(MARK.running.color)).hue)
+  expect(Math.min(gap, 360 - gap)).toBeGreaterThanOrEqual(90)
 })
 
 test('the palette gives every status its own color, stopped and failed included, and the toasts name it by its mark', () => {

@@ -257,7 +257,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   // (marks.tsx), so the buttons, rows and summaries share one palette. Its
   // word shows on hover, in a label placed by `at` (tipAt).
   const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'stay', isDimmed = false, at: TipAt = { top: -1 }) =>
-    lit(key, withTip(els, key, label, at, statusChip(els, key, label, onPress, tone, isDimmed)))
+    lit(key, withTip(els, key, label, at, statusChip(els, key, label, onPress, tone, isDimmed, ring === key)))
 
   // Where a hover label opens for a chip whose box starts at column `x` of
   // the body: on the row above (every chip but the header's has the tree's
