@@ -77,6 +77,11 @@ export const tallyText = (list: readonly Todo[]) => tally(list).map(tallyMark).j
 // The toast for a todo that settled: its mark, number and status.
 export const statusToast = (n: number, s: TodoStatus) => `${MARK[s].symbol} #${n} ${s}`
 
+// The rule the tree draws between two todos' header lines: one dim line in
+// the theme's subtle color, the same grey the neutral chips wear, so it parts
+// the todos without reading as a status.
+export const DIVIDER: Color = 'subtle'
+
 // A chip's tone: the status its action moves the todo into, `danger` for one
 // that destroys it (Delete), or `neutral` for one that changes no status.
 export type Tone = TodoStatus | 'danger' | 'neutral'

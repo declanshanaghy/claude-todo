@@ -38,8 +38,8 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .pane.has-focus{box-shadow:inset 2px 0 0 var(--orange)}
 .panebody{padding:6px 8px 10px;overflow:auto;max-height:640px}
 .row{white-space:pre;display:flex;align-items:baseline;min-height:20px}
-/* The rule above each todo (todoDividers): dim, full width, the title cut with … so it never wraps. */
-.divider{color:var(--dim);overflow:hidden}.divider .dt{flex:0 1 auto;padding:0 1ch;overflow:hidden;text-overflow:ellipsis}.divider .fill{flex:1 1 0;min-width:2ch;overflow:hidden}.divider .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
+/* The rule between two todos, above every header but the first shown: one dim line of ─, full width, cut so it never wraps; not focusable. */
+.divider{color:var(--dim);opacity:.6;overflow:hidden;white-space:nowrap}.divider::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
 /* The todo's header IS its splitter: one focusable line `▸ ◐ #N title ──── status`. */
 .thead{color:var(--dim)}.thead .tt{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}.thead .fill{flex:1 1 0;min-width:2ch;overflow:hidden;padding:0 1ch}.thead .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
 .thead .st{flex:0 0 auto}
@@ -611,11 +611,13 @@ function renderPane(){
     S.seenFid=S.fid;
     return;
   }
-  let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div><div class="row"> </div>`;
-  if(S.view) h += `<div class="row">${chipB('back','Back')}</div><div class="row"> </div>`;
+  let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div>`;
+  if(S.view) h += `<div class="row">${chipB('back','Back')}</div>`;
   const list = S.todos.filter(t=>S.show.has(viewOf(t.status))).sort((a,b)=>(a.status==='done')-(b.status==='done') || a.n-b.n);
   const hidden = S.todos.length-list.length;
-  for(const t of list){
+  list.forEach((t,i)=>{
+    // A dim rule between todos, above every header but the first shown: the one line that isn't an element's own.
+    if(i>0) h += `<div class="row divider"></div>`;
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
     // The right end is the status's mark in its color (a running one spins), with d/n while it has run; the word is the line's label.
@@ -628,7 +630,7 @@ function renderPane(){
     } else {
       h += `<div class="row">${B('todo:'+t.id, `<span class="row thead" style="min-height:0"><span class="dim">${tw} </span><span class="${gc}"><b>#${t.n}</b>&nbsp;</span><span class="tt ${gc}">${esc(t.title)}</span><span class="fill"></span><span class="st">${right}</span></span>`, 'grow')}</div>`;
     }
-    if(!t.expanded){ continue; }
+    if(!t.expanded) return;
     // Level 1: what it was asked to do (2 lines), what you can do now, and how far it got.
     h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : '<i>no prompt yet: ▶ Exec drafts one</i>')}</div>`;
     if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="ma">✓ ${esc(t.summary)}</span></div>`;
@@ -637,7 +639,7 @@ function renderPane(){
       const calls=t.agents.reduce((n,a)=>n+a.calls.filter(c=>!c.say).length,0);
       h += `<div class="row ind2">${B('subs:'+t.id, `<span class="dim">${t.subsOpen?'▾':'▸'} </span>${t.agents.length} subtask${t.agents.length>1?'s':''} <span class="dim">· ${done} done · ${calls} calls${t.mode==='workflow'?' · workflow':''}</span>`, 'grow')}</div>`;
     }
-    if(!t.subsOpen){ h += `<div class="row"> </div>`; continue; }
+    if(!t.subsOpen) return;
     // Level 2: one line per subtask, grouped by wave for a workflow.
     let wave=0;
     for(const a of t.agents){
@@ -657,8 +659,7 @@ function renderPane(){
       }
       h += `<div class="row ind6">${chipB('browse:'+a.id,'Full transcript')}</div>`;
     }
-    h += `<div class="row"> </div>`;
-  }
+  });
   if(!S.todos.length) h += `<div class="row dim">No todos. Type a title above.</div>`;
   else if(!list.length) h += `<div class="row dim">Nothing in this view.</div>`;
   if(hidden) h += `<div class="row faint">${hidden} hidden by the view · toggle a status above</div>`;

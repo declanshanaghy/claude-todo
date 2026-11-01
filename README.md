@@ -71,7 +71,7 @@ The pane opens on the right at session start and keeps the tree short, then lets
 | 2 | the subtasks line | One row per subtask (an agent), grouped by wave for a Workflow, worktree writers marked ⎇, with its call count |
 | 3 | a subtask | Its last 6 turns and tool calls, one line each, and **↗ Full transcript** |
 
-The header line is its own splitter, so a closed todo costs one row and the rule that keeps a long tree's todos apart is the same line you press; there is no separate row or divider to keep in step with it. Each level stays a glance (two lines of prompt, six lines of activity) so opening one never pushes the rest of the backlog off the pane, and closing a level closes everything under it, so reopening starts folded. What's open is kept with the pane's other UI state, across redraws and reloads. The detail lives in a dialog: **↗ Full transcript** turns the pane into a browser of that agent's work, read like Claude Code's own transcript: what the agent wrote between its tool calls, then each call with its formatted input and its ⎿ result; **☰ Details** on a todo shows its full prompt, run ids and agents. `esc` closes the dialog and puts the ring back on the subtask's row.
+The header line is its own splitter, so a closed todo costs one row plus the one dim rule that parts it from the todo above; that divider is never focusable, so the ring walks straight from header to header. Each level stays a glance (two lines of prompt, six lines of activity) so opening one never pushes the rest of the backlog off the pane, and closing a level closes everything under it, so reopening starts folded. What's open is kept with the pane's other UI state, across redraws and reloads. The detail lives in a dialog: **↗ Full transcript** turns the pane into a browser of that agent's work, read like Claude Code's own transcript: what the agent wrote between its tool calls, then each call with its formatted input and its ⎿ result; **☰ Details** on a todo shows its full prompt, run ids and agents. `esc` closes the dialog and puts the ring back on the subtask's row.
 
 ![A running Workflow expanded down to one tool call's input and response](docs/screenshots/m3-browse.png)
 *Browsing: open a todo, its subtasks and one subtask to see its latest calls; ↗ Full transcript reads everything it wrote and every tool call it made.*
@@ -94,7 +94,7 @@ The header line is its own splitter, so a closed todo costs one row and the rule
 
 A dev copy loaded with `--plugin-dir` gets no `/config` row, so use the environment variable there.
 
-Earlier versions had a **Todo dividers** setting for a rule above each todo; each todo's line now carries its own rule, so the setting is gone, and a value still in `/config` or `CLAUDE_TODO_DIVIDERS` is ignored.
+Earlier versions had a **Todo dividers** setting for a rule above each todo; the divider is now always drawn, so the setting is gone, and a value still in `/config` or `CLAUDE_TODO_DIVIDERS` is ignored.
 
 ## Troubleshooting
 
