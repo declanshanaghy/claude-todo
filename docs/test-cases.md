@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 134 of 137 cases (97.8%)** are covered by `claude plugin test .`.
+**Coverage: 136 of 139 cases (97.8%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -23,6 +23,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C13 | Viewing an agent's transcript offers the way back to the main conversation | the pane opens at start, stays closed across a reload once hidden, and offers the way back from a transcript |
 | C14 | The header draws the session's title at its right end in the prompt bar's border color (`promptBorder`), Todos at its left; with no title it draws none | the header shows the session title at its right in the prompt bar color, following each change |
 | C15 | The title follows each change: set at session start, updated on each prompt, a hook's `sessionTitle` winning over the event's, cleared by a start with none | the header shows the session title at its right in the prompt bar color, following each change |
+| C16 | `/todo exec auto` takes the keyword before or after the target; with no target it runs the lowest-numbered pending todo, and says so when none is pending | /todo exec auto runs a named todo with the keyword before or after it, or the lowest-numbered pending one, and says when none is |
 
 ## The counts: the pane's header or the status line
 
@@ -41,6 +42,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 |---|---|---|
 | E1 | ▶ Exec submits the exec protocol and marks the todo drafting | M2: Exec submits the exec protocol and marks the todo drafting |
 | E1a | Exec, restart and resume all carry the git rules: own worktree branch, commit as it goes, the project's checks before landing, rebase onto `origin/<base>` resolving parallel todos' conflicts by keeping both sides, retry a rejected push, never force-push, abort and keep the branch on an unresolvable conflict; a lone Agent runs with `isolation: "worktree"` and a Workflow's merge agent is the only one that pushes | every protocol puts the work on its own worktree branch and lands it only after the checks pass |
+| E1c | ⚡ Auto (in the running color) submits the auto protocol: Claude drafts the one best prompt and records it with no AskUserQuestion, and plans multi-step work on stated defaults with no plan mode or approval; plain Exec still asks | Auto drafts the one best prompt and runs it with no questions, planning multi-step work on defaults |
 | E1b | `mcp__todo__update` stores the todo's branch and landed commit, and Details shows them | mcp__todo__update reports a change and mcp__todo__list reads the backlog; a todo's Details shows its prompt, summary, run ids and agents, with nothing to press |
 | D1 | A done todo leaves the tree its lifetime after it finished; a failed one stays; `mcp__todo__list` keeps both | a done todo leaves the tree 5 minutes after it finished; a failed one stays, and the list keeps both |
 | D2 | `CLAUDE_TODO_DONE_TTL_MINUTES` overrides the option, and 0 keeps done todos | CLAUDE_TODO_DONE_TTL_MINUTES overrides the option; 0 keeps done todos |

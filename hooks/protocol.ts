@@ -28,15 +28,21 @@ const GIT_RULES = (n: number) => `Git rules: copy them, with <base> filled in, i
 - The landing message: a summary line of at most 72 characters, "<area>: <what it does, imperative>"; a blank line; why it was needed and what changed, wrapped at 72 columns; the checks it passed; then the line "Todo: #${n}", then your usual commit attribution trailer. One todo lands as one commit: no merge, fixup or work-in-progress commits on <base>.
 - Report back: your branch, the landed commit's hash and summary line, each check run and its result, and whether it landed or why not.`
 
-const RUN_STEPS = (t: Todo, cap: number) => `Base branch: before launching, run git branch --show-current in the main checkout; that branch is <base>. If git status there shows uncommitted changes, tell the user in one line that the todo won't see them, then go on.
+const RUN_STEPS = (t: Todo, cap: number, auto = false) => `Base branch: before launching, run git branch --show-current in the main checkout; that branch is <base>. If git status there shows uncommitted changes, tell the user in one line that the todo won't see them, then go on.
 3. Classify the final prompt:
    - simple: one coherent piece of work a single agent can finish without coordination
    - multi-step: separable subtasks, or several files/areas that parallel writers should change
 4. Simple → call mcp__todo__update {n: ${t.n}, mode: "agent", status: "running"}, then launch Agent with run_in_background: true, isolation: "worktree", a description starting "[todo:${t.n}] ", and the final prompt plus any context it needs and the git rules below. The agent lands its own work. Do not wait for it.
 5. Multi-step → call mcp__todo__update {n: ${t.n}, mode: "workflow", status: "planning"}, then:
-   a. EnterPlanMode. Interrogate the user with AskUserQuestion rounds (up to 4 questions each) until the problem and every subtask are unambiguous. Never assume what you can ask.
+${
+  auto
+    ? `   a. Auto mode: no plan mode and no questions. Settle every open point yourself with the best-effort default the repo and this session suggest, and note each default you chose.
+   b. Write the plan in the chat: a mermaid execution tree (waves, which agents are writers in worktrees, the merge step), a subtask table and the defaults you chose. Don't ask for approval.
+   c. Straight away, call Workflow with an inline script:`
+    : `   a. EnterPlanMode. Interrogate the user with AskUserQuestion rounds (up to 4 questions each) until the problem and every subtask are unambiguous. Never assume what you can ask.
    b. Write the plan: a mermaid execution tree (waves, which agents are writers in worktrees, the merge step) and a subtask table. ExitPlanMode for approval.
-   c. On approval, call Workflow with an inline script:
+   c. On approval, call Workflow with an inline script:`
+}
       - meta.name "todo-${t.n}-<slug>"; meta.phases "Wave 1" … "Wave K"
       - every agent() gets label "w<K>:<name>" and phase "Wave <K>"; every agent that changes files gets isolation: "worktree" and a label ending "@wt"
       - data flows down the dependency tree only: pass each parent's returned result into its children's prompts; no queues or side channels
@@ -52,15 +58,20 @@ ${GIT_RULES(t.n)}
 
 ${TAG_RULES(t.n)}`
 
-export function execPrompt(t: Todo, cap: number, refine: boolean): string {
-  const draft = refine
+// Auto mode takes the draft that would have been offered first and runs it
+// without a question: no prompt to pick, and multi-step work is planned on
+// best-effort defaults and launched without plan-mode approval.
+export function execPrompt(t: Todo, cap: number, refine: boolean, auto = false): string {
+  const draft = auto
+    ? `1. Auto mode: don't ask the user anything. Draft the single best prompt for this todo (the one you would have offered first) from its title and this session's context (repo, recent work, open threads), and go on with it.`
+    : refine
     ? `1. Refine the current prompt below. Ask with ONE AskUserQuestion (header "Refine", question 'Prompt for #${t.n} "${t.title}"?'): the first option is "Keep current prompt" with the current prompt as its description, followed by 2 refinements of it. Each option's description holds the full prompt.
    Current prompt: ${t.prompt ?? '(none)'}`
     : `1. Draft 2–3 concrete prompts for this todo from its title and this session's context (repo, recent work, open threads). Ask with ONE AskUserQuestion (header "Prompt", question 'Prompt for #${t.n} "${t.title}"?'). Each option's label is a short name and its description is the full prompt; the user can type their own via Other.`
-  return `[todo] Execute todo #${t.n} "${t.title}". Follow this protocol exactly.
+  return `[todo] Execute todo #${t.n} "${t.title}"${auto ? ' in auto mode' : ''}. Follow this protocol exactly.
 ${draft}
 2. Call mcp__todo__update {n: ${t.n}, prompt: "<the final prompt>"}.
-${RUN_STEPS(t, cap)}`
+${RUN_STEPS(t, cap, auto)}`
 }
 
 export function restartPrompt(t: Todo, cap: number): string {

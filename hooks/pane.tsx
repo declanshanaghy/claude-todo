@@ -175,6 +175,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           <Box gap={1}>
             {btn('exec', '▶ Exec', () => execTodo($, t, false), 'running')}
+            // Auto goes straight to running, so it wears running's fill too.
+            {btn('auto', '⚡ Auto', () => execTodo($, t, false, true), 'running')}
             {btn('rename', '✎ Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
             {!t.hasRun && btn('delete', '✕ Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
             {details}

@@ -288,6 +288,36 @@ test('M2: Exec submits the exec protocol and marks the todo drafting', async ($,
   await ui.unmount()
 })
 
+test('Auto drafts the one best prompt and runs it with no questions, planning multi-step work on defaults', async ($, on) => {
+  const submitted: string[] = []
+  engine(on, submitted)
+  await start($)
+  await todo($, 'add Fix kitty tab titles')
+  await todo($, 'add Count md files')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  const chip = await ui.find({ type: 'Button', key: 'act:1:auto' })
+  expect(chip?.props['label']).toBe('⚡ Auto')
+  const fill = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
+  expect(fill?.props['backgroundColor']).toBe(MARK.running.color)
+  await ui.press({ key: 'act:1:auto' })
+  await ui.press({ key: 'todo:2' })
+  await ui.press({ key: 'act:2:exec' })
+
+  const [auto, asked] = submitted as [string, string]
+  expect(auto).toContain('Execute todo #1 "Fix kitty tab titles" in auto mode')
+  expect(auto).toContain('single best prompt')
+  expect(auto).toContain('mcp__todo__update {n: 1, prompt:')
+  expect(auto).toContain('isolation: "worktree"')
+  expect(auto).toContain('best-effort default')
+  for (const gone of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'On approval']) expect(auto).not.toContain(gone)
+  // Plain Exec still asks, and plans with the person.
+  for (const kept of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']) expect(asked).toContain(kept)
+  expect(asked).not.toContain('auto mode')
+  expect(await ui.find({ type: 'Button', key: 'act:1:reset' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('every protocol puts the work on its own worktree branch and lands it only after the checks pass', async ($, on) => {
   const submitted: string[] = []
   const db = seeded([
@@ -715,14 +745,14 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
   // Down walks into #1's actions, past the window's height, and the window stays put.
   expect((await arrow(1)).deny).toBeDefined()
   expect(await lit(ui, 'act:1:exec')).toBe(true)
-  for (const key of ['act:1:rename', 'act:1:delete', 'act:1:details', 'todo:2']) {
+  for (const key of ['act:1:auto', 'act:1:rename', 'act:1:delete', 'act:1:details', 'todo:2']) {
     await arrow(1)
     expect(await lit(ui, key)).toBe(true)
   }
   // Up walks back; it stops at the first element.
   await arrow(-1)
   expect(await lit(ui, 'act:1:details')).toBe(true)
-  for (let i = 0; i < 9; i++) await arrow(-1)
+  for (let i = 0; i < 10; i++) await arrow(-1)
   expect(await lit(ui, 'add')).toBe(true)
   // The wheel and page keys still scroll.
   expect((await $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 4, by: 4, bodyRows: 4, contentRows: 40, origin: { kind: 'person' } })).deny).toBeUndefined()
@@ -793,6 +823,36 @@ test('/todo exec finds a todo by number or title fragment, submits once the comm
   await clock.settle()
   expect(todoAt(db, 1).status).toBe('drafting')
   expect(submitted).toHaveLength(2)
+})
+
+test('/todo exec auto runs a named todo with the keyword before or after it, or the lowest-numbered pending one, and says when none is', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([
+    aTodo(1, 'Done one', { status: 'done', hasRun: true }),
+    aTodo(2, 'Stopped one', { status: 'stopped', hasRun: true, prompt: 'p' }),
+    aTodo(3, 'Count md files'),
+    aTodo(4, 'Fix kitty tab titles'),
+  ])
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  // No target: the lowest-numbered pending todo, skipping a lower stopped one.
+  expect((await todo($, 'exec auto')).text).toBe('Auto-executing #3 Count md files: Claude drafts the prompt and launches it, no questions asked.')
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Execute todo #3 "Count md files" in auto mode')
+  expect(todoAt(db, 3).status).toBe('drafting')
+  expect((await todo($, 'exec 4 auto')).text).toContain('Auto-executing #4')
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Execute todo #4 "Fix kitty tab titles" in auto mode')
+  expect((await todo($, 'exec auto stopped')).text).toContain('Auto-executing #2 Stopped one')
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('#2 "Stopped one" in auto mode')
+  expect(submitted).toHaveLength(3)
+  expect((await todo($, 'exec auto')).text).toBe('No pending todo to run.')
+  expect((await todo($, 'exec auto #3')).text).toBe('#3 is drafting.')
+  expect((await todo($, 'exec auto nothing-like-it')).text).toBe('No todo matches "nothing-like-it".')
+  await clock.settle()
+  expect(submitted).toHaveLength(3)
 })
 
 test('the status line counts todos by status and clears with the last one', async ($, on) => {

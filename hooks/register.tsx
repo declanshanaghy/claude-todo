@@ -572,7 +572,19 @@ async function submit($: $, t: Todo, text: string) {
 
 const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
 
-export async function execTodo($: $, t: Todo, refine: boolean) {
+// The todo `/todo exec auto` runs when it names none: the next by priority,
+// which for now is the lowest-numbered pending one.
+export const nextRunnable = (list: readonly Todo[]) =>
+  list.filter(t => t.status === 'pending').sort((a, b) => a.n - b.n)[0]
+
+const execNote = (t: Todo, auto: boolean) =>
+  auto
+    ? `Auto-executing #${t.n} ${t.title}: Claude drafts the prompt and launches it, no questions asked.`
+    : `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`
+
+// `auto` skips every question: Claude picks the prompt and, for multi-step
+// work, plans on defaults and runs it without plan-mode approval.
+export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
   if (!refine && !RUNNABLE.has(t.status)) return `#${t.n} is ${t.status}.`
   if (refine) await clearRun($, t.n)
   await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
@@ -581,9 +593,9 @@ export async function execTodo($: $, t: Todo, refine: boolean) {
     expanded: u.expanded.includes(`t${t.n}`) ? u.expanded : [...u.expanded, `t${t.n}`],
     justStopped: u.justStopped.filter(x => x !== t.n),
   }))
-  const drop = await submit($, t, execPrompt(t, await read($, cpuCap), refine))
+  const drop = await submit($, t, execPrompt(t, await read($, cpuCap), refine, auto))
   if (drop !== undefined) return `#${t.n} didn't start: ${drop}`
-  return `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`
+  return execNote(t, auto)
 }
 
 export async function restartTodo($: $, t: Todo) {
@@ -817,7 +829,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
-      description: 'Per-directory todos: /todo add <title> · /todo exec <n|title> · /todo show · /todo noshow',
+      description: 'Per-directory todos: /todo add <title> · /todo exec [auto] <n|title> · /todo exec auto · /todo show · /todo noshow',
     })
     await $.tool.register({
       name: 'update',
@@ -940,20 +952,24 @@ export const register: Register = (on, options) => {
       return { text: n === null ? 'Not added: the todo list could not be saved.' : `Added #${n} ${arg.trim()}` }
     }
     if (verb === 'exec') {
-      const t = await findTodo($, arg)
-      if (!t) return { text: `No todo matches "${arg}".` }
+      // `auto` may lead or trail the target: `exec auto 3` or `exec 3 auto`.
+      const auto = rest[0] === 'auto' || (rest.length > 1 && rest.at(-1) === 'auto')
+      const words = auto ? (rest[0] === 'auto' ? rest.slice(1) : rest.slice(0, -1)) : rest
+      const target = words.join(' ')
+      const t = auto && target === '' ? nextRunnable(await read($, todos)) : await findTodo($, target)
+      if (!t) return { text: auto && target === '' ? 'No pending todo to run.' : `No todo matches "${target}".` }
       if (!RUNNABLE.has(t.status)) return { text: `#${t.n} is ${t.status}.` }
       // A command's own hook can't submit a prompt (it would wait on the turn
       // the command holds), so the exec starts from a timer once it answered.
       $.clock.after(0, () => {
         void (async () => {
           const now = (await read($, todos)).find(x => x.n === t.n)
-          if (now) await execTodo($, now, false)
+          if (now) await execTodo($, now, false, auto)
         })()
       })
-      return { text: `Executing #${t.n} ${t.title}: answer the prompt question in the chat.` }
+      return { text: execNote(t, auto) }
     }
-    return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec <n|title>' }
+    return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec [auto] <n|title> · /todo exec auto' }
   })
 
   on('tool.call', { tool: 'mcp__todo__update' as never }, async ($, e) => {
