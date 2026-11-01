@@ -3082,6 +3082,7 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
     aTodo(4, 'Stopped one', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'p', taskId: 'ag4' }),
     aTodo(5, 'Drafting', { status: 'drafting', owner: 's1' }),
     running(6, 'Elsewhere', { owner: 'other' }),
+    aTodo(7, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }),
   ])
   engine(on, [], undefined, true, { db })
   await start($)
@@ -3103,15 +3104,21 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
       expect(`${k}: ${String(drawn)}`).toBe(`${k}: ${CHIP_SYMBOL[label] ? ` ${CHIP_SYMBOL[label]} ` : '(no symbol)'}`)
     }
   }
-  for (const n of [1, 2, 3, 4, 5, 6]) await ui.press({ key: `todo:${n}` })
+  for (const n of [1, 2, 3, 4, 5, 6, 7]) await ui.press({ key: `todo:${n}` })
   // Exec and Resume start a run; Pause, Stop and Takeover halt it; Refine and
   // Restart draft it again; Delete destroys it; the rest change no status.
-  await check(1, { exec: 'running', rename: 'neutral', delete: 'danger', details: 'neutral' })
-  await check(2, { pause: 'paused', stop: 'stopped', details: 'neutral' })
-  await check(3, { resume: 'running', stop: 'stopped' })
-  await check(4, { refine: 'drafting', restart: 'drafting', resume: 'running' })
+  await check(1, { exec: 'running', rename: 'neutral', delete: 'danger', details: 'details' })
+  await check(2, { pause: 'paused', stop: 'stopped', details: 'details' })
+  await check(3, { resume: 'running', stop: 'stopped', details: 'details' })
+  await check(4, { refine: 'drafting', restart: 'drafting', resume: 'running', details: 'details' })
   await check(5, { reset: 'neutral' })
-  await check(6, { takeover: 'stopped' })
+  await check(6, { takeover: 'stopped', details: 'details' })
+  await check(7, { details: 'details' })
+  // Details moves no status, but wears a teal of its own, not the neutral grey
+  // and no status's color.
+  expect(toneColor('details')).toBe('ide')
+  expect(toneColor('details')).not.toBe(toneColor('neutral'))
+  for (const m of Object.values(MARK)) expect(m.color).not.toBe(toneColor('details'))
   // The chips share the rows' palette: Resume and a running row are one color.
   expect(toneColor('running')).toBe(MARK.running.color)
   expect(MARK.running.color).toBe('success')

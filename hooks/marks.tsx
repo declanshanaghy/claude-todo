@@ -85,10 +85,16 @@ export const statusToast = (n: number, s: TodoStatus) => `${MARK[s].symbol} #${n
 export const DIVIDER: Color = 'subtle'
 
 // A chip's tone: the status its action moves the todo into, `danger` for one
-// that destroys it (Delete), or `neutral` for one that changes no status.
-export type Tone = TodoStatus | 'danger' | 'neutral'
+// that destroys it (Delete), `details` for ☰ Details, or `neutral` for any
+// other chip that changes no status.
+export type Tone = TodoStatus | 'danger' | 'details' | 'neutral'
 
-export const toneColor = (tone: Tone): Color => (tone === 'danger' ? 'error' : tone === 'neutral' ? 'subtle' : MARK[tone].color)
+// Details moves no status, so it wears a teal of its own instead of the
+// neutral grey. The theme's one true teal is planMode, which planning's mark
+// owns, so it takes ide, the theme's nearest distinct cyan.
+const TONE: Record<'danger' | 'details' | 'neutral', Color> = { danger: 'error', details: 'ide', neutral: 'subtle' }
+
+export const toneColor = (tone: Tone): Color => (tone in TONE ? TONE[tone as keyof typeof TONE] : MARK[tone as TodoStatus].color)
 
 // ---------- widgets, for any surface that embeds the palette ----------
 

@@ -7,7 +7,7 @@
 <style>
 :root{
   --bg:#0d1016; --term:#11141b; --panebg:#0f1219; --line:#262b36; --fg:#d6d9e0; --dim:#6b7383; --faint:#3a4150;
-  --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757; --teal:#48968c; --periwinkle:#b1b9f9;
+  --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757; --teal:#48968c; --ide:#4782c8; --periwinkle:#b1b9f9;
   --chrome:#181c25; --chromefg:#aab1bf; --subtle:#8b93a3; --inv:#11141b;
   --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
 }
@@ -53,10 +53,11 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .btn.f:not(.chip) *{color:var(--term)!important}
 /* Action chips mirror statusChip() in hooks/marks.tsx: a filled label whose fill is
    the mark color of the status the action moves the todo into (tone-<status>, the
-   same colors as MARK below), danger = error red, neutral = subtle grey. The focus
+   same colors as MARK below), danger = error red, details = its own ide teal-blue
+   (Details moves no status), neutral = subtle grey. The focus
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
-.chip{--tone:var(--subtle)}.chip.tone-neutral{--tone:var(--subtle)}.chip.tone-danger{--tone:var(--red)}
+.chip{--tone:var(--subtle)}.chip.tone-neutral{--tone:var(--subtle)}.chip.tone-danger{--tone:var(--red)}.chip.tone-details{--tone:var(--ide)}
 .chip.tone-prompting{--tone:var(--periwinkle)}.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
 .chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--red)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
@@ -510,6 +511,7 @@ function press(fid){
        rename:()=>{ t.renaming=true; S.fid='ren:'+t.id; },
        delete:()=>{ t.confirm='delete'; S.fid='act:'+t.id+':cancel'; },
        cancel:()=>{ t.confirm=null; S.fid='act:'+t.id+':delete'; },
+       details:()=>{ toast(`☰ #${t.n} details open in the call browser`); },
        deleteyes:()=>{ S.todos=S.todos.filter(x=>x!==t); chat('sys',`todo: deleted #${t.n} ${esc(t.title)}`); toast(`✕ #${t.n} deleted`); S.fid='add'; },
     })[act]();
   }
@@ -529,21 +531,24 @@ const viewOf = st => (st==='drafting'||st==='planning') ? 'running' : st;
 const tallyHtml = c => VIEWS.map(st=>`<span class="${MARK[st][1]}">${MARK[st][0]}${c(st)}</span>`).join(' ');
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
 // Filled action chip, toned like hooks/marks.tsx: the status the action leads to
-// (running, paused, stopped, drafting…), 'danger' for Delete, or 'neutral'.
+// (running, paused, stopped, drafting…), 'danger' for Delete, 'details' for
+// Details (its own teal, as it moves no status), or 'neutral'.
 // A chip draws only its symbol (CHIP_SYMBOL there); the word is its label.
 const SYM={Exec:'▶',Auto:'⚡',Fire:'🔥',Rename:'✎',Refine:'✨',Restart:'↻',Resume:'⏵',Pause:'⏸',Stop:'■',Delete:'✕',Takeover:'⇄',Details:'☰',Reset:'↺',Keep:'↩',Cancel:'↩',Back:'↩',Leave:'✓','Full transcript':'↗'};
 function chipB(fid, label, tone='neutral'){ return B(fid, `<span class="fill" title="${esc(label)}" aria-label="${esc(label)}">${esc(SYM[label]??label)}</span>`, `chip tone-${tone}`); }
 function actRow(t){
   const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone);
+  const det = a('details','Details','details');
   if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','Stop','stopped')} ${a('keep','Keep')}</div>`;
   if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
     // Prompting: nothing may start it yet, so Exec and Auto are left out; Rename and Delete as ever.
-    case 'prompting': return `<div class="row ind2">${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')}</div>`;
-    case 'pending': return `<div class="row ind2">${a('exec','Exec','running')} ${a('auto','Auto','running')} ${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')}</div>`;
-    case 'running': return `<div class="row ind2">${a('pause','Pause','paused')} ${a('stop','Stop','stopped')}</div>`;
-    case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')}</div>`;
-    case 'stopped': return `<div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}${t.justStopped?' '+a('leave','Leave'):''}</div>`;
+    case 'prompting': return `<div class="row ind2">${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')} ${det}</div>`;
+    case 'pending': return `<div class="row ind2">${a('exec','Exec','running')} ${a('auto','Auto','running')} ${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')} ${det}</div>`;
+    case 'running': return `<div class="row ind2">${a('pause','Pause','paused')} ${a('stop','Stop','stopped')} ${det}</div>`;
+    case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')} ${det}</div>`;
+    case 'stopped': return `<div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}${t.justStopped?' '+a('leave','Leave'):''} ${det}</div>`;
+    case 'done': return `<div class="row ind2">${det}</div>`;
     case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';

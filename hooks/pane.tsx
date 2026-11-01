@@ -242,7 +242,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
 
   const actions = (t: Todo) => {
     const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => chip(`act:${t.n}:${k}`, label, onPress, tone)
-    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }))
+    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }), 'details')
     const c = u.confirm?.n === t.n ? u.confirm.kind : null
     if (c === 'stop') {
       return [
