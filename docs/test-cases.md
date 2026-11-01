@@ -41,7 +41,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | K3 | The person closing the pane with its × hands the counts to the status line; drawing it again takes them back | closing the pane with its × hands the counts to the status line; drawing it again takes them back (the kit can't raise the person's `ui.close`, so the test has the engine forget the pane and the sync tick notice; the hook itself is the one K2 runs) |
 | K4 | A narrower terminal that unseats the pane hands the counts to the status line within a sync tick; a render of the pane takes them back | a narrower terminal that unseats the pane hands the counts to the status line until it is drawn again |
 | K5 | The detail dialog covers the header, so the status line counts until it closes | the dialog covers the header, so the status line counts until it closes |
-| K6 | The header, the status line and the rows show the same marks (▶ ◔ ○ ✗ ⏸ ■ ✓) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
+| K6 | The header, the status line and the rows show the same marks (▶ ◔ ● ✗ ⏸ ■ ✓) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
 | K7 | The status line's counts are the whole list's, whatever the view hides; drafting and planning count as running | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
 
 ## Launching and prompts
@@ -74,7 +74,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | ID | Behaviour | Covered by |
 |---|---|---|
 | R1 | Adding a todo answers at once; then, from a timer, the plugin spawns the drafter itself: its own registered agent type (haiku, tools Read, Grep and Glob only), in the background, its description tagged `[todo-drafts:N]` and its prompt carrying the launch's key | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
-| R2 | The drafter's answer (its JSON, fenced or not), or a `mcp__todo__drafts` call, stores up to 3 drafts on the todo without touching its prompt or run, and a pending todo's level 1 hints "3 drafts ready"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R2 | The drafter's answer (its JSON, fenced or not), or a `mcp__todo__drafts` call, stores up to 3 drafts on the todo without touching its prompt or run, and a pending todo's level 1 says "3 drafts ready: ▶ Exec picks one" in place of "no prompt yet"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 | R3 | The drafter never links as a todo's run: its spawn, its tool calls and its end add no agent, call or tool-use id and change no status | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 | R4 | With drafts stored, ▶ Exec asks ONE AskUserQuestion offering them (labels and whole prompts, plus Other) without drafting; ⚡ Auto takes the first; ✨ Refine still refines the chosen prompt | Exec offers the stored drafts without drafting, Auto takes the first, Refine is unchanged |
 | R5 | A rename clears the drafts and launches a new drafter; drafts sent under the old launch's key are refused as stale; the same title again drafts nothing | a rename clears the drafts and drafts again; drafts the old drafter sends late are refused as stale |
@@ -205,7 +205,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| V1 | The header draws one toggle per view (▶ running, ◔ prompting, ○ pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| V1 | The header draws one toggle per view (▶ running, ◔ prompting, ● pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
 | V2 | The default view shows running (with drafting and planning), prompting, pending and failed, and hides paused, stopped and done | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
 | V3 | Pressing a toggle shows or hides its view's todos; done todos, when shown, sort after all others, the rest by number | each status toggle shows or hides its todos, done sorts last, and all flips to default and back |
 | V4 | `all` lights every view and reads `default` while they all are; pressing it then restores the default view | each status toggle shows or hides its todos, done sorts last, and all flips to default and back |

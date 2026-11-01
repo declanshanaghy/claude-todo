@@ -11,10 +11,11 @@ import type { Todo, TodoStatus, View } from '../types'
 export type Mark = { symbol: string; color: Color }
 
 export const MARK: Record<TodoStatus, Mark> = {
-  // Added, its background drafter still writing its prompt drafts: pending's
-  // circle filling in, in a color of its own, as nothing may start it yet.
+  // Added, its background drafter still writing its prompt drafts: the
+  // circle filling in toward pending's full one, in a color of its own, as
+  // nothing may start it yet.
   prompting: { symbol: '◔', color: 'remember' },
-  pending: { symbol: '○', color: 'inactive' },
+  pending: { symbol: '●', color: 'inactive' },
   drafting: { symbol: '✎', color: 'suggestion' },
   planning: { symbol: '◇', color: 'planMode' },
   // A row spins instead while it runs (SPIN), in this color. Green, as Exec,

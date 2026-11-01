@@ -1088,7 +1088,7 @@ test('the status line counts todos by status and clears with the last one', asyn
   const { statuses } = engine(on, [], undefined, true, { unplaced: 'the terminal is too narrow' })
   await start($)
   await todo($, 'add One')
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:delete' })
@@ -1123,13 +1123,13 @@ test('open: a placed pane counts in its header and clears the status line; an un
   // Never both: the status line said nothing while the header counted.
   expect(statuses.filter(x => x !== undefined)).toEqual([])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '◔0', '○1', '✗0', '⏸0', '■0', '✓0'])
+  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '◔0', '●1', '✗0', '⏸0', '■0', '✓0'])
   await ui.unmount()
 
   where.unplaced = 'the terminal is too narrow'
   await start($)
   await clock.settle()
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
 })
 
 // The header row as drawn: the pane's first child.
@@ -1263,9 +1263,9 @@ test('noshow hands the counts to the status line, and show takes them back', asy
   await todo($, 'add One')
   expect(statuses.at(-1)).toBeUndefined()
   await todo($, 'noshow')
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   await todo($, 'add Two')
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○2 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●2 ✗0 ⏸0 ■0 ✓0')
   await todo($, 'show')
   await clock.settle()
   expect(statuses.at(-1)).toBeUndefined()
@@ -1281,7 +1281,7 @@ test('closing the pane with its × hands the counts to the status line; drawing 
   // so the engine just forgets the pane, as the × leaves it: the next tick sees.
   isOpen.delete('todo')
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   // The person opens it again: its render takes the counts back.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await clock.advance(1)
@@ -1299,7 +1299,7 @@ test('a narrower terminal that unseats the pane hands the counts to the status l
   expect(statuses.at(-1)).toBeUndefined()
   where.unplaced = 'the terminal is too narrow'
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   // Widened: the pane is drawn again.
   delete where.unplaced
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1318,7 +1318,7 @@ test('the dialog covers the header, so the status line counts until it closes', 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:details' })
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ○1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
   await ui.unmount()
   const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
   await clock.advance(1)
@@ -1342,7 +1342,7 @@ test('the header, the status line and the rows draw the same marks in the same o
   await start($)
   await clock.settle()
   const line = statuses.at(-1)
-  expect(line).toBe('todo ▶1 ◔1 ○2 ✗0 ⏸1 ■1 ✓1')
+  expect(line).toBe('todo ▶1 ◔1 ●2 ✗0 ⏸1 ■1 ✓1')
 
   const ui = await mountAll($)
   const header = await headerMarks(ui)
@@ -1388,11 +1388,11 @@ test('the default view shows running (drafting and planning too), pending and fa
   await start($)
   await clock.settle()
   // The status line counts every todo, whatever the pane shows.
-  expect(statuses.at(-1)).toBe('todo ▶3 ◔0 ○1 ✗1 ⏸1 ■1 ✓1')
+  expect(statuses.at(-1)).toBe('todo ▶3 ◔0 ●1 ✗1 ⏸1 ■1 ✓1')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
   const marks = await headerMarks(ui)
-  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '○1', '✗1', '⏸1 hidden', '■1 hidden', '✓1 hidden'])
+  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '●1', '✗1', '⏸1 hidden', '■1 hidden', '✓1 hidden'])
   // A hidden view's toggle is dim and struck through, in its own color.
   const struck = (await ui.find({ type: 'Button', key: 'view:done' })) as Drawn | undefined
   expect(JSON.stringify(struck?.children)).toContain('"strikethrough":true')
@@ -2004,7 +2004,9 @@ test('adding a todo spawns a small read-only drafter in the background, whose dr
   // Level 1 hints that they're ready.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  expect(await ui.find({ type: 'Text', text: /3 drafts ready/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 3 drafts ready: ▶ Exec picks one' })).toBeDefined()
+  // Its drafts are its prompt's stand-in: no "no prompt yet" beside them.
+  expect(await ui.find({ type: 'Text', text: /no prompt yet/ })).toBeUndefined()
   expect(submitted).toHaveLength(0)
   await ui.unmount()
 
@@ -2676,7 +2678,7 @@ test('each todo is one line, its own splitter: toggle, #N and title in the statu
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const head = await ui.find({ type: 'Button', key: 'todo:1' })
   // 70 columns less the pane's paddingX and the ring's cell on each side.
-  expect(head?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ○$/)
+  expect(head?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ●$/)
   expect(head?.text.length).toBe(66)
   // The word the mark stands for stays the line's label.
   expect((head as { props?: { label?: string } } | undefined)?.props?.label).toBe('#1 Fix kitty tab titles: pending')
@@ -2772,12 +2774,12 @@ test('at a narrow width the header cuts the title with … and keeps the rule an
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 30 } })
   const head = await ui.find({ type: 'Button', key: 'todo:3' })
-  expect(head?.text).toBe('▸ #3 Fix kitty tab t… ── ○')
+  expect(head?.text).toBe('▸ #3 Fix kitty tab t… ── ●')
   expect(head?.text.length).toBe(26)
   await ui.unmount()
   // Too narrow for any title: the number, a little rule and the mark.
   const tiny = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 13 } })
-  expect((await tiny.find({ type: 'Button', key: 'todo:3' }))?.text).toBe('▸ #3 ── ○')
+  expect((await tiny.find({ type: 'Button', key: 'todo:3' }))?.text).toBe('▸ #3 ── ●')
   await tiny.unmount()
 })
 
@@ -2794,7 +2796,7 @@ test('an old todoDividers setting, from /config or the environment, is ignored',
   engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]), env: { CLAUDE_TODO_DIVIDERS: 'line' } })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ○$/)
+  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▸ #1 Fix kitty tab titles ─+ ●$/)
   // todoDividers 'none' would have dropped it: the divider is drawn regardless.
   expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeDefined()
   await ui.unmount()

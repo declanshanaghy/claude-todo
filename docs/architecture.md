@@ -119,7 +119,7 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 | State | Mark | Meaning | Who moves it on |
 |---|---|---|---|
 | prompting | ◔ | Added (or renamed); its drafter is writing prompt drafts, so nothing may start it yet | The drafter's drafts or its end; the sync tick if it's gone |
-| pending | ○ | Ready to run: never run (or run, then reset before it started again) | You |
+| pending | ● | Ready to run: never run (or run, then reset before it started again) | You |
 | drafting | ✎ | Claude is writing or refining the prompt, or resuming | Claude, via `mcp__todo__update` |
 | planning | ◇ | Multi-step: plan-mode questions and the execution tree | Claude |
 | running | ▶ (spins) | An Agent or Workflow is working | The agent's end |
@@ -137,7 +137,7 @@ Each button is filled with the color of the state it leads to (the launchers in 
 | State | Buttons | Leads to |
 |---|---|---|
 | prompting | ▶ Exec and ⚡ Auto dimmed · ✎ Rename · ✕ Delete · ☰ Details, and the hint "no prompt yet: drafting prompts…" | refused, saying why · refused · prompting under a new drafter · confirm → removed · call browser |
-| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint once its drafts are stored: "3 drafts ready" | drafting · drafting · prompting · confirm → removed · call browser |
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint: "3 drafts ready: ▶ Exec picks one" once its drafts are stored, else "no prompt yet: ▶ Exec drafts one" | drafting · drafting · prompting · confirm → removed · call browser |
 | drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
@@ -160,7 +160,7 @@ Pane-wide controls:
 | ＋ add todo… | top of the list | adds a pending todo |
 | 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); dimmed while none is pending or the agent cap is full |
 | ↗ Full transcript | under an open subtask's latest calls | opens the call browser; Esc returns to the subtask |
-| status toggles `▶ ◔ ○ ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, prompting, pending and failed (a view stored before prompting had a toggle shows it wherever it showed pending); done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
+| status toggles `▶ ◔ ● ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, prompting, pending and failed (a view stored before prompting had a toggle shows it wherever it showed pending); done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
 
 ## Running a todo
 

@@ -500,19 +500,17 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
             {' '}
             no prompt yet: drafting prompts…
           </Text>
+        ) : t.status === 'pending' && t.drafts?.length ? (
+          // Its drafts are in: Exec offers them rather than drafting one.
+          <Text dimColor italic>
+            {' '}
+            {plural(t.drafts.length, 'draft')} ready: ▶ Exec picks one
+          </Text>
         ) : (
           <Text dimColor italic>
             {' '}
             no prompt yet: ▶ Exec drafts one
           </Text>
-        )}
-        {t.status === 'pending' && t.drafts?.length ? (
-          <Text dimColor>
-            {' '}
-            {plural(t.drafts.length, 'draft')} ready
-          </Text>
-        ) : (
-          ''
         )}
         {t.status === 'done' && t.summary ? (
           <Text color={markOf('done').color} wrap="truncate-end">
