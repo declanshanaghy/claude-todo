@@ -29,7 +29,7 @@ Or declare it in your settings so every machine picks it up:
 
 | You | What happens |
 |---|---|
-| `/todo Fix kitty tab titles` (or `/todo add …`), or type in the pane's **＋ add todo…** | The todo is stored with its title only, at once; the `add` is only needed when the title starts with a command word such as `list` or `exec`; a small background subagent then drafts 3 candidate prompts for it. Meanwhile it is ◔ prompting and nothing starts it; then it turns ● pending and its open row says "3 drafts ready: ▶ Exec picks one" |
+| `/todo Fix kitty tab titles` (or `/todo add …`), or type in the pane's **＋ add todo…** | The todo is stored with its title only, at once; the `add` is only needed when the title starts with a command word such as `list` or `exec`; a small background subagent then drafts 3 candidate prompts for it. Meanwhile it is ◔ prompting and nothing starts it; then it turns ● pending and its open row says "3 drafts: ▶ Exec asks, ⚡/🔥 take the 1st" |
 | `/todo exec 1` (or a title fragment), or **▶ Exec** in the pane | Claude asks for the prompt, offering the stored drafts straight away (or drafting 2–3 if there are none; type your own via Other), then classifies it |
 | `/todo exec auto 1` (or `/todo exec 1 auto`), or **⚡ Auto** in the pane | The same run with no questions: Claude takes the best draft (or writes the one prompt it would have offered first), and plans multi-step work on its own best-effort defaults, launching without plan-mode approval |
 | `/todo exec auto`, or **🔥 Fire** in the pane's header | Auto-runs the next todo in line, the lowest-numbered pending one (skipping any still prompting), or says none is pending |

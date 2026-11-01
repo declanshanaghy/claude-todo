@@ -139,7 +139,7 @@ Each button is filled with the color of the state it leads to (the launchers in 
 | State | Buttons | Leads to |
 |---|---|---|
 | prompting | ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and the hint "no prompt yet: drafting prompts…"; no ▶ Exec or ⚡ Auto until its drafts turn it pending | prompting under a new drafter · confirm → removed · call browser |
-| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint: "3 drafts ready: ▶ Exec picks one" once its drafts are stored, else "no prompt yet: ▶ Exec drafts one" | drafting · drafting · prompting · confirm → removed · call browser |
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint: "3 drafts: ▶ Exec asks, ⚡/🔥 take the 1st" once its drafts are stored, else "no prompt yet: ▶ Exec drafts one" | drafting · drafting · prompting · confirm → removed · call browser |
 | drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…" after ▶ Exec, "starting with the first draft…" after ⚡ Auto or 🔥 Fire with drafts, "drafting the prompt…" after one without, "continuing in the chat…" once it has run, "planning in the chat…"); level 1 shows the prompt, or "prompt being settled in the chat…" until Claude stores it, never "no prompt yet" | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |

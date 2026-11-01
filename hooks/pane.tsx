@@ -474,9 +474,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
           </Text>
         ) : t.status === 'pending' && t.drafts?.length ? (
           // Its drafts are in: Exec offers them rather than drafting one.
-          <Text dimColor italic>
+          // ▶ Exec asks which to run; ⚡ Auto and 🔥 Fire take drafts[0].
+          <Text dimColor italic wrap="truncate-end">
             {' '}
-            {plural(t.drafts.length, 'draft')} ready: ▶ Exec picks one
+            {plural(t.drafts.length, 'draft')}: ▶ Exec asks, ⚡/🔥 take the 1st
           </Text>
         ) : t.status === 'pending' ? (
           <Text dimColor italic>

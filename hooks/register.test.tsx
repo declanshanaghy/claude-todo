@@ -378,7 +378,7 @@ test('a fired todo never says "no prompt yet": Auto stores its first draft as th
   expect(await ui.find({ type: 'Text', text: 'drafting the prompt…' })).toBeDefined()
 
   expect(await ui.find({ type: 'Text', text: /no prompt yet/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /Exec drafts one|Exec picks one/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Exec drafts one|Exec asks, / })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -2175,7 +2175,7 @@ test('adding a todo spawns a small read-only drafter in the background, whose dr
   // Level 1 hints that they're ready.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  expect(await ui.find({ type: 'Text', text: ' 3 drafts ready: ▶ Exec picks one' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 3 drafts: ▶ Exec asks, ⚡/🔥 take the 1st' })).toBeDefined()
   // Its drafts are its prompt's stand-in: no "no prompt yet" beside them.
   expect(await ui.find({ type: 'Text', text: /no prompt yet/ })).toBeUndefined()
   expect(submitted).toHaveLength(0)
@@ -2311,7 +2311,7 @@ test("a todo is prompting from its drafter's spawn until its drafts are stored, 
   expect(t).toMatchObject({ status: 'pending', drafts: DRAFTS })
   expect(t.owner).toBeUndefined()
   expect(t.promptingAt).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /3 drafts ready/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /3 drafts: ▶ Exec asks/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeDefined()
   // Its drafter's later end changes nothing.
   await turnDone($, 'dr1', 'Stored 3 drafts.')

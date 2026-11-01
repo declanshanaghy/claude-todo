@@ -644,7 +644,7 @@ function renderPane(){
     }
     if(!t.expanded) return;
     // Level 1: what it was asked to do (2 lines), what you can do now, and how far it got.
-    h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts ready: ▶ Exec picks one</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
+    h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts: ▶ Exec asks, ⚡/🔥 take the 1st</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
     if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="ma">✓ ${esc(t.summary)}</span></div>`;
     h += actRow(t);
     if(t.agents.length){
