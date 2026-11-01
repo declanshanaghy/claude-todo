@@ -1020,7 +1020,7 @@ test('/todo resume refuses a todo the chip is not offered on, naming its status 
   expect(todoAt(db, 5).status).toBe('paused')
 })
 
-test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and dims while none is pending or the cap is full', async ($, on) => {
+test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is left out while none is pending', async ($, on) => {
   const submitted: string[] = []
   const toasts: string[] = []
   const db = seeded([
@@ -1028,7 +1028,8 @@ test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and di
     aTodo(2, 'Count md files'),
     aTodo(3, 'Fix kitty tab titles'),
   ])
-  engine(on, submitted, undefined, true, { db, toasts })
+  engine(on, submitted, undefined, false, { db, toasts })
+  const clock = mock.clock(on, { now: 1000 })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const fill = async () => {
@@ -1049,24 +1050,30 @@ test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and di
 
   // The same path as `/todo exec auto`: #2, skipping the lower stopped #1.
   await ui.press({ key: 'fire' })
+  await clock.settle()
   expect(submitted).toHaveLength(1)
   expect(submitted[0]).toContain('Execute todo #2 "Count md files" in auto mode')
   expect(todoAt(db, 2).status).toBe('drafting')
+  // The last press is made with the ring on it.
+  await arrow(-1)
+  expect(await isLit(ui, 'fire')).toBe(true)
   await ui.press({ key: 'fire' })
+  await clock.settle()
   expect(submitted.at(-1)).toContain('Execute todo #3 "Fix kitty tab titles" in auto mode')
 
-  // Nothing pending: dimmed, unfilled, and a press says why and runs nothing.
-  const dim = await fill()
-  expect(dim?.['backgroundColor']).toBeUndefined()
-  expect(dim?.['dimColor']).toBe(true)
-  expect(dim?.['color']).toBe(MARK.running.color)
-  await ui.press({ key: 'fire' })
+  // Nothing pending: Fire is gone, and the ring it was on moves to the
+  // header's last toggle. `/todo exec auto` still says why.
+  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeUndefined()
+  expect(await isLit(ui, 'view:all')).toBe(true)
+  expect((await todo($, 'exec auto')).text).toBe('No pending todo to run.')
   expect(submitted).toHaveLength(2)
-  expect(toasts.at(-1)).toBe('No pending todo to run.')
+  // Something runnable again: it comes back.
+  await todo($, 'add Another')
+  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeDefined()
   await ui.unmount()
 })
 
-test('🔥 Fire dims and launches nothing while the running agents fill the cap', async ($, on) => {
+test('🔥 Fire is left out while the running agents fill the cap', async ($, on) => {
   const submitted: string[] = []
   const toasts: string[] = []
   // The engine's cap is 6 (10 CPUs less 4): six running agents fill it.
@@ -1075,12 +1082,28 @@ test('🔥 Fire dims and launches nothing while the running agents fill the cap'
   engine(on, submitted, undefined, true, { db, toasts })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const chip = await ui.find({ type: 'Button', key: 'fire' })
-  expect(chip?.props['dimColor']).toBe(true)
-  await ui.press({ key: 'fire' })
+  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeUndefined()
   expect(submitted).toHaveLength(0)
-  expect(toasts.at(-1)).toBe('The agent cap is reached (6 of 6 running).')
   expect(todoAt(db, 2).status).toBe('pending')
+  await ui.unmount()
+})
+
+test('a chip that leaves the row under the ring hands the ring to its todo header', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([aTodo(1, 'Count md files')])
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'act:1:exec', origin: { kind: 'person' } })
+  expect(await isLit(ui, 'act:1:exec')).toBe(true)
+  // Drafting has no Exec: the ring lands on #1's header, not on nothing.
+  await ui.press({ key: 'act:1:exec' })
+  await clock.settle()
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
+  expect(await isLit(ui, 'todo:1')).toBe(true)
   await ui.unmount()
 })
 
@@ -1493,10 +1516,10 @@ const prompting = (n: number, title: string) => aTodo(n, title, { status: 'promp
 
 const BY_STATE: StateRow[] = [
   {
-    // Exec and Auto are drawn dimmed: a press says why and starts nothing.
+    // Exec and Auto are left out until its drafts arrive.
     state: 'prompting',
     todo: n => prompting(n, 'Prompting'),
-    chips: { exec: 'prompting', auto: 'prompting', rename: 'prompting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+    chips: { rename: 'prompting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
   },
   { state: 'prompting, confirming Delete', todo: n => prompting(n, 'Prompting'), before: ['delete'], chips: { deleteyes: 'removed', cancel: 'prompting' } },
   {
@@ -2114,7 +2137,7 @@ test('drafts that arrive once a todo is running are kept without touching its ru
   expect(todoAt(db, 1)).toMatchObject({ status: 'running', prompt: 'mine', drafts: DRAFTS })
 })
 
-test("a todo is prompting from its drafter's spawn until its drafts are stored, Exec and Auto dimmed meanwhile", async ($, on) => {
+test("a todo is prompting from its drafter's spawn until its drafts are stored, Exec and Auto left out meanwhile", async ($, on) => {
   const { db, clock, submitted } = drafterEngine(on)
   await start($)
   await todo($, 'add Fix kitty tab titles')
@@ -2129,8 +2152,8 @@ test("a todo is prompting from its drafter's spawn until its drafts are stored, 
   expect(row?.text.endsWith(` ${MARK.prompting.symbol}`)).toBe(true)
   await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Text', text: /no prompt yet: drafting prompts…/ })).toBeDefined()
-  for (const k of ['exec', 'auto']) expect((await ui.find({ type: 'Button', key: `act:1:${k}` }))?.props['dimColor']).toBe(true)
-  expect((await ui.find({ type: 'Button', key: 'act:1:rename' }))?.props['dimColor']).toBeUndefined()
+  for (const k of ['exec', 'auto']) expect(await ui.find({ type: 'Button', key: `act:1:${k}` })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:rename' })).toBeDefined()
 
   await storeDrafts($, 1, '1.1')
   const t = todoAt(db, 1)
@@ -2138,7 +2161,7 @@ test("a todo is prompting from its drafter's spawn until its drafts are stored, 
   expect(t.owner).toBeUndefined()
   expect(t.promptingAt).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /3 drafts ready/ })).toBeDefined()
-  expect((await ui.find({ type: 'Button', key: 'act:1:exec' }))?.props['dimColor']).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeDefined()
   // Its drafter's later end changes nothing.
   await turnDone($, 'dr1', 'Stored 3 drafts.')
   await clock.settle()
@@ -2148,26 +2171,22 @@ test("a todo is prompting from its drafter's spawn until its drafts are stored, 
 })
 
 test('Exec, Auto, 🔥 Fire and /todo exec never start a prompting todo, and say its prompts are still being drafted', async ($, on) => {
-  const { db, clock, submitted, toasts } = drafterEngine(on)
+  const { db, clock, submitted } = drafterEngine(on)
   await start($)
   await todo($, 'add Fix kitty tab titles')
   await clock.settle()
   const still = "#1's prompts are still being drafted: it can start once they're ready."
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'act:1:exec' })
-  expect(toasts.at(-1)).toBe(still)
-  await ui.press({ key: 'act:1:auto' })
-  expect(toasts.at(-1)).toBe(still)
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:auto' })).toBeUndefined()
   expect((await todo($, 'exec 1')).text).toBe(still)
   expect((await todo($, 'exec auto 1')).text).toBe(still)
   expect((await todo($, 'auto 1')).text).toBe(still)
   expect((await todo($, 'resume 1')).text).toBe(still)
-  // Nothing else pending: `/todo exec auto` and Fire skip it, saying why; Fire is dimmed.
+  // Nothing else pending: `/todo exec auto` and Fire skip it, saying why; Fire is left out.
   expect((await todo($, 'exec auto')).text).toBe(`No pending todo to run. ${still}`)
-  expect((await ui.find({ type: 'Button', key: 'fire' }))?.props['dimColor']).toBe(true)
-  await ui.press({ key: 'fire' })
-  expect(toasts.at(-1)).toBe(`No pending todo to run. ${still}`)
+  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeUndefined()
   await clock.settle()
   expect(submitted).toHaveLength(0)
   expect(todoAt(db, 1).status).toBe('prompting')

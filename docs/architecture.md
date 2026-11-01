@@ -76,7 +76,7 @@ A failed run (most often a write the host aborts as the turn it served ends) is 
 
 ## A todo's life
 
-A todo is always in one of nine states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire and ⏵ Resume launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. Buttons that change no status (✎ Rename, ☰ Details, ✓ Leave, ↩) and ↺ Reset, which only hands the todo back, are neutral grey. While a todo is prompting, ▶ Exec and ⚡ Auto stay in its row but dimmed: a press says its prompts are still being drafted.
+A todo is always in one of nine states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire and ⏵ Resume launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. Buttons that change no status (✎ Rename, ☰ Details, ✓ Leave, ↩) and ↺ Reset, which only hands the todo back, are neutral grey. A button is drawn only while it can act: there are no dimmed buttons. While a todo is prompting, ▶ Exec and ⚡ Auto are left out of its row (level 1 says why), and 🔥 Fire is left out of the header while nothing is runnable. When the button the focus ring is on disappears, the ring moves to its todo's header (from Fire, to the header's last toggle).
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "20px"}, "state": {"nodeSpacing": 60, "rankSpacing": 70}}}%%
@@ -136,7 +136,7 @@ Each button is filled with the color of the state it leads to (the launchers in 
 
 | State | Buttons | Leads to |
 |---|---|---|
-| prompting | ▶ Exec and ⚡ Auto dimmed · ✎ Rename · ✕ Delete · ☰ Details, and the hint "no prompt yet: drafting prompts…" | refused, saying why · refused · prompting under a new drafter · confirm → removed · call browser |
+| prompting | ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and the hint "no prompt yet: drafting prompts…"; no ▶ Exec or ⚡ Auto until its drafts turn it pending | prompting under a new drafter · confirm → removed · call browser |
 | pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint: "3 drafts ready: ▶ Exec picks one" once its drafts are stored, else "no prompt yet: ▶ Exec drafts one" | drafting · drafting · prompting · confirm → removed · call browser |
 | drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
@@ -158,7 +158,7 @@ Pane-wide controls:
 | Control | Where | Does |
 |---|---|---|
 | ＋ add todo… | top of the list | adds a pending todo |
-| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); dimmed while none is pending or the agent cap is full |
+| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); left out while none is pending or the agent cap is full, and back once one is runnable |
 | ↗ Full transcript | under an open subtask's latest calls | opens the call browser; Esc returns to the subtask |
 | status toggles `▶ ◔ ● ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, prompting, pending and failed (a view stored before prompting had a toggle shows it wherever it showed pending); done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
 

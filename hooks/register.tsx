@@ -6,7 +6,7 @@ import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, sn
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
 import { DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
-import { drawPane, focusOrder } from './pane'
+import { drawPane, focusOrder, rehome } from './pane'
 import { draftsPrompt, execPrompt, restartPrompt, resumePrompt } from './protocol'
 
 export const PANE = 'todo'
@@ -1706,12 +1706,13 @@ export const register: Register = (on, options) => {
       return tree
     }
     const gone = new Set(await read($, expired))
-    return drawPane($, e, {
+    // The ring shows only while the pane holds the keys.
+    const at = e.props.isFocused ? await read($, ring) : null
+    const tree = drawPane($, e, {
       queued: (await read($, queued)).map(q => q.n),
       me: await read($, me),
       fault: await read($, fault),
-      // The ring shows only while the pane holds the keys.
-      ring: e.props.isFocused ? await read($, ring) : null,
+      ring: at,
       list: (await read($, todos)).filter(t => !gone.has(t.n)),
       nodes: await read($, agents),
       all: await read($, calls),
@@ -1720,5 +1721,24 @@ export const register: Register = (on, options) => {
       f: await read($, spin),
       turns: await read($, turns),
     })
+    // The chip the ring was on is gone (it can't act now): move the ring to
+    // its todo's header, from a timer, since a render never writes state. Once
+    // per vanished key, so a refused move can't loop.
+    const to = rehome(at, focusOrder())
+    if (to === undefined) rehomed = null
+    else if (at !== rehomed) {
+      rehomed = at
+      $.clock.after(0, () => void rehomeRing($, at, to).catch(() => undefined))
+    }
+    return tree
   })
+}
+
+// The vanished key last handed on, so each is moved once.
+let rehomed: string | null = null
+
+async function rehomeRing($: $, from: string | null, to: string) {
+  // Something else moved the ring meanwhile (a confirmation, a press): theirs stands.
+  if ((await read($, ring)) !== from || focusOrder().includes(from ?? '')) return
+  await focus($, to)
 }

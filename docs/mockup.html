@@ -60,8 +60,6 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .chip.tone-prompting{--tone:var(--periwinkle)}.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
 .chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--red)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
-/* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
-.chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
 /* current: Claude Code inverts the focused element, so the fill becomes text color */
 .fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
 /* uniform / both: one neutral fill; only the focused chip turns orange + bold */
@@ -290,7 +288,7 @@ function step(t, silent){
 
 /* ---------- scenes ---------- */
 const SCENES = [
- {name:'1 · Add task', hint:'The pane has focus and the ring is on the <b>＋ add todo</b> input. Type a title and press <kbd>enter</kbd>. Or press <kbd>esc</kbd> and type <kbd>/todo add Your title</kbd> at the prompt. Either way, only the title is stored; no prompt is asked for. A new todo is <b>◔ prompting</b> while its background drafter writes prompt drafts (#2 here): ▶ Exec and ⚡ Auto are dimmed and refuse it until the drafts arrive and it turns <b>● pending</b>.',
+ {name:'1 · Add task', hint:'The pane has focus and the ring is on the <b>＋ add todo</b> input. Type a title and press <kbd>enter</kbd>. Or press <kbd>esc</kbd> and type <kbd>/todo add Your title</kbd> at the prompt. Either way, only the title is stored; no prompt is asked for. A new todo is <b>◔ prompting</b> while its background drafter writes prompt drafts (#2 here): ▶ Exec and ⚡ Auto are left out of its row until the drafts arrive and it turns <b>● pending</b>.',
   setup(){ S.todos=[T(1,'Fix kitty tab titles','pending'), T(2,'Migrate statusline to theme lib','prompting',{expanded:true})]; later(2500, ()=>{ const t=S.todos.find(x=>x.n===2); if(t?.status==='prompting'){ t.status='pending'; t.drafts=3; render(); } }); S.chat=[['user','/todo add Fix kitty tab titles'],['sys','todo: added #1 Fix kitty tab titles'],['user','/todo add Migrate statusline to theme lib'],['sys','todo: added #2 Migrate statusline to theme lib']]; focusPane('add'); }},
  {name:'2 · Launch task', hint:'#1 is expanded and the ring is on <b>▶ Exec</b>. Press <kbd>enter</kbd>. Claude drafts 3 prompts in an AskUserQuestion dialog. Draft <b>1 or 2</b> is classified <b>multi-step</b> (questions → execution tree → approval → Workflow). Draft <b>3</b> is <b>simple</b> and starts a single background Agent. <b>4</b> lets you type your own.',
   setup(){ const t1=T(1,'Fix kitty tab titles','pending',{expanded:true,drafts:3}); S.todos=[t1, T(2,'Migrate statusline to theme lib','pending')]; S.chat=[['sys','todo: 2 pending']]; focusPane('act:t1:exec'); }},
@@ -400,7 +398,8 @@ function autoExec(t){
   });
 }
 // 🔥 Fire (fireBlock/fireNext in hooks/register.tsx): `/todo exec auto` with no
-// target, dimmed while nothing is pending or the running agents fill the cap.
+// target, left out of the header while nothing is pending or the running agents
+// fill the cap; a ring that was on it moves to the header's last toggle.
 const nextRunnable = () => S.todos.filter(t=>t.status==='pending').sort((a,b)=>a.n-b.n)[0];
 function fireBlock(){
   if(!nextRunnable()){ const p=S.todos.filter(t=>t.status==='prompting').sort((a,b)=>a.n-b.n)[0]; return 'No pending todo to run.'+(p?' '+stillPrompting(p):''); }
@@ -537,8 +536,8 @@ function actRow(t){
   if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','Stop','stopped')} ${a('keep','Keep')}</div>`;
   if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
-    // Prompting: Exec and Auto dimmed (a press says why), Rename and Delete as ever.
-    case 'prompting': return `<div class="row ind2">${chipB(`act:${t.id}:exec`,'Exec','running off')} ${chipB(`act:${t.id}:auto`,'Auto','running off')} ${a('rename','Rename')} ${a('delete','Delete','danger')}</div>`;
+    // Prompting: nothing may start it yet, so Exec and Auto are left out; Rename and Delete as ever.
+    case 'prompting': return `<div class="row ind2">${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')}</div>`;
     case 'pending': return `<div class="row ind2">${a('exec','Exec','running')} ${a('auto','Auto','running')} ${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')}</div>`;
     case 'running': return `<div class="row ind2">${a('pause','Pause','paused')} ${a('stop','Stop','stopped')}</div>`;
     case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')}</div>`;
@@ -596,11 +595,14 @@ function renderPane(){
   const c = st => S.todos.filter(t=>t.status===st).length;
   const cv = v => S.todos.filter(t=>viewOf(t.status)===v).length;
   // The view toggles ride the header after Todos: one per status, its mark and count; lit = shown, struck = hidden. "all" flips between everything and the default.
+  // Fire is drawn only while it can launch; a ring left on it moves to the last toggle.
+  const canFire = !S.browse && !fireBlock();
+  if(!canFire && S.fid==='fire') S.fid='flt:all';
   const allOn = S.show.size===VIEWS.length;
   const toggles = S.browse ? '' : ` ${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', allOn?'default':'all', 'flt dim')}`;
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>${toggles}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
-  const fire = S.browse ? '' : B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
+  const fire = canFire ? B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, 'chip tone-running')+' ' : '';
   document.getElementById('panecap').innerHTML = fire;
   if(S.browse){
     body.innerHTML = renderBrowser();

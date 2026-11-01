@@ -148,27 +148,17 @@ export const CHIP_SYMBOL: Readonly<Record<string, string>> = {
 
 // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
 // Text child carries the tone's fill around its symbol, padded a cell each
-// side. A dimmed chip (one that can't act now)
-// drops the fill for dim text in the tone's color, so it still says what it
-// would do; it stays pressable, so the focus ring still reaches it.
+// side. A chip that can't act now is never drawn: it is left out instead.
 export const statusChip = (
   { Text, Button }: Pick<ElementTable, 'Text' | 'Button'>,
   key: string,
   label: string,
   onPress: () => unknown,
   tone: Tone = 'neutral',
-  isDimmed = false,
-) =>
-  isDimmed ? (
-    <Button key={key} label={label} plain dimColor onPress={() => void onPress()}>
-      <Text weight="semibold" color={toneColor(tone)} dimColor>
-        {` ${CHIP_SYMBOL[label] ?? label} `}
-      </Text>
-    </Button>
-  ) : (
-    <Button key={key} label={label} plain onPress={() => void onPress()}>
-      <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText">
-        {` ${CHIP_SYMBOL[label] ?? label} `}
-      </Text>
-    </Button>
-  )
+) => (
+  <Button key={key} label={label} plain onPress={() => void onPress()}>
+    <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText">
+      {` ${CHIP_SYMBOL[label] ?? label} `}
+    </Text>
+  </Button>
+)
