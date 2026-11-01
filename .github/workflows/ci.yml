@@ -13,62 +13,78 @@ env:
   # read; bump it with the version you develop against.
   CLAUDE_CODE_VERSION: 2.1.316
 
+# One job per check, so each passes or fails on its own and has its own badge
+# (the Badges workflow reads their conclusions); `check` gathers them into the
+# one result a branch needs.
 jobs:
-  check:
+  lint:
+    name: Lint (ESLint)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          claude-code-version: ${{ env.CLAUDE_CODE_VERSION }}
+          types: 'true'
+      - run: npm run lint
 
+  typecheck:
+    name: Typecheck (strict tsc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          claude-code-version: ${{ env.CLAUDE_CODE_VERSION }}
+          types: 'true'
+      - run: npm run typecheck
+
+  validate:
+    name: Plugin validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          claude-code-version: ${{ env.CLAUDE_CODE_VERSION }}
+      - run: claude plugin validate .
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          claude-code-version: ${{ env.CLAUDE_CODE_VERSION }}
+          sqlite3: 'true'
+      - run: claude plugin test .
+
+  coverage:
+    name: Behaviour coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
-          cache: npm
+      - run: npm run coverage
 
-      - run: npm ci
-
-      # The mod drives the sqlite3 CLI; the tests stand in for it, but keep the
-      # runner like a user's machine.
-      - name: Install sqlite3
-        run: command -v sqlite3 || (sudo apt-get update && sudo apt-get install -y sqlite3)
-
-      - name: Install Claude Code
-        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-
-      # The engine writes .claude-plugin/types (gitignored) only when an
-      # interactive session loads the mod; validate, test and -p sessions
-      # don't. Loading needs no sign-in: a session with onboarding done, this
-      # folder trusted and a placeholder key reaches the load without ever
-      # sending a request. It runs under a pseudo-terminal with stdin held
-      # open, and is killed as soon as the files are there.
-      # The placeholder is assembled here so no key-shaped literal sits in the
-      # repo for secret scanners to stop a push over.
-      - name: Have the engine write the mod's types
+  check:
+    name: All checks
+    if: always()
+    needs: [lint, typecheck, validate, test, coverage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every check passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          export ANTHROPIC_API_KEY="sk-ant-""api03-ci-placeholder-never-sent-0000000000000000000000"
-          node -e '
-            const fs = require("fs")
-            const key = process.env.ANTHROPIC_API_KEY
-            fs.writeFileSync(`${process.env.HOME}/.claude.json`, JSON.stringify({
-              hasCompletedOnboarding: true,
-              customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
-              projects: { [process.cwd()]: { hasTrustDialogAccepted: true } },
-            }))'
-          sleep 120 | TERM=xterm-256color script -qfec "claude --plugin-dir ." /dev/null > "$RUNNER_TEMP/session.log" 2>&1 &
-          for _ in $(seq 1 90); do
-            if [ -s .claude-plugin/types/claude-code/index.d.ts ] && [ -s .claude-plugin/types/tsconfig.json ]; then break; fi
-            sleep 1
-          done
-          pkill -f -- '--plugin-dir' || true
-          pkill -f 'sleep 120' || true
-          if [ ! -s .claude-plugin/types/tsconfig.json ]; then
-            echo "::error::Claude Code did not write .claude-plugin/types; the session's screen follows"
-            tr -cd '[:print:]\n' < "$RUNNER_TEMP/session.log" | tail -n 40
-            exit 1
-          fi
-          head -n 1 .claude-plugin/types/claude-code/index.d.ts
-
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: claude plugin validate .
-      - run: claude plugin test .
+          echo "Results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done

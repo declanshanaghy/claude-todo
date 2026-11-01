@@ -1,0 +1,75 @@
+name: Set up the mod's checks
+description: >-
+  Node and the npm dependencies, and on request the pinned Claude Code, the
+  sqlite3 CLI and the API declarations the engine writes for lint and typecheck.
+
+inputs:
+  claude-code-version:
+    description: The Claude Code version to install; empty skips it.
+    default: ''
+  sqlite3:
+    description: Install the sqlite3 CLI, as on a user's machine.
+    default: 'false'
+  types:
+    description: Have the engine write .claude-plugin/types (needs claude-code-version).
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: lts/*
+        cache: npm
+
+    - run: npm ci
+      shell: bash
+
+    # The mod drives the sqlite3 CLI; the tests stand in for it, but keep the
+    # runner like a user's machine.
+    - name: Install sqlite3
+      if: inputs.sqlite3 == 'true'
+      shell: bash
+      run: command -v sqlite3 || (sudo apt-get update && sudo apt-get install -y sqlite3)
+
+    - name: Install Claude Code
+      if: inputs.claude-code-version != ''
+      shell: bash
+      env:
+        CLAUDE_CODE_VERSION: ${{ inputs.claude-code-version }}
+      run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+    # The engine writes .claude-plugin/types (gitignored) only when an
+    # interactive session loads the mod; validate, test and -p sessions
+    # don't. Loading needs no sign-in: a session with onboarding done, this
+    # folder trusted and a placeholder key reaches the load without ever
+    # sending a request. It runs under a pseudo-terminal with stdin held
+    # open, and is killed as soon as the files are there.
+    # The placeholder is assembled here so no key-shaped literal sits in the
+    # repo for secret scanners to stop a push over.
+    - name: Have the engine write the mod's types
+      if: inputs.types == 'true'
+      shell: bash
+      run: |
+        export ANTHROPIC_API_KEY="sk-ant-""api03-ci-placeholder-never-sent-0000000000000000000000"
+        node -e '
+          const fs = require("fs")
+          const key = process.env.ANTHROPIC_API_KEY
+          fs.writeFileSync(`${process.env.HOME}/.claude.json`, JSON.stringify({
+            hasCompletedOnboarding: true,
+            customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
+            projects: { [process.cwd()]: { hasTrustDialogAccepted: true } },
+          }))'
+        sleep 120 | TERM=xterm-256color script -qfec "claude --plugin-dir ." /dev/null > "$RUNNER_TEMP/session.log" 2>&1 &
+        for _ in $(seq 1 90); do
+          if [ -s .claude-plugin/types/claude-code/index.d.ts ] && [ -s .claude-plugin/types/tsconfig.json ]; then break; fi
+          sleep 1
+        done
+        pkill -f -- '--plugin-dir' || true
+        pkill -f 'sleep 120' || true
+        if [ ! -s .claude-plugin/types/tsconfig.json ]; then
+          echo "::error::Claude Code did not write .claude-plugin/types; the session's screen follows"
+          tr -cd '[:print:]\n' < "$RUNNER_TEMP/session.log" | tail -n 40
+          exit 1
+        fi
+        head -n 1 .claude-plugin/types/claude-code/index.d.ts
