@@ -33,7 +33,22 @@ export type Todo = {
   // Its agent can't be woken again (stopped by the person, or taken over from
   // another session): ▶ Resume starts a fresh agent on the work it kept.
   isAgentGone?: boolean
+  // Candidate prompts its drafting subagent stored when it was added (or
+  // renamed), best first: ▶ Exec offers them without drafting, ⚡ Auto takes
+  // the first. Never the chosen prompt, which stays `prompt`.
+  drafts?: Draft[]
 }
+
+// One candidate prompt: a short name for the question's option, and the task.
+export type Draft = { label: string; prompt: string }
+
+// A todo's drafting subagent while it works: the key its launch gave it, and
+// its agent id once known.
+export type Drafting = { key: string; agentId?: string; at: number }
+
+// An exec waiting on that subagent: whether it's auto, and the status to put
+// back if its prompt is dropped.
+export type Waiting = { auto: boolean; was: TodoStatus }
 
 // A worktree a todo's agent left behind, found by its agent id in git.
 export type Kept = { agentId: string; name: string; path: string; branch: string }
@@ -155,6 +170,17 @@ declare module 'claude-code' {
       expired: number[]
       // The session's title as the prompt bar shows it; '' for none.
       sessionTitle: string
+      // This session's drafting subagents: by todo while one is in flight,
+      // and by agent id until each ends; each todo's latest drafting key, and
+      // the last key's number.
+      drafting: Record<number, Drafting>
+      drafters: Record<string, { n: number; key: string }>
+      draftKeys: Record<number, string>
+      draftSeq: number
+      // Execs held until their todo's drafts arrive, by todo.
+      waiting: Record<number, Waiting>
+      // The agent type the drafting subagents spawn as.
+      drafterType: string
     }
   }
 }

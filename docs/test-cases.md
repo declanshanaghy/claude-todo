@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 151 of 154 cases (98.1%)** are covered by `claude plugin test .`.
+**Coverage: 161 of 164 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -58,6 +58,21 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | E6 | Rename trims and stores the new title | Rename stores the new title and puts the ring back on the row |
 | E7 | Refine deletes the old run's agents and calls from the database and submits the refine protocol with the current prompt | Refine clears the old run from the database and asks for a refined prompt |
 | E8 | Restart as-is clears the run ids and agents and submits the restart protocol | Restart as-is clears the run ids and its agents, then submits the restart protocol |
+
+## Prompt drafts
+
+| ID | Behaviour | Covered by |
+|---|---|---|
+| R1 | Adding a todo answers at once; then, from a timer, the plugin spawns the drafter itself: its own registered agent type (haiku, tools Read, Grep, Glob and `mcp__todo__drafts` only), in the background, its description tagged `[todo-drafts:N]` and its prompt carrying the launch's key | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R2 | `mcp__todo__drafts` stores up to 3 drafts on the todo without touching its status, prompt or run, and a pending todo's level 1 hints "3 drafts ready"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R3 | The drafter never links as a todo's run: its spawn, its tool calls and its end add no agent, call or tool-use id and change no status | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R4 | With drafts stored, ▶ Exec asks ONE AskUserQuestion offering them (labels and whole prompts, plus Other) without drafting; ⚡ Auto takes the first; ✨ Refine still refines the chosen prompt | Exec offers the stored drafts without drafting, Auto takes the first, Refine is unchanged |
+| R5 | A rename clears the drafts and launches a new drafter; drafts sent under the old launch's key are refused as stale; the same title again drafts nothing | a rename clears the drafts and drafts again; drafts the old drafter sends late are refused as stale |
+| R6 | Drafts that arrive once the todo started are stored, its status and chosen prompt untouched | drafts that arrive once a todo is running are kept without touching its run or its chosen prompt |
+| R7 | An exec (▶ Exec, ⚡ Auto, 🔥 Fire, `/todo exec`) while the drafter works waits: a toast, the level-1 hint "waiting for prompt drafts…" and a line in the exec message say so, and the drafts are offered (or the first auto-taken) as soon as they arrive; the drafter's later end runs nothing more | an exec while the drafter works waits for it, says so, then offers its drafts or auto-takes the first |
+| R8 | A drafter that ends without drafts, or a wait past 2 minutes, falls back to drafting in the chat, saying why in a toast and the prompt; a refused spawn leaves nothing to wait for | a drafter that ends without drafts, fails to start or takes too long falls back to drafting in the chat, saying so |
+| R9 | A Reset while an exec waits on drafts cancels it; the drafts are still stored | a reset while an exec waits on drafts cancels it |
+| R10 | The drafter's agent type is hidden from the model's own agent listing (`agent.offer`); other types are offered as ever | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 
 ## Linking and tracing
 

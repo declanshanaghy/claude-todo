@@ -5,6 +5,7 @@ import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
 import { CHIP_SYMBOL, MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 import { clampLines, headParts } from './pane'
+import { execPrompt } from './protocol'
 
 const PANE = {
   plugin: 'todo',
@@ -1716,6 +1717,247 @@ test('mcp__todo__update reports a change and mcp__todo__list reads the backlog',
 
   const listed = await $.tool.call({ tool: 'mcp__todo__list' } as never)
   expect(JSON.parse(String(listed.result))).toEqual([{ n: 1, title: 'Count md files', status: 'done', prompt: 'count them', summary: '12 files', mode: 'agent' }])
+})
+
+// ---------- prompt drafts ----------
+
+// The spawn as the engine raises it: the Agent tool spells the type subagent_type.
+type Spawned = { prompt: string; description?: string; subagentType?: string; subagent_type?: string; model?: string }
+// The engine beneath the drafter: it registers the plugin's agent type, and
+// each spawn starts dr1, dr2, … (or is refused while `deny` is set). The
+// test's engine hands a plugin's spawn no id, so the agent list names them.
+function drafterEngine(on: Parameters<TestBody>[1], where: Where = {}) {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  const got = engine(on, submitted, undefined, false, { toasts, ...where })
+  const clock = mock.clock(on, { now: 1000 })
+  const registered: Record<string, unknown>[] = []
+  const spawns: Spawned[] = []
+  const gate = { deny: undefined as string | undefined }
+  on('agent.register', (_, e) => (registered.push(e as never), { value: { agent: `todo:${e.name}` } }) as never)
+  on('agent.spawn', (_, e) => {
+    spawns.push(e)
+    return gate.deny === undefined ? { model: 'haiku', agentId: `dr${spawns.length}` } : { deny: gate.deny }
+  })
+  on('agent.offer', () => ({ isOffered: true }))
+  on('agent.list', () => ({
+    value: spawns.map((s, i) => ({ id: `dr${i + 1}`, description: s.description ?? '', type: 'todo:drafter', status: 'running' })),
+  }) as never)
+  return { ...got, submitted, toasts, clock, registered, spawns, gate }
+}
+
+const DRAFTS = [
+  { label: 'Fix the tab title', prompt: 'Set the kitty tab title from the session name in hooks/title.ts.' },
+  { label: 'Add a title test', prompt: 'Cover the kitty tab title with a test.' },
+  { label: 'Document it', prompt: 'Explain kitty tab titles in the README.' },
+]
+// A drafter's call, from its own loop, under the key its launch gave it.
+const storeDrafts = ($: T$, n: number, key: string, drafts = DRAFTS) =>
+  $.tool.call({ tool: 'mcp__todo__drafts', n, key, drafts, agentId: `drafter-${key}` } as never)
+
+test('adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run', async ($, on) => {
+  const { db, clock, registered, spawns, submitted } = drafterEngine(on)
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'dr1' } }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'hooks/title.ts', stderr: '' }, text: 'hooks/title.ts' }))
+  await start($)
+  const added = await todo($, 'add Fix kitty tab titles')
+  // Adding answers before any drafter starts.
+  expect(added.text).toBe('Added #1 Fix kitty tab titles')
+  expect(spawns).toHaveLength(0)
+  await clock.settle()
+
+  expect(registered[0]).toMatchObject({ name: 'drafter', model: 'haiku', tools: ['Read', 'Grep', 'Glob', 'mcp__todo__drafts'] })
+  expect(spawns).toHaveLength(1)
+  expect(spawns[0]).toMatchObject({ model: 'haiku', description: '[todo-drafts:1] Draft prompts for #1' })
+  expect(spawns[0]?.subagentType ?? spawns[0]?.subagent_type).toBe('todo:drafter')
+  expect(spawns[0]?.prompt).toContain('mcp__todo__drafts once: {n: 1, key: "1.1"')
+  expect(spawns[0]?.prompt).toContain('read-only')
+
+  const stored = await storeDrafts($, 1, '1.1')
+  expect(stored.result).toBe('Stored 3 drafts for #1.')
+  expect(todoAt(db, 1)).toMatchObject({ status: 'pending', drafts: DRAFTS, toolUseIds: [], hasRun: false })
+  expect(todoAt(db, 1).prompt).toBeUndefined()
+  // Its spawn, its own calls and its end never touch the todo or its subtasks.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tuD', description: '[todo-drafts:1] Draft prompts for #1', prompt: 'p' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', command: 'grep -rl title', agentId: 'dr1' } as never)
+  await turnDone($, 'dr1', 'Stored 3 drafts.')
+  expect(Object.keys(db.agents)).toHaveLength(0)
+  expect(Object.keys(db.calls)).toHaveLength(0)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'pending', toolUseIds: [], drafts: DRAFTS })
+
+  // Level 1 hints that they're ready.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  expect(await ui.find({ type: 'Text', text: /3 drafts ready/ })).toBeDefined()
+  expect(submitted).toHaveLength(0)
+  await ui.unmount()
+
+  // The drafter is the plugin's to spawn, never offered to the model; other types are.
+  const offer = (agent: string) => $.agent.offer({ agent, description: 'd', source: 'plugin', provider: { plugin: 'todo', tier: 'user' } } as never)
+  expect(await offer('todo:drafter')).toMatchObject({ isOffered: false })
+  expect(await offer('Explore')).toMatchObject({ isOffered: true })
+
+  // A bad call stores nothing.
+  expect(await $.tool.call({ tool: 'mcp__todo__drafts', n: 9, drafts: DRAFTS } as never)).toMatchObject({ isError: true })
+  expect(await $.tool.call({ tool: 'mcp__todo__drafts', n: 1, drafts: [{ label: '' }] } as never)).toMatchObject({ isError: true })
+  expect(todoAt(db, 1).drafts).toEqual(DRAFTS)
+})
+
+test('Exec offers the stored drafts without drafting, Auto takes the first, Refine is unchanged', async ($, on) => {
+  const { clock, submitted } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Fix kitty tab titles')
+  await todo($, 'add Count md files')
+  await clock.settle()
+  await storeDrafts($, 1, '1.1')
+  await storeDrafts($, 2, '2.2', [{ label: 'Count', prompt: 'Count the md files.' }, ...DRAFTS.slice(1)])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:exec' })
+  expect(await todo($, 'exec auto 2')).toMatchObject({ text: expect.stringContaining('takes the best drafted prompt') })
+  await clock.settle()
+
+  const [asked, auto] = submitted as [string, string]
+  expect(asked).toContain("don't draft new ones")
+  expect(asked).toContain('ONE AskUserQuestion')
+  for (const d of DRAFTS) expect(asked).toContain(`   - ${d.label}: ${d.prompt}`)
+  expect(asked).toContain('via Other')
+  expect(asked).not.toContain('Draft 2–3')
+  expect(auto).toContain('in auto mode')
+  expect(auto).toContain('Count the md files.')
+  expect(auto).not.toContain('Draft the single best prompt')
+  expect(auto).not.toContain('AskUserQuestion')
+  await ui.unmount()
+
+  // Refine works on the chosen prompt, as ever, never on the drafts.
+  const t = { ...aTodo(3, 'T', { status: 'stopped', hasRun: true, prompt: 'chosen' }), drafts: DRAFTS }
+  const refine = execPrompt(t, 1, true)
+  expect(refine).toContain('Current prompt: chosen')
+  expect(refine).not.toContain(DRAFTS[0]?.prompt ?? '-')
+})
+
+test('a rename clears the drafts and drafts again; drafts the old drafter sends late are refused as stale', async ($, on) => {
+  const { db, clock, spawns } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Old title')
+  await clock.settle()
+  await storeDrafts($, 1, '1.1')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:rename' })
+  await ui.input({ key: 'ren:1', text: 'New title' })
+  expect(todoAt(db, 1)).toMatchObject({ title: 'New title' })
+  expect(todoAt(db, 1).drafts).toBeUndefined()
+  await clock.settle()
+  expect(spawns).toHaveLength(2)
+  expect(spawns[1]?.prompt).toContain('"New title"')
+
+  expect((await storeDrafts($, 1, '1.1')).result).toContain('stale')
+  expect(todoAt(db, 1).drafts).toBeUndefined()
+  await storeDrafts($, 1, '1.2')
+  expect(todoAt(db, 1).drafts).toEqual(DRAFTS)
+  // The same title again is no rename: nothing is re-drafted.
+  await ui.press({ key: 'act:1:rename' })
+  await ui.input({ key: 'ren:1', text: 'New title' })
+  await clock.settle()
+  expect(spawns).toHaveLength(2)
+  expect(todoAt(db, 1).drafts).toEqual(DRAFTS)
+  await ui.unmount()
+})
+
+test('drafts that arrive once a todo is running are kept without touching its run or its chosen prompt', async ($, on) => {
+  const { db, clock } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Fix kitty tab titles')
+  await clock.settle()
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, prompt: 'mine', mode: 'agent', status: 'running' } as never)
+  await storeDrafts($, 1, '1.1')
+  expect(todoAt(db, 1)).toMatchObject({ status: 'running', prompt: 'mine', drafts: DRAFTS })
+})
+
+test('an exec while the drafter works waits for it, says so, then offers its drafts or auto-takes the first', async ($, on) => {
+  const { db, clock, submitted, toasts } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Fix kitty tab titles')
+  await todo($, 'add Count md files')
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:exec' })
+  await clock.settle()
+  expect(submitted).toHaveLength(0)
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect(toasts).toContain('#1: waiting for prompt drafts…')
+  expect(await ui.find({ type: 'Text', text: /waiting for prompt drafts…/ })).toBeDefined()
+  const said = await todo($, 'exec auto 2')
+  expect(said.text).toContain('Waiting for its prompt drafts')
+  await clock.settle()
+  expect(submitted).toHaveLength(0)
+
+  await storeDrafts($, 1, '1.1')
+  await clock.settle()
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toContain("don't draft new ones")
+  expect(submitted[0]).toContain(DRAFTS[0]?.prompt ?? '-')
+  await storeDrafts($, 2, '2.2', [{ label: 'Count', prompt: 'Count the md files.' }])
+  await clock.settle()
+  expect(submitted).toHaveLength(2)
+  expect(submitted[1]).toContain('in auto mode')
+  expect(submitted[1]).toContain('Count the md files.')
+  // A drafter's later end, after it stored them, runs nothing more.
+  await turnDone($, 'dr1', 'Stored 3 drafts.')
+  await clock.settle()
+  expect(submitted).toHaveLength(2)
+  await ui.unmount()
+})
+
+test('a drafter that ends without drafts, fails to start or takes too long falls back to drafting in the chat, saying so', async ($, on) => {
+  const { clock, submitted, toasts, gate } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Ends empty')
+  await todo($, 'add Hangs')
+  await clock.settle()
+  await todo($, 'exec 1')
+  await todo($, 'exec 2')
+  await clock.settle()
+  expect(submitted).toHaveLength(0)
+
+  await turnDone($, 'dr1', 'Nothing to say.')
+  await clock.settle()
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toContain('its drafting subagent ended without drafts, so draft the prompts here')
+  expect(submitted[0]).toContain('Draft 2–3')
+  expect(toasts).toContain('#1: its drafting subagent ended without drafts; drafting in the chat')
+
+  await clock.advance(120_000)
+  expect(submitted).toHaveLength(2)
+  expect(submitted[1]).toContain('Execute todo #2')
+  expect(submitted[1]).toContain('its drafts took too long')
+
+  // A spawn the engine refuses leaves nothing to wait for.
+  gate.deny = 'no subagents here'
+  await todo($, 'add Refused')
+  await clock.settle()
+  await todo($, 'exec 3')
+  await clock.settle()
+  expect(submitted).toHaveLength(3)
+  expect(submitted[2]).toContain('Draft 2–3')
+})
+
+test('a reset while an exec waits on drafts cancels it', async ($, on) => {
+  const { db, clock, submitted } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Fix kitty tab titles')
+  await clock.settle()
+  await todo($, 'exec 1')
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'act:1:reset' })
+  await storeDrafts($, 1, '1.1')
+  await clock.settle()
+  expect(submitted).toHaveLength(0)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'pending', drafts: DRAFTS })
+  await ui.unmount()
 })
 
 // ---------- the sync loop ----------

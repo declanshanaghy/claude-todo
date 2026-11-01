@@ -43,6 +43,8 @@ export type PaneData = {
   f: number
   // The session's title, drawn at the header's right; '' draws none.
   sessionTitle: string
+  // The todos whose exec waits for its drafting subagent's prompts.
+  waiting: number[]
 }
 
 // Layout follows docs/mockup.html (scene 3, Drill down); glyphs and colors follow Claude
@@ -213,7 +215,7 @@ export function ringBox({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, ring:
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, turns, u, cap, f, sessionTitle }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, turns, u, cap, f, sessionTitle, waiting }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -287,7 +289,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'planning':
         return [
           <Box gap={1}>
-            <Text dimColor>{t.status === 'planning' ? 'planning in the chat…' : t.hasRun ? 'continuing in the chat…' : 'answer the prompt question in the chat…'}</Text>
+            <Text dimColor>
+              {t.status === 'planning'
+                ? 'planning in the chat…'
+                : waiting.includes(t.n)
+                  ? 'waiting for prompt drafts…'
+                  : t.hasRun
+                    ? 'continuing in the chat…'
+                    : 'answer the prompt question in the chat…'}
+            </Text>
             {btn('reset', 'Reset', () => setTodoStatus($, t.n, t.hasRun ? 'stopped' : 'pending'))}
           </Box>,
         ]
@@ -486,6 +496,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
             {' '}
             no prompt yet: ▶ Exec drafts one
           </Text>
+        )}
+        {t.status === 'pending' && t.drafts?.length ? (
+          <Text dimColor>
+            {' '}
+            {plural(t.drafts.length, 'draft')} ready
+          </Text>
+        ) : (
+          ''
         )}
         {t.status === 'done' && t.summary ? (
           <Text color={markOf('done').color} wrap="truncate-end">

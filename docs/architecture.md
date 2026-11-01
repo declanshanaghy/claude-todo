@@ -1,6 +1,6 @@
 # Architecture
 
-The mod is a hooks module that runs inside every Claude Code session. It never plans or launches work itself: it keeps the backlog, draws the pane, and hands Claude a protocol prompt. Claude asks, plans and launches subagents. The mod watches what gets launched and records it in a database that every session shares.
+The mod is a hooks module that runs inside every Claude Code session. It never plans or launches a todo's work itself: it keeps the backlog, draws the pane, and hands Claude a protocol prompt. Its one agent of its own is a small, read-only drafter it spawns when a todo is added, so the prompts are ready before you press ▶ Exec. Claude asks, plans and launches subagents. The mod watches what gets launched and records it in a database that every session shares.
 
 ## The pieces
 
@@ -12,12 +12,15 @@ flowchart LR
     H["Hooks module<br/>commands · tools · tracing · sync"]
     M["Claude (main loop)"]
     A["Subagents<br/>an Agent or a Workflow,<br/>each in its own git worktree"]
+    D["Drafter<br/>haiku, read-only,<br/>one per added todo"]
     P -- "press: exec, pause, stop…" --> H
     H -- "protocol prompt" --> M
     M -- "mcp__todo__update / list" --> H
     M -- "launches" --> A
     A -. "tool calls, turns<br/>(seen through hooks)" .-> H
     H -- "atoms: the session's copy" --> P
+    H -- "$.agent.spawn on add, rename" --> D
+    D -- "mcp__todo__drafts" --> H
   end
   S2["Other sessions<br/>in the same repo"]
   DB[("SQLite<br/>todos · agents · calls<br/>migrated · backups")]
@@ -29,10 +32,10 @@ flowchart LR
 
 | Piece | Role | Source |
 |---|---|---|
-| Hooks module | Registers `/todo`, the `mcp__todo__*` tools and the pane; links launched agents to their todo; records every tool call and the text its agents write between them; keeps the session's copy of the list in sync | `hooks/register.tsx` |
+| Hooks module | Registers `/todo`, the `mcp__todo__*` tools, the drafter's agent type and the pane; spawns a drafter for each added or renamed todo; links launched agents to their todo; records every tool call and the text its agents write between them; keeps the session's copy of the list in sync | `hooks/register.tsx` |
 | Database layer | Builds each SQL script, runs it through `sqlite3`, parses the answer | `hooks/db.ts` |
 | Pane and call browser | Draw the tree, the action chips and the read-only dialog from the session's copy | `hooks/pane.tsx`, `hooks/detail.tsx` |
-| Protocol | The prompts Claude follows for exec, restart and resume, including the git rules | `hooks/protocol.ts` |
+| Protocol | The prompts Claude follows for exec, restart and resume, including the git rules, and the drafter's task | `hooks/protocol.ts` |
 | Contract | The todo, agent and call shapes, and the state the pane reads | `types/index.d.ts` |
 
 ## Where state lives
@@ -42,6 +45,8 @@ flowchart LR
 | Todos, agents, tool calls and turns | One SQLite file in Claude Code's plugin data folder, keyed by directory | Shared by every session and every copy of the mod; survives restarts |
 | The session's copy of its directory's rows | `$.state` atoms | The pane draws from them, and a write to one redraws it |
 | Pane layout (open rows, confirmations, focus ring, the view) | `$.state` atoms | Per session; nothing else needs it. What's open and the view outlast a reload |
+| A todo's drafts | On the todo's row, beside (never in) its chosen prompt | Ready for any session's ▶ Exec, and kept through restarts |
+| Drafters in flight, their keys, execs waiting on them | `$.state` atoms | A drafter belongs to the session that spawned it |
 | Settings | `/config` (`pluginConfigs`) or environment variables | Claude Code's standard plugin options |
 
 A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list.
@@ -108,7 +113,7 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 | State | Mark | Meaning | Who moves it on |
 |---|---|---|---|
 | pending | ○ | Added, never run (or run, then reset before it started again) | You |
-| drafting | ✎ | Claude is writing or refining the prompt, or resuming | Claude, via `mcp__todo__update` |
+| drafting | ✎ | Claude is writing or refining the prompt (or waiting for its drafter), or resuming | Claude, via `mcp__todo__update` |
 | planning | ◇ | Multi-step: plan-mode questions and the execution tree | Claude |
 | running | ▶ (spins) | An Agent or Workflow is working | The agent's end |
 | paused | ⏸ | Halted with its run kept, so Resume picks up where it was | You |
@@ -124,8 +129,8 @@ Each button is filled with the color of the state it leads to (the launchers in 
 
 | State | Buttons | Leads to |
 |---|---|---|
-| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details | drafting · drafting · pending · confirm → removed · call browser |
-| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint once its drafts are stored: "3 drafts ready" | drafting · drafting · pending · confirm → removed · call browser |
+| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "waiting for prompt drafts…" while its drafter works, "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
 | stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ☰ Details, all on one row | drafting · drafting · drafting · collapses it · call browser |
@@ -151,6 +156,21 @@ Pane-wide controls:
 
 ## Running a todo
 
+Drafting starts when the todo is added, so ▶ Exec has its prompts ready:
+
+```mermaid
+sequenceDiagram
+  actor U as You
+  participant H as Hooks module
+  participant D as Drafter (haiku, read-only)
+  U->>H: ＋ add (or ✎ Rename)
+  H-->>U: added at once
+  H->>D: from a timer: $.agent.spawn "[todo-drafts:N] …" with a fresh key
+  D->>D: a few Grep, Glob, Read calls
+  D->>H: mcp__todo__drafts {n, key, 3 drafts}
+  H->>H: store them on the todo (an older key's are stale and refused)
+```
+
 ```mermaid
 sequenceDiagram
   actor U as You
@@ -161,8 +181,12 @@ sequenceDiagram
   participant O as origin
   U->>P: ▶ Exec
   P->>H: execTodo: status drafting
-  H->>M: protocol prompt
-  M->>U: pick or write the prompt
+  opt its drafter is still working
+    H-->>U: toast and hint: waiting for prompt drafts…
+    H->>H: hold until the drafts arrive, the drafter ends, or 2 minutes pass
+  end
+  H->>M: protocol prompt, carrying the drafts when there are any
+  M->>U: pick a draft or write the prompt (auto: the first draft)
   M->>H: mcp__todo__update (prompt, mode, running)
   M->>W: Agent "[todo:N] …" or Workflow "todo-N-…"
   H->>H: tool.call / agent.spawn link it to #N
@@ -175,6 +199,8 @@ sequenceDiagram
   W-->>M: report: branch, commits, checks, landed hash
   M->>H: mcp__todo__update (done or failed, branch, landed)
 ```
+
+Without drafts (the drafter ended with none, couldn't start, or took too long), the protocol has Claude draft 2–3 prompts in the chat as before, and says why. Drafts that arrive after the todo started are kept but change nothing. The drafter's tag is `[todo-drafts:N]`, which the linking hooks skip, so it never becomes the todo's run.
 
 A dropped prompt (the host refusing it, a Stop standing) puts the todo back where it was and says why. An agent stopped outside the pane ends with an aborted turn, which marks its todo stopped and its agent as one that can't be woken. ⏵ Resume then has Claude start a fresh agent in the worktree the old one kept, briefed with its branch and the turns and calls already recorded; it does the same when a Workflow run belongs to another session, or after a takeover.
 

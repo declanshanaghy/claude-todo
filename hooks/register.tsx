@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, ImageRef, Kept, PaneUi, Todo, Turn, View } from '../types'
+import type { AgentNode, Call, Confirm, Detail, Draft, Drafting, ImageRef, Kept, PaneUi, Todo, Turn, View, Waiting } from '../types'
 import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
 import { DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
 import { drawPane, focusOrder } from './pane'
-import { execPrompt, restartPrompt, resumePrompt } from './protocol'
+import { draftsPrompt, execPrompt, restartPrompt, resumePrompt } from './protocol'
 
 export const PANE = 'todo'
 
@@ -74,6 +74,17 @@ const expired = atom({ plugin: 'todo', key: 'expired' } as const, [] as number[]
 // engine offers no getter, so the classic SessionStart and UserPromptSubmit
 // events, which carry it, keep it current.
 const sessionTitle = atom({ plugin: 'todo', key: 'sessionTitle' } as const, '')
+// Each todo's drafting subagent while it works; every drafter this session
+// spawned, by agent id, until it ends; each todo's latest drafting key (drafts
+// sent under an older one were asked for an old title) and the last key's
+// number; the execs held until their drafts arrive; and the agent type
+// drafters spawn as.
+const drafting = atom({ plugin: 'todo', key: 'drafting' } as const, {} as Record<number, Drafting>)
+const drafters = atom({ plugin: 'todo', key: 'drafters' } as const, {} as Record<string, { n: number; key: string }>)
+const draftKeys = atom({ plugin: 'todo', key: 'draftKeys' } as const, {} as Record<number, string>)
+const draftSeq = atom({ plugin: 'todo', key: 'draftSeq' } as const, 0)
+const waiting = atom({ plugin: 'todo', key: 'waiting' } as const, {} as Record<number, Waiting>)
+const drafterType = atom({ plugin: 'todo', key: 'drafterType' } as const, 'Explore')
 
 const CALLS_PER_AGENT = 200
 const CALLS_TOTAL = 1500
@@ -577,7 +588,128 @@ export async function addTodo($: $, title: string) {
   // A refused write has already said why.
   if (!isSaved) return null
   $.ui.toast(`＋ added #${n}`)
+  queueDrafts($, n)
   return n
+}
+
+// ---------- prompt drafts ----------
+
+// How long an exec waits on its todo's drafting subagent before it drafts in
+// the chat after all.
+export const DRAFT_WAIT_MS = 120_000
+export const DRAFTS_TAG = (n: number) => `[todo-drafts:${n}] `
+
+// Adding stays instant: the drafting subagent starts from a timer, never
+// inside the add (a command's hook can't wait on what it starts).
+function queueDrafts($: $, n: number) {
+  $.clock.after(0, () => void launchDrafts($, n).catch(() => undefined))
+}
+
+// The plugin spawns the drafter itself: a small, read-only agent type it
+// registered, in the background. It stores its drafts through
+// mcp__todo__drafts with the key it was given; it is never linked as the
+// todo's run. Each launch gets a new key, so a rename's stale drafts are told
+// apart from the ones the new title asked for.
+async function launchDrafts($: $, n: number) {
+  const t = (await read($, todos)).find(x => x.n === n)
+  if (!t) return
+  const seq = (await read($, draftSeq)) + 1
+  await update($, draftSeq, () => seq)
+  const key = `${n}.${seq}`
+  const at = await $.clock.now()
+  await update($, draftKeys, k => ({ ...k, [n]: key }))
+  await update($, drafting, d => ({ ...d, [n]: { key, at } }))
+  const others = (await read($, todos)).filter(x => x.n !== n).map(x => `#${x.n} ${x.title} (${x.status})`)
+  const description = `${DRAFTS_TAG(n)}Draft prompts for #${n}`
+  const args = { prompt: draftsPrompt(t, key, { sessionTitle: await read($, sessionTitle), others }), description, model: 'haiku' }
+  let ran: Awaited<ReturnType<$['agent']['spawn']>> | undefined
+  for (const subagentType of [...new Set([await read($, drafterType), 'Explore'])]) {
+    try {
+      ran = await $.agent.spawn({ ...args, subagentType })
+    } catch (err) {
+      ran = { deny: err instanceof Error ? err.message : String(err) }
+    }
+    if (ran.deny === undefined) break
+  }
+  const isMine = async () => (await read($, drafting))[n]?.key === key
+  if (ran?.deny !== undefined) {
+    if (!(await isMine())) return
+    await update($, drafting, d => omit(d, n))
+    await releaseWait($, n, 'its drafting subagent could not start')
+    return
+  }
+  // Its id tells its end apart; an answer without one is found by its tag.
+  const id = ran?.agentId ?? (await findDrafter($, description))
+  if (!id) return
+  await update($, drafters, x => ({ ...x, [id]: { n, key } }))
+  if (await isMine()) await update($, drafting, d => (d[n]?.key === key ? { ...d, [n]: { ...d[n], agentId: id } } : d))
+}
+
+async function findDrafter($: $, description: string) {
+  try {
+    const known = await read($, drafters)
+    return (await $.agent.list()).filter(a => a.description === description && !known[a.id]).at(-1)?.id
+  } catch {
+    return undefined
+  }
+}
+
+function omit<V>(o: Record<number, V>, n: number): Record<number, V> {
+  const { [n]: _, ...rest } = o
+  return rest
+}
+
+// The exec held for #n's drafts goes ahead: with the drafts if they arrived,
+// else drafting in the chat, saying `why`. It submits from a timer, since it
+// is reached from hooks of the drafter's own loop.
+async function releaseWait($: $, n: number, why: string) {
+  const w = (await read($, waiting))[n]
+  if (!w) return
+  await update($, waiting, x => omit(x, n))
+  const t = (await read($, todos)).find(x => x.n === n)
+  // Reset (or taken elsewhere) while it waited: nothing to run.
+  if (t?.status !== 'drafting') return
+  const note = t.drafts?.length ? undefined : `${why}, so draft the prompts here`
+  if (note) $.ui.toast(`#${n}: ${why}; drafting in the chat`)
+  $.clock.after(0, () => {
+    void (async () => {
+      const now = (await read($, todos)).find(x => x.n === n)
+      if (now?.status !== 'drafting') return
+      await submit($, { ...now, status: w.was }, execPrompt(now, await read($, cpuCap), false, w.auto, note))
+    })().catch(() => undefined)
+  })
+}
+
+// Drafts a drafter stored. Ones whose key an earlier launch had (the todo
+// was renamed since) are refused; a todo that already started keeps them and
+// nothing is interrupted.
+async function storeDrafts($: $, a: { n?: unknown; key?: unknown; drafts?: unknown }) {
+  const t = (await read($, todos)).find(x => x.n === a.n)
+  if (!t) return { result: `No todo #${String(a.n)}.`, isError: true as const }
+  const key = str(a.key)
+  if (key && key !== (await read($, draftKeys))[t.n]) return { result: `#${t.n} was renamed since; these drafts are stale and were not stored.` }
+  const raw = Array.isArray(a.drafts) ? (a.drafts as unknown[]) : []
+  const drafts: Draft[] = raw
+    .map(d => (typeof d === 'object' && d !== null ? (d as Record<string, unknown>) : {}))
+    .map(d => ({ label: str(d['label']).trim(), prompt: str(d['prompt']).trim() }))
+    .filter(d => d.label && d.prompt)
+    .slice(0, 3)
+  if (drafts.length === 0) return { result: 'No drafts given: each needs a label and a prompt.', isError: true as const }
+  await patchTodo($, t.n, x => ({ ...x, drafts }))
+  await update($, drafting, d => omit(d, t.n))
+  await releaseWait($, t.n, 'drafts arrived')
+  return { result: `Stored ${drafts.length} drafts for #${t.n}.` }
+}
+
+// A drafter's turn ended: if it stored nothing, its todo isn't drafting any
+// more, and an exec waiting on it drafts in the chat.
+async function drafterEnded($: $, id: string, failed: boolean) {
+  const who = (await read($, drafters))[id]
+  if (!who) return
+  await update($, drafters, d => Object.fromEntries(Object.entries(d).filter(([k]) => k !== id)))
+  if ((await read($, drafting))[who.n]?.key !== who.key) return
+  await update($, drafting, d => omit(d, who.n))
+  await releaseWait($, who.n, failed ? 'its drafting subagent failed' : 'its drafting subagent ended without drafts')
 }
 
 async function clearRun($: $, n: number) {
@@ -630,10 +762,18 @@ export async function fireNext($: $) {
   return execTodo($, t, false, true)
 }
 
-const execNote = (t: Todo, auto: boolean) =>
-  auto
-    ? `Auto-executing #${t.n} ${t.title}: Claude drafts the prompt and launches it, no questions asked.`
-    : `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`
+export const WAIT_NOTE = 'Waiting for its prompt drafts: they are offered as soon as they arrive.'
+
+const execNote = (t: Todo, auto: boolean, isWaiting = false) =>
+  (auto
+    ? `Auto-executing #${t.n} ${t.title}: Claude ${t.drafts?.length || isWaiting ? 'takes the best drafted prompt' : 'drafts the prompt'} and launches it, no questions asked.`
+    : `Executing #${t.n} ${t.title}: answer the prompt question in the chat.`) + (isWaiting ? `\n${WAIT_NOTE}` : '')
+
+// Whether an exec of `t` now should wait for the drafting subagent still at
+// work on it rather than draft from scratch.
+async function isDraftPending($: $, t: Todo) {
+  return !t.drafts?.length && (await read($, drafting))[t.n] !== undefined
+}
 
 // `auto` skips every question: Claude picks the prompt and, for multi-step
 // work, plans on defaults and runs it without plan-mode approval.
@@ -646,6 +786,14 @@ export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
     expanded: u.expanded.includes(`t${t.n}`) ? u.expanded : [...u.expanded, `t${t.n}`],
     justStopped: u.justStopped.filter(x => x !== t.n),
   }))
+  // Its drafter is still at work: hold the exec until the drafts arrive, the
+  // drafter ends without them, or the wait runs out.
+  if (!refine && (await isDraftPending($, t))) {
+    await update($, waiting, w => ({ ...w, [t.n]: { auto, was: t.status } }))
+    $.ui.toast(`#${t.n}: waiting for prompt drafts…`)
+    $.clock.after(DRAFT_WAIT_MS, () => void releaseWait($, t.n, 'its drafts took too long').catch(() => undefined))
+    return execNote(t, auto, true)
+  }
   const drop = await submit($, t, execPrompt(t, await read($, cpuCap), refine, auto))
   if (drop !== undefined) return `#${t.n} didn't start: ${drop}`
   return execNote(t, auto)
@@ -776,7 +924,12 @@ export async function deleteTodo($: $, t: Todo) {
 
 export async function renameTodo($: $, n: number, title: string) {
   const clean = title.trim()
-  if (clean) await patchTodo($, n, t => ({ ...t, title: clean }))
+  const was = (await read($, todos)).find(t => t.n === n)
+  // A new title makes its drafts stale: they go, and it is drafted again.
+  if (clean && was && clean !== was.title) {
+    await patchTodo($, n, t => assign(t, { title: clean, drafts: undefined }))
+    queueDrafts($, n)
+  }
   await patchUi($, u => ({ ...u, renaming: null }))
   await focus($, `todo:${n}`)
 }
@@ -894,6 +1047,51 @@ export const register: Register = (on, options) => {
       isDeferred: false,
     })
     await $.tool.register({
+      name: 'drafts',
+      description:
+        "Store a todo-pane todo's candidate prompts, best first (3). Called by the todo plugin's drafting subagent only.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          n: { type: 'integer', description: 'Todo number' },
+          key: { type: 'string', description: 'The key your task gave you, as given' },
+          drafts: {
+            type: 'array',
+            maxItems: 3,
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string', description: 'A short name, at most 5 words' },
+                prompt: { type: 'string', description: 'The full, self-contained prompt' },
+              },
+              required: ['label', 'prompt'],
+            },
+          },
+        },
+        required: ['n', 'drafts'],
+      },
+      isDeferred: false,
+    })
+    // The drafter: small, cheap and read-only, run in the background and
+    // hidden from the model's own agent listing. Without it (an engine that
+    // refuses the type) drafters spawn as the read-only Explore.
+    try {
+      const { agent } = await $.agent.register({
+        name: 'drafter',
+        description: "Drafts candidate prompts for a todo-pane todo; spawned by the todo plugin only.",
+        prompt:
+          'You draft candidate prompts for a todo in a todo list. You only read: never edit or write files, and never change git state. Follow the task you are given and store your drafts with mcp__todo__drafts.',
+        tools: ['Read', 'Grep', 'Glob', 'mcp__todo__drafts'],
+        model: 'haiku',
+        effort: 'low',
+        maxTurns: 12,
+        background: true,
+      })
+      await update($, drafterType, () => agent)
+    } catch {
+      await update($, drafterType, () => 'Explore')
+    }
+    await $.tool.register({
       name: 'list',
       description: "List this repo's todos, or the home directory's outside a repo (number, title, status, prompt, summary).",
       inputSchema: { type: 'object', properties: {} },
@@ -1008,7 +1206,7 @@ export const register: Register = (on, options) => {
           if (now) await execTodo($, now, false, auto)
         })()
       })
-      return { text: execNote(t, auto) }
+      return { text: execNote(t, auto, await isDraftPending($, t)) }
     }
     return { text: 'Usage: /todo [show] · /todo noshow · /todo add <title> · /todo exec [auto] <n|title> · /todo exec auto' }
   })
@@ -1040,6 +1238,13 @@ export const register: Register = (on, options) => {
     const now = (await read($, todos)).find(x => x.n === t.n)
     return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
   })
+
+  on('tool.call', { tool: 'mcp__todo__drafts' as never }, async ($, e) => storeDrafts($, argsOf(e)))
+
+  // The drafter is the plugin's to spawn, never the model's to pick.
+  on('agent.offer', async ($, e, next) => (e.agent === (await read($, drafterType)) && e.agent !== 'Explore' ? { isOffered: false } : next(e))).catch(
+    (_, e, next) => next(e),
+  )
 
   on('tool.call', { tool: 'mcp__todo__list' as never }, async $ => {
     const list = await read($, todos)
@@ -1135,6 +1340,8 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny !== undefined || !ran.agentId) return ran
+    // A drafting subagent is never a todo's run.
+    if (/^\[todo-drafts:\d+\]/.test(e.description)) return ran
     let n = (await read($, todos)).find(t => t.toolUseIds.includes(e.tool_use_id))?.n
     if (n === undefined && e.parentAgentId) {
       n = (await read($, agents)).find(a => a.agentId === e.parentAgentId)?.todoN
@@ -1183,7 +1390,9 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
-    if (id !== undefined) {
+    if (id !== undefined && (await read($, drafters))[id]) {
+      await drafterEnded($, id, e.isAborted || ('reason' in e && e.reason === 'refusal'))
+    } else if (id !== undefined) {
       const node = (await read($, agents)).find(a => a.agentId === id)
       if (node?.status === 'running' && e.isAborted) {
         // Stopped outside the pane (the tasks list, an interrupt): the agent
@@ -1278,6 +1487,7 @@ export const register: Register = (on, options) => {
       f: await read($, spin),
       turns: await read($, turns),
       sessionTitle: await read($, sessionTitle),
+      waiting: Object.keys(await read($, waiting)).map(Number),
     })
   })
 }

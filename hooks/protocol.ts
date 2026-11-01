@@ -61,17 +61,44 @@ ${TAG_RULES(t.n)}`
 // Auto mode takes the draft that would have been offered first and runs it
 // without a question: no prompt to pick, and multi-step work is planned on
 // best-effort defaults and launched without plan-mode approval.
-export function execPrompt(t: Todo, cap: number, refine: boolean, auto = false): string {
+//
+// A todo whose drafting subagent already stored candidate prompts skips the
+// drafting: the one question offers them as they are, and auto takes the
+// first. `note` says why there are none when they were waited for in vain.
+export function execPrompt(t: Todo, cap: number, refine: boolean, auto = false, note?: string): string {
+  const drafts = refine ? [] : (t.drafts ?? [])
+  const best = drafts[0]
   const draft = auto
-    ? `1. Auto mode: don't ask the user anything. Draft the single best prompt for this todo (the one you would have offered first) from its title and this session's context (repo, recent work, open threads), and go on with it.`
+    ? best
+      ? `1. Auto mode: don't ask the user anything, and don't draft: this prompt was already drafted for the todo (the best of its drafts), so go on with it as it is:
+   ${best.prompt}`
+      : `1. Auto mode: don't ask the user anything. Draft the single best prompt for this todo (the one you would have offered first) from its title and this session's context (repo, recent work, open threads), and go on with it.`
     : refine
     ? `1. Refine the current prompt below. Ask with ONE AskUserQuestion (header "Refine", question 'Prompt for #${t.n} "${t.title}"?'): the first option is "Keep current prompt" with the current prompt as its description, followed by 2 refinements of it. Each option's description holds the full prompt.
    Current prompt: ${t.prompt ?? '(none)'}`
+    : drafts.length
+    ? `1. These prompts were already drafted for this todo: don't draft new ones. Straight away, ask with ONE AskUserQuestion (header "Prompt", question 'Prompt for #${t.n} "${t.title}"?') offering them in this order, each label as an option's label and its prompt, whole, as that option's description; the user can type their own via Other.
+${drafts.map(d => `   - ${d.label}: ${d.prompt}`).join('\n')}`
     : `1. Draft 2–3 concrete prompts for this todo from its title and this session's context (repo, recent work, open threads). Ask with ONE AskUserQuestion (header "Prompt", question 'Prompt for #${t.n} "${t.title}"?'). Each option's label is a short name and its description is the full prompt; the user can type their own via Other.`
-  return `[todo] Execute todo #${t.n} "${t.title}"${auto ? ' in auto mode' : ''}. Follow this protocol exactly.
+  return `[todo] Execute todo #${t.n} "${t.title}"${auto ? ' in auto mode' : ''}. Follow this protocol exactly.${note ? `\n(${note})` : ''}
 ${draft}
 2. Call mcp__todo__update {n: ${t.n}, prompt: "<the final prompt>"}.
 ${RUN_STEPS(t, cap, auto)}`
+}
+
+// What a todo's drafting subagent is asked: the todo, what the session can
+// tell it, and the one call that stores its drafts. It changes nothing.
+export type DraftContext = { sessionTitle: string; others: string[] }
+
+export function draftsPrompt(t: Pick<Todo, 'n' | 'title'>, key: string, ctx: DraftContext): string {
+  const others = ctx.others.length ? ctx.others.map(x => `   - ${x}`).join('\n') : '   - none'
+  return `Draft candidate prompts for todo #${t.n} "${t.title}" in the todo pane. You are read-only: never edit or write files, and never change git state.
+Session: ${ctx.sessionTitle || '(untitled)'}
+The directory's other todos:
+${others}
+1. Look around the repo just enough to make the prompts concrete (a few Grep, Glob or Read calls: the README, the files the title points at). Keep it short.
+2. Call mcp__todo__drafts once: {n: ${t.n}, key: "${key}", drafts: [{label, prompt}, …]} with exactly 3 drafts, best first. A label is a short name of at most 5 words. A prompt is the whole, self-contained task for an agent that hasn't seen this conversation: what to change, where, and how to tell it's done.
+3. Answer with one line: how many drafts you stored.`
 }
 
 export function restartPrompt(t: Todo, cap: number): string {
