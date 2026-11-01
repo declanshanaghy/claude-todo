@@ -194,6 +194,10 @@ declare module 'claude-code' {
       draftSeq: number
       // The agent type the drafting subagents spawn as.
       drafterType: string
+      // Whether the pane draws its hover labels (/todo tooltips): this
+      // session's copy of $.store's `tooltips`, which keeps it across
+      // sessions, so the pane's render can read it.
+      tooltips: boolean
     }
   }
 }

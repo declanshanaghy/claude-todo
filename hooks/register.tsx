@@ -56,6 +56,11 @@ const ui = atom(
   { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, shown: [...DEFAULT_VIEW] },
   { shape: 'ui-2' },
 )
+// Whether the pane draws its hover labels. $.store's `tooltips` keeps the
+// choice across sessions (absent: on); this is the session's copy of it,
+// read at boot, as a render subscribes to $.state but not to $.store.
+export const TOOLTIPS = 'tooltips'
+const tooltips = atom({ plugin: 'todo', key: 'tooltips' } as const, true)
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
 const spin = atom({ plugin: 'todo', key: 'spin' } as const, 0)
 const detail = atom({ plugin: 'todo', key: 'detail' } as const, null as Detail)
@@ -701,6 +706,7 @@ export const VERBS: readonly { verb: string; also?: readonly string[]; use: stri
   { verb: 'rename', use: '/todo rename <n> <new title>', means: 'retitle a todo, drafting again' },
   { verb: 'leave', use: '/todo leave <n|title>', means: 'leave a just-stopped todo as it is' },
   { verb: 'details', use: '/todo details <n|title>', means: 'its prompt, runs and agents in the pane' },
+  { verb: 'tooltips', use: '/todo tooltips [on|off]', means: "turn the pane's hover labels on or off" },
   { verb: 'help', also: ['?'], use: '/todo help|?', means: 'this list' },
 ]
 
@@ -727,6 +733,18 @@ export const HELP = [
 ]
   .map(line => cut(line, ANSWER_COLUMNS))
   .join('\n')
+
+// /todo tooltips [on|off]: shows or hides the pane's hover labels, kept in
+// $.store so every later session starts the same way; bare, it flips them.
+// The chips' own hover fill and the ring's hint line stay either way.
+export async function setTooltips($: $, arg: string) {
+  const said = arg.trim().toLowerCase()
+  if (said !== '' && said !== 'on' && said !== 'off') return 'Usage: /todo tooltips [on|off]'
+  const isOn = said === '' ? !(await read($, tooltips)) : said === 'on'
+  await $.store.set(TOOLTIPS, isOn)
+  await update($, tooltips, () => isOn)
+  return isOn ? 'Pane hover labels on.' : 'Pane hover labels off; /todo tooltips on brings them back.'
+}
 
 export async function addTodo($: $, title: string) {
   const clean = title.trim()
@@ -1443,6 +1461,10 @@ async function setUp($: $, options: Options) {
     }
   }
   await update($, cpuCap, () => cap)
+  // The hover labels: only a stored false turns them off, and an unreadable
+  // store leaves them on.
+  const tips = await $.store.get(TOOLTIPS).catch(() => undefined)
+  await update($, tooltips, () => tips !== false)
 
   // The database first: a session that can't reach it keeps its 0.2 todos
   // where they are and shows them read-only.
@@ -1605,6 +1627,7 @@ export const register: Register = (on, options) => {
       await $.ui.close({ id: PANE })
       return { text: 'Todo pane hidden; /todo show brings it back.' }
     }
+    if (verb === 'tooltips') return { text: await setTooltips($, arg) }
     const asked = verb === '' || verb === 'list' || verb === 'show'
     if (asked) await patchUi($, u => ({ ...u, isHidden: false }))
     // Every /todo is the person asking, so the pane seats at any width; one
@@ -1978,6 +2001,7 @@ export const register: Register = (on, options) => {
       f: await read($, spin),
       turns: await read($, turns),
       offset: await read($, offset),
+      tips: await read($, tooltips),
     })
     // The chip the ring was on is gone (it can't act now): move the ring to
     // its todo's header, or to the view toggle when the none view hid its

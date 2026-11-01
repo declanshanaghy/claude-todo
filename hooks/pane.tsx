@@ -63,6 +63,8 @@ export type PaneData = {
   f: number
   // The list's scroll offset: its first row the window shows (see listWindow).
   offset: number
+  // Whether the hover labels are drawn (/todo tooltips; on by default).
+  tips: boolean
 }
 
 // Layout follows docs/mockup.html (scene 3, Drill down); glyphs and colors follow Claude
@@ -267,7 +269,7 @@ export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}m
 type Line = { indent: number; node: JSX.Element }
 const lineAt = (indent: number) => (node: JSX.Element): Line => ({ indent, node })
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, offset }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, offset, tips }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -276,9 +278,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
 
   // An action chip fills with the color of the status it moves the todo into
   // (marks.tsx), so the buttons, rows and summaries share one palette. Its
-  // word shows on hover, in a label placed by `at` (tipAt).
+  // word shows on hover, in a label placed by `at` (tipAt), unless /todo
+  // tooltips turned the labels off (`tips`).
   const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'stay', isDimmed = false, at: TipAt = { top: -1 }) =>
-    lit(key, withTip(els, key, label, at, statusChip(els, key, label, onPress, tone, isDimmed, ring === key)))
+    lit(key, withTip(els, key, label, at, statusChip(els, key, label, onPress, tone, isDimmed, ring === key), tips))
 
   // Where a hover label opens for a chip whose box starts at column `x` of
   // the body: on the row above (every chip but the header's has the tree's
@@ -729,8 +732,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         {/* The toggles' hover labels, here rather than beside each toggle:
             the box holding the toggles clips what leaves its one row. Each
             joins its toggle's hover group (`scope`), so the pointer on the
-            toggle reveals it, on the row below. */}
-        {tally(list).map((m, i, all) => {
+            toggle reveals it, on the row below. None with the labels off. */}
+        {(tips ? tally(list) : []).map((m, i, all) => {
           const x = toggleAt(all, i)
           return tipLabel(els, m.status, { top: 1, left: Math.min(x, e.props.bodyColumns - (cells(m.status) + 2)) - PAD_X }, `tip:view:${m.status}`)
         })}

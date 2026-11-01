@@ -3725,6 +3725,79 @@ test('every chip has a hidden hover label with its word, absolute so it takes no
   await narrow.unmount()
 })
 
+// Every hover label the pane draws: the absolute Boxes, chips' and toggles' alike.
+const tipsDrawn = async (ui: { drawn: () => Promise<unknown> }) => boxesIn(await ui.drawn()).filter(isTip).length
+
+test('/todo tooltips off drops every hover label, on brings them back, and the bare form flips them', async ($, on) => {
+  const db = seeded([aTodo(1, 'Waiting'), running(2, 'Runs')], [agentNode('ag2', 2)], [callRow('c1', 'ag2', { ms: 12 })])
+  const { store } = engine(on, [], undefined, true, { db })
+  await start($)
+  // Off by nobody's choice: on, and nothing written to the store.
+  expect(store).not.toHaveProperty('tooltips')
+  const ui = await mountAll($)
+  for (const n of [1, 2]) await ui.press({ key: `todo:${n}` })
+  await ui.press({ key: 'subs:2' })
+  await ui.press({ key: 'ag:ag2' })
+  const all = await tipsDrawn(ui)
+  expect(all).toBeGreaterThan(SUMMARY.length)
+  const rows = (await ui.findAll({ type: 'Box' })).length
+
+  expect((await todo($, 'tooltips off')).text).toBe('Pane hover labels off; /todo tooltips on brings them back.')
+  expect(store['tooltips']).toBe(false)
+  expect(await tipsDrawn(ui)).toBe(0)
+  expect(await tipOf(ui, 'act:1:exec')).toBeUndefined()
+  // A subtask's ☰ Details, on its title row, loses its label too.
+  expect(await ui.find({ type: 'Button', key: 'full:ag2' })).toBeDefined()
+  expect(await tipOf(ui, 'full:ag2')).toBeUndefined()
+  // The chips stay, each in its keyed Box with its own hover fill, and the ring's hint line still says what one does.
+  const exec = (await ui.find({ type: 'Box', key: 'tip:act:1:exec' })) as Found | undefined
+  expect(exec).toBeDefined()
+  expect(JSON.stringify(exec)).toContain('"inverse":true')
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'act:1:rename', origin: { kind: 'person' } })
+  const first = (await levelRows(ui, 1, 2))[0]
+  expect(first === undefined ? '' : textsIn({ children: [first] }).join('')).toBe(' ✎ Rename: give the todo a new title')
+  expect(blankRows(await ui.findAll({ type: 'Box' }))).toEqual([])
+  // Only the labels went: every other Box is still drawn.
+  expect((await ui.findAll({ type: 'Box' })).length).toBe(rows - all)
+
+  expect((await todo($, 'tooltips on')).text).toBe('Pane hover labels on.')
+  expect(store['tooltips']).toBe(true)
+  expect(await tipsDrawn(ui)).toBe(all)
+
+  // Bare, it flips whatever it is, both ways, and keeps each choice.
+  expect((await todo($, 'tooltips')).text).toContain('off')
+  expect(store['tooltips']).toBe(false)
+  expect(await tipsDrawn(ui)).toBe(0)
+  expect((await todo($, 'tooltips')).text).toBe('Pane hover labels on.')
+  expect(store['tooltips']).toBe(true)
+  expect(await tipsDrawn(ui)).toBe(all)
+
+  // Any other word is a usage note that changes nothing, and never a todo.
+  expect((await todo($, 'tooltips maybe')).text).toBe('Usage: /todo tooltips [on|off]')
+  expect(store['tooltips']).toBe(true)
+  expect(titles(db, '/proj')).toEqual(['1 Waiting', '2 Runs'])
+  await ui.unmount()
+})
+
+test('/todo tooltips off outlives the session: a later one starts with the hover labels off', async ($, on) => {
+  const db = seeded([aTodo(1, 'Waiting')])
+  const { store } = engine(on, [], undefined, true, { db, store: { tooltips: false } })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  expect(await tipsDrawn(ui)).toBe(0)
+  // A reload boots again from the store, so it stays off.
+  await start($)
+  expect(await tipsDrawn(ui)).toBe(0)
+  // Turned on there, it is kept on for the next session.
+  await todo($, 'tooltips on')
+  expect(store['tooltips']).toBe(true)
+  expect(await tipsDrawn(ui)).toBeGreaterThan(0)
+  await start($)
+  expect(await tipsDrawn(ui)).toBeGreaterThan(0)
+  await ui.unmount()
+})
+
 test('focusing a chip puts its word and what it does in the hint line, at the same line count; unfocusing restores the hint', async ($, on) => {
   const long = 'Make both statuslines read colors from the theme lib via a new generator, keeping their output byte for byte identical.'
   const db = seeded([aTodo(1, 'Fresh'), aTodo(2, 'Long', { prompt: long })])

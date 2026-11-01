@@ -236,11 +236,13 @@ export const tipLabel = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, word
 
 // A chip and its hover label in one keyed Box: the key makes the Box a hover
 // scope, so the pointer anywhere on the chip reveals the label, with no hook
-// run and no redraw.
-export const withTip = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, key: string, word: string, at: TipAt, node: JSX.Element) => (
+// run and no redraw. With the labels off (/todo tooltips off, `isShown`
+// false) the label is left out whole, and the keyed Box stays, so the chip's
+// own hover fill keeps the scope it had.
+export const withTip = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, key: string, word: string, at: TipAt, node: JSX.Element, isShown = true) => (
   <Box key={`tip:${key}`} flexShrink={0}>
     {node}
-    {tipLabel({ Box, Text }, word, at)}
+    {isShown ? tipLabel({ Box, Text }, word, at) : ''}
   </Box>
 )
 
