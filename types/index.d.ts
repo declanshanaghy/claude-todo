@@ -140,6 +140,7 @@ declare module 'claude-code' {
       cpuCap: number
       spin: number
       detail: Detail
+      returnTo: string | null
       // Whether a surface draws the pane now; the status line counts while not.
       placed: boolean
       // The key of the element the pane's focus ring is on.

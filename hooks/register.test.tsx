@@ -48,6 +48,8 @@ type Where = {
   drop?: string
   // What `git worktree list --porcelain` answers.
   worktrees?: string
+  // Each $.ui.open's argument, readable by the test.
+  openedWith?: { id: string; focus?: boolean }[]
   toasts?: string[]
   // The environment beyond HOME.
   env?: Record<string, string>
@@ -199,6 +201,7 @@ function engine(
   const isOpen = new Set<string>()
   on('ui.open', (_, e) => {
     panes.opens.push(e.id)
+    where.openedWith?.push({ id: e.id, ...(e.focus !== undefined ? { focus: e.focus } : {}) })
     isOpen.add(e.id)
     return { value: where.unplaced === undefined ? { isPlaced: true } : { isPlaced: false, reason: where.unplaced } } as never
   })
@@ -2104,4 +2107,75 @@ test('the run protocol never leaves a stopped todo running', async ($, on) => {
   await ui.press({ key: 'act:1:exec' })
   expect(submitted.at(-1)).toContain('A notification that says it was stopped (by the user or by Claude) means status "stopped"')
   await ui.unmount()
+})
+
+// ---------- the dialog never wedges ----------
+
+// Every Code source and Markdown text a drawing holds.
+function texts(node: unknown, out: string[] = []): string[] {
+  if (Array.isArray(node)) for (const n of node) texts(n, out)
+  else if (typeof node === 'object' && node !== null) {
+    const el = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown }
+    if (el.type === 'Code' && typeof el.props?.['source'] === 'string') out.push(el.props['source'])
+    if (el.type === 'Markdown' && typeof el.props?.['text'] === 'string') out.push(el.props['text'])
+    texts(el.children, out)
+  }
+  return out
+}
+
+test('the call browser hands Code and Markdown no control or format character, even where a cut splits an emoji', async ($, on) => {
+  const nasty = `ok \u001b]8;;https://x\u0007link\u001b]8;;\u0007 \u0085 zw\u200b bidi\u202e sep\u2028 ${'😀'.repeat(400)}\r\n${'line\n'.repeat(30)}`
+  const db = seeded(
+    [aTodo(1, 'Count', { status: 'done', hasRun: true, mode: 'agent', taskId: 'ag1' })],
+    [agentNode('ag1', 1, { status: 'done' })],
+    [callRow('c1', 'ag1', { tool: 'Bash', fields: [{ k: 'command', v: nasty }], response: nasty, state: 'ok' }), callRow('c2', 'ag1', { tool: 'Edit', fields: [{ k: 'old_string', v: nasty }, { k: 'new_string', v: 'b\u200b' }], response: '{"a":"\\u2028"}', state: 'ok', startedAt: 2 })],
+  )
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'ag:ag1' })
+  const all = texts(await ui.findAll({ type: 'Code' })).concat(texts(await ui.findAll({ type: 'Markdown' })))
+  expect(all.length).toBeGreaterThan(0)
+  for (const t of all) expect(t).not.toMatch(/[^\P{C}\t\n]|[\p{Zl}\p{Zp}]/u)
+  await ui.unmount()
+})
+
+test('Escape on the dialog closes it and puts the ring back where it was, keeping the keys in the pane', async ($, on) => {
+  const openedWith: { id: string; focus?: boolean }[] = []
+  const db = seeded([aTodo(1, 'Count', { status: 'done', hasRun: true, mode: 'agent', taskId: 'ag1' })], [agentNode('ag1', 1, { status: 'done' })])
+  engine(on, [], undefined, false, { db, openedWith })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'ag:ag1', origin: { kind: 'person' } })
+  await ui.press({ key: 'ag:ag1' })
+  expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
+  await ui.unmount()
+  // Escape takes the keys from the pane: it's drawn unfocused.
+  const before = openedWith.length
+  const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
+  await clock.advance(1)
+  await blurred.unmount()
+  expect(openedWith.slice(before)).toEqual([{ id: 'todo', focus: true }])
+  const back = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await back.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
+  expect((await back.find({ type: 'Box', key: 'ring:ag:ag1' }))?.props['borderStyle']).toBe('round')
+  await back.unmount()
+})
+
+test('a dialog left open across a reload starts closed', async ($, on) => {
+  const db = seeded([aTodo(1, 'Count', { status: 'done', hasRun: true })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:details' })
+  expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
+  await ui.unmount()
+  await start($)
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await again.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
+  await again.unmount()
 })

@@ -54,6 +54,8 @@ const ui = atom(
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
 const spin = atom({ plugin: 'todo', key: 'spin' } as const, 0)
 const detail = atom({ plugin: 'todo', key: 'detail' } as const, null as Detail)
+// What held the pane's focus ring when the dialog opened: Escape puts it back.
+const returnTo = atom({ plugin: 'todo', key: 'returnTo' } as const, null as string | null)
 // Whether a surface draws the pane now. Its header summary or, while it isn't
 // on screen (closed, hidden, waiting for a wider terminal, or showing the
 // dialog), the status line counts the todos: one of them, never both.
@@ -446,6 +448,8 @@ async function openPane($: $, asked: boolean) {
 // The view-only detail dialog replaces the tree in the same pane, which
 // already holds the keys; Escape hands them back and the render closes it.
 export async function openDetail($: $, d: Detail) {
+  const at = await read($, ring)
+  await update($, returnTo, () => at)
   await update($, unfolded, () => [])
   await update($, earlier, () => 0)
   await update($, detail, () => d)
@@ -455,6 +459,22 @@ export async function openDetail($: $, d: Detail) {
 async function closeDetail($: $) {
   await update($, detail, () => null)
   await syncStatus($)
+}
+
+// Escape (or a click elsewhere) takes the keys from the pane while the dialog
+// shows: it closes, and the pane takes the keys back with the ring where it
+// was before the dialog opened, rather than leaving them at the prompt.
+async function leaveDetail($: $) {
+  const back = await read($, returnTo)
+  await closeDetail($)
+  await update($, returnTo, () => null)
+  try {
+    await $.ui.open({ id: PANE, title: 'Todos', backgroundColor: 'transparent', focus: true })
+  } catch {
+    // The pane can't be seated now: the prompt keeps the keys.
+    return
+  }
+  if (back !== null) await focus($, back)
 }
 
 // A fold toggle in the call browser: one block unfolds or folds again.
@@ -818,6 +838,9 @@ export const register: Register = (on, options) => {
 
     // The database first: a session that can't reach it keeps its 0.2 todos
     // where they are and shows them read-only.
+    // A dialog left open across a reload (or stranded by a refused drawing)
+    // starts closed.
+    await update($, detail, () => null)
     const bootAt = await $.clock.now()
     const self = await $.session.id()
     await update($, me, () => self)
@@ -1143,7 +1166,7 @@ export const register: Register = (on, options) => {
     if (d) {
       // Escape (or a click elsewhere) takes the keys from the pane: close the
       // dialog then, from a timer, as above.
-      if (!e.props.isFocused) $.clock.after(0, () => void closeDetail($))
+      if (!e.props.isFocused) $.clock.after(0, () => void leaveDetail($).catch(() => undefined))
       const want: ImageRef[] = []
       const tree = drawDetail($, e, {
         detail: d,

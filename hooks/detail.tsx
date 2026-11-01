@@ -44,7 +44,16 @@ const opt = <K extends string>(k: K, v: string | undefined): Partial<Record<K, s
 
 // Code and Markdown take tab and newline as their only control characters, so
 // a tool's colours and carriage returns are dropped.
-const clean = (s: string) => s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+// What Code and Markdown take: no control or format character but tab and
+// newline, or the host refuses the whole drawing and the dialog can't close.
+// Terminal escapes go whole first; then every other C0/C1 control, format mark
+// (zero-width, bidi), lone surrogate half (a cut can split a pair) and
+// line/paragraph separator.
+export const clean = (s: string) =>
+  s
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\P{C}\t\n]|[\p{Zl}\p{Zp}]/gu, '')
 
 function editDiff(oldS: string, newS: string) {
   const o = oldS.split('\n')
@@ -121,14 +130,15 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
 
   // A block folded to its first lines until its toggle unfolds it.
   const fold = (id: string, text: string, draw: (shown: string) => JSX.Element, isMarkdown = false) => {
-    if (!isLong(text)) return draw(spend(text))
+    // Cleaned after the cut: a slice can split a surrogate pair.
+    if (!isLong(text)) return draw(clean(spend(text)))
     const isOpen = open.has(id)
     const shown = isOpen ? text : previewOf(text, isMarkdown)
     const more = text.split('\n').length - shown.split('\n').length
     const label = isOpen ? '▴ fold' : more > 0 ? `… +${more} lines` : '… more'
     return (
       <Box flexDirection="column">
-        {draw(spend(shown))}
+        {draw(clean(spend(shown)))}
         {toggle(`fold:${id}`, label, () => unfold($, id))}
       </Box>
     )
@@ -237,7 +247,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
                   const half = Math.ceil(PREVIEW_LINES / 2)
                   const o = isOpen ? clean(oldS) : clean(oldS).split('\n').slice(0, half).join('\n')
                   const n = isOpen ? clean(newS) : clean(newS).split('\n').slice(0, half).join('\n')
-                  return <Code source={editDiff(o, n)} format="diff" {...opt('path', c.filePath)} />
+                  return <Code source={clean(editDiff(o, n))} format="diff" {...opt('path', c.filePath)} />
                 },
               )
             : ''}
