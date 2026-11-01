@@ -100,7 +100,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
   const open = new Set(data.unfolded)
   const width = e.props.bodyColumns
   const heading = (label: string) => (
-    <Box marginTop={1}>
+    <Box>
       <Text weight="semibold" color="claude">
         {label}
       </Text>
@@ -108,7 +108,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
   )
   const hasToggles = { is: false }
   const footer = () => (
-    <Box marginTop={1}>
+    <Box>
       <Text dimColor>esc closes · ↑↓ or a swipe scrolls{hasToggles.is ? ' · tab, then enter, unfolds' : ''}</Text>
     </Box>
   )
@@ -162,7 +162,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
   const turnBlock = (t: Turn) => {
     const text = clean(t.text)
     return (
-      <Box marginTop={1}>
+      <Box>
         <Box flexShrink={0}>
           <Text>⏺ </Text>
         </Box>
@@ -199,7 +199,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
         fold(`${c.id}:out`, response, s => <Code source={s} {...opt('path', c.tool === 'Read' ? c.filePath : undefined)} />)
       )
     return (
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column">
         <Text wrap="truncate-end">
           <Text color={gc}>{g}</Text> <Text weight="semibold">{spend(c.tool)}</Text>
           <Text dimColor>

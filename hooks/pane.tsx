@@ -192,17 +192,20 @@ export const TAIL = 6
 const oneLine = (text: string) => clean(text).split('\n').map(l => l.trim()).find(Boolean) ?? ''
 const gist = (text: string) => oneLine(text.replace(/[#*`]/g, ''))
 
-// Every focusable item lights the same way: while the ring is on it, a
-// rounded border in Claude's color, as the ring's inversion alone is hard to
-// see. The others keep a blank cell on each side in its place, so a moving
-// ring never shifts anything. The call browser's fold toggles use it too.
-export function ringBox({ Box }: Pick<ElementTable, 'Box'>, ring: string | null, key: string, node: JSX.Element) {
+// Every focusable item lights the same way: while the ring is on it, an
+// orange [ ] in the cell on either side, as the ring's inversion alone is hard
+// to see. The others keep those two cells blank, so a moving ring never shifts
+// anything, and no item ever takes more than its own line. The call browser's
+// fold toggles use it too.
+export function ringBox({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, ring: string | null, key: string, node: JSX.Element) {
   return ring === key ? (
-    <Box key={`ring:${key}`} borderStyle="round" borderColor="claude">
+    <Box key={`ring:${key}`} flexShrink={0}>
+      <Text weight="bold" color="claude">[</Text>
       {node}
+      <Text weight="bold" color="claude">]</Text>
     </Box>
   ) : (
-    <Box key={`ring:${key}`} padding={1}>
+    <Box key={`ring:${key}`} flexShrink={0} paddingX={1}>
       {node}
     </Box>
   )
@@ -307,15 +310,13 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'stopped':
       case 'failed': {
         const fresh = u.justStopped.includes(t.n)
+        // One row, like every state's: carry on first, then start over, then
+        // put it away, Details last.
         return [
-          ...(fresh ? [<Text color="suggestion">Stopped. What next?</Text>] : []),
-          <Box gap={1}>
-            {btn('refine', 'Refine', () => execTodo($, t, true), 'drafting')}
-            {btn('restart', 'Restart', () => restartTodo($, t), 'drafting')}
-            {details}
-          </Box>,
           <Box gap={1}>
             {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
+            {btn('refine', 'Refine', () => execTodo($, t, true), 'drafting')}
+            {btn('restart', 'Restart', () => restartTodo($, t), 'drafting')}
             {fresh &&
               btn('leave', 'Leave', async () => {
                 await patchUi($, x => ({
@@ -324,6 +325,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
                   expanded: collapse(x.expanded, `t${t.n}`),
                 }))
               })}
+            {details}
           </Box>,
         ]
       }
@@ -585,7 +587,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
       )}
       {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
-      <Text> </Text>
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
       {list.length > 0 && shown.length === 0 ? <Text dimColor>Nothing in this view.</Text> : ''}
       {shown.flatMap(todoRows)}

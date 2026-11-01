@@ -732,7 +732,8 @@ test('every focusable item lights the same border while the ring is on it, and k
   // The border's color, or `blank` for the cell of room an unlit item keeps.
   const lit = async (ui: { find: (q: { type: string; key: string }) => Promise<{ props: Record<string, unknown> } | undefined> }, key: string) => {
     const p = (await ui.find({ type: 'Box', key: `ring:${key}` }))?.props
-    return p?.['borderStyle'] === 'round' ? p['borderColor'] : p?.['padding'] === 1 ? 'blank' : p
+    // Lit: the [ ] marks in Claude's color; else the two cells kept blank.
+    return p === undefined ? p : p['paddingX'] === 1 ? 'blank' : 'claude'
   }
   const tab = (element: string) =>
     $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element, origin: { kind: 'person' } })
@@ -764,7 +765,7 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
   await todo($, 'add First')
   await todo($, 'add Second')
   const lit = async (ui: { find: (q: { type: string; key: string }) => Promise<{ props: Record<string, unknown> } | undefined> }, key: string) =>
-    (await ui.find({ type: 'Box', key: `ring:${key}` }))?.props['borderStyle'] === 'round'
+    (await ui.find({ type: 'Box', key: `ring:${key}` }))?.props['paddingX'] === undefined
   const arrow = (by: 1 | -1, bodyRows = 4) =>
     $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: Math.max(0, by), by, bodyRows, contentRows: 40, origin: { kind: 'person' } })
 
@@ -797,7 +798,10 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
 
 type Drawing = { find: (q: { type: string; key?: string; text?: string | RegExp }) => Promise<{ props: Record<string, unknown>; text?: string } | undefined> }
 // Whether the ring's border is drawn around `key`.
-const isLit = async (ui: Drawing, key: string) => (await ui.find({ type: 'Box', key: `ring:${key}` }))?.props['borderStyle'] === 'round'
+const isLit = async (ui: Drawing, key: string) => {
+  const box = await ui.find({ type: 'Box', key: `ring:${key}` })
+  return box !== undefined && box.props['paddingX'] !== 1
+}
 
 const agentNode = (agentId: string, todoN: number, over: Partial<AgentNode> = {}): AgentNode => ({
   agentId, todoN, name: agentId, kind: 'agent', isWorktree: false, status: 'running', startedAt: 1, ...over,
@@ -1260,7 +1264,8 @@ test('a todo in hand stays in the default view: paused under the ring, or just s
   await ui.press({ key: 'act:2:stopyes' })
   // The ring moved to #2's Refine: #1 leaves the view, #2 stays until Leave.
   expect(await rowsDrawn(ui)).toEqual([2])
-  expect(await ui.find({ type: 'Text', text: 'Stopped. What next?' })).toBeDefined()
+  // Just stopped: Leave joins its one row of actions (no extra line asks what next).
+  expect(await ui.find({ type: 'Button', key: 'act:2:leave' })).toBeDefined()
   await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'view:running', origin: { kind: 'person' } })
   expect(await rowsDrawn(ui)).toEqual([2])
   await ui.press({ key: 'act:2:leave' })
@@ -2775,7 +2780,7 @@ test('Escape on the dialog closes it and puts the ring back on the subtask row i
   expect(openedWith.slice(before)).toEqual([{ id: 'todo', focus: true }])
   const back = await mountAll($)
   expect(await back.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
-  expect((await back.find({ type: 'Box', key: 'ring:ag:ag1' }))?.props['borderStyle']).toBe('round')
+  expect((await back.find({ type: 'Box', key: 'ring:ag:ag1' }))?.props['paddingX']).toBeUndefined()
   await back.unmount()
 })
 
@@ -2792,4 +2797,55 @@ test('a dialog left open across a reload starts closed', async ($, on) => {
   const again = await mountAll($)
   expect(await again.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
   await again.unmount()
+})
+
+// ---------- compact: one line per row, no blank lines ----------
+
+// Every drawn row: a Box laid out as a row is one line; a column stacks its children.
+function blankRows(node: unknown, out: string[] = []): string[] {
+  if (Array.isArray(node)) for (const n of node) blankRows(n, out)
+  else if (typeof node === 'object' && node !== null) {
+    const el = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown[] }
+    const p = el.props ?? {}
+    for (const k of ['padding', 'paddingY', 'paddingTop', 'paddingBottom', 'marginTop', 'marginBottom', 'margin', 'marginY']) {
+      if (typeof p[k] === 'number' && p[k] > 0) out.push(`${String(el.type)} ${k}=${String(p[k])}`)
+    }
+    const key = typeof p['key'] === 'string' ? p['key'] : ''
+    if (el.type === 'Box' && p['borderStyle'] !== undefined && key.startsWith('ring:')) out.push(`ring border ${key}`)
+    if (el.type === 'Text' && Array.isArray(el.children) && el.children.every(c => typeof c === 'string' && c.trim() === '')) out.push('blank Text')
+    blankRows(el.children, out)
+  }
+  return out
+}
+
+test('every state draws its actions on one row, and the pane has no blank lines', async ($, on) => {
+  const db = seeded([
+    aTodo(1, 'Pending'),
+    aTodo(2, 'Running', { status: 'running', hasRun: true, mode: 'agent', taskId: 'a2', owner: 's1' }),
+    aTodo(3, 'Paused', { status: 'paused', hasRun: true, mode: 'agent', taskId: 'a3', owner: 's1' }),
+    aTodo(4, 'Stopped', { status: 'stopped', hasRun: true, mode: 'agent', taskId: 'a4' }),
+    aTodo(5, 'Failed', { status: 'failed', hasRun: true, mode: 'agent', isAgentGone: true }),
+  ])
+  engine(on, [], undefined, true, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Every state on show, not just the default view's.
+  await ui.press({ key: 'view:all' })
+  for (const n of [1, 2, 3, 4, 5]) await ui.press({ key: `todo:${n}` })
+  // A stopped todo that was just stopped also offers Leave, on the same row.
+  await ui.press({ key: 'act:2:stop' })
+  await ui.press({ key: 'act:2:stopyes' })
+  const tree = await ui.findAll({ type: 'Box' })
+  // Each todo's chips share one parent: one row.
+  for (const n of [1, 2, 3, 4, 5]) {
+    const chips = await ui.findAll({ type: 'Button' })
+    const mine = chips.filter(b => String(b.key).startsWith(`act:${n}:`))
+    expect(mine.length).toBeGreaterThan(0)
+    const rows = tree.filter(b => b.props['flexDirection'] !== 'column' && mine.every(m => JSON.stringify(b.children).includes(`"act:${n}:${String(m.key).split(':')[2] ?? ''}"`)))
+    expect(rows.length).toBeGreaterThan(0)
+  }
+  expect(await ui.find({ type: 'Text', text: /What next/ })).toBeUndefined()
+  expect(blankRows(tree)).toEqual([])
+  await ui.unmount()
 })

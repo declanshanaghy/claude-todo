@@ -128,7 +128,7 @@ Each button is filled with the color of the state it leads to (the launchers in 
 | drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
-| stopped / failed | ✨ Refine · ↻ Restart · ☰ Details · ⏵ Resume (if there's an agent or worktree to pick up) · ✓ Leave (right after a Stop) | drafting · drafting · call browser · drafting · collapses it |
+| stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ☰ Details, all on one row | drafting · drafting · drafting · collapses it · call browser |
 | done | ☰ Details | call browser |
 | in flight in another session | ⇄ Takeover · ☰ Details | confirm → stopped here · call browser |
 

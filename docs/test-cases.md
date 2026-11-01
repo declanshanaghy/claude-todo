@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 150 of 153 cases (98%)** are covered by `claude plugin test .`.
+**Coverage: 151 of 154 cases (98.1%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -185,6 +185,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
+| U90 | Every state draws its action chips on one row (a just-stopped todo included, Resume first and Details last), no element draws a blank line (no vertical padding or margin, spacer text or focus border), and the old "What next?" line is gone | every state draws its actions on one row, and the pane has no blank lines |
 | U1 | Level 1 sums a todo's agents on one `▸ N subtasks · d done · c calls` line; their rows wait behind it, and a subtask's calls never draw as code in the tree | M3: a tagged Agent links its spawn and its tool calls show under it |
 | U2 | ↗ Full transcript turns the pane into a call browser, with nothing to press while nothing in it is long enough to fold | M3: a tagged Agent links its spawn and its tool calls show under it |
 | U3 | The pane losing the keys (Esc) closes the dialog | M3: Esc (the pane losing the keys) closes the call browser |

@@ -67,6 +67,11 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 /* border / both: every chip reserves a transparent border so focus never shifts the row */
 .fm-border .chip,.fm-both .chip{border:2px solid transparent;border-radius:7px;padding:1px}
 .fm-border .chip.f,.fm-both .chip.f{border-color:var(--orange)}
+/* brackets: what ships: an orange [ ] in the cell either side of the lit item,
+   the cells kept blank otherwise, so focus never moves anything or adds a line. */
+.fm-brackets .chip::before,.fm-brackets .chip::after{display:inline-block;width:1ch;color:transparent;font-weight:700}
+.fm-brackets .chip::before{content:"["}.fm-brackets .chip::after{content:"]"}
+.fm-brackets .chip.f::before,.fm-brackets .chip.f::after{color:var(--orange)}
 .focusbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px;font-size:13px;color:var(--chromefg)}
 .focusbar button{background:var(--chrome);color:var(--chromefg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
 .focusbar button.on{background:var(--fg);color:var(--term);border-color:var(--fg);font-weight:600}
@@ -163,15 +168,16 @@ const HASH = location.hash.match(/^#m(\d)(-embed)?/);
 const EMBED = !!(HASH && HASH[2]);
 const canFocus = () => !EMBED || document.hasFocus();
 if(EMBED) document.documentElement.classList.add('embed');
-// Focus-style options for action chips: ?focus=current|uniform|border|both (combines with #mN, e.g. ?focus=both#m5).
+// Focus-style options for action chips: ?focus=brackets|current|uniform|border|both (combines with #mN, e.g. ?focus=both#m5).
 const FOCUS_MODES = [
-  ['current','current','tone fills; focus = terminal inversion (what ships today)'],
+  ['brackets','brackets','tone fills; focus = an orange [ ] either side, on the same line (what ships today)'],
+  ['current','current','tone fills; focus = terminal inversion only'],
   ['uniform','uniform','same grey fill on every chip; focused chip turns orange + bold'],
   ['border','border','tone fills; rounded orange border around the focused chip'],
   ['both','both','uniform fills + the border on the focused chip'],
 ];
 let focusMode = new URLSearchParams(location.search).get('focus');
-if(!FOCUS_MODES.some(m=>m[0]===focusMode)) focusMode = 'current';
+if(!FOCUS_MODES.some(m=>m[0]===focusMode)) focusMode = 'brackets';
 function setFocusMode(m, push){
   focusMode = m;
   FOCUS_MODES.forEach(([k])=>document.documentElement.classList.toggle('fm-'+k, k===m));
@@ -528,7 +534,7 @@ function actRow(t){
     case 'pending': return `<div class="row ind2">${a('exec','Exec','running')} ${a('auto','Auto','running')} ${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')}</div>`;
     case 'running': return `<div class="row ind2">${a('pause','Pause','paused')} ${a('stop','Stop','stopped')}</div>`;
     case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')}</div>`;
-    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('leave','Leave')}</div>`;
+    case 'stopped': return `<div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}${t.justStopped?' '+a('leave','Leave'):''}</div>`;
     case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';
@@ -741,7 +747,7 @@ function loadScene(i){
 }
 const fbar=document.getElementById('focusbar');
 FOCUS_MODES.forEach(([k,label,desc])=>{ const b=document.createElement('button'); b.textContent=label; b.title=desc; b.dataset.mode=k; b.onmousedown=e=>e.preventDefault(); b.onclick=()=>{ setFocusMode(k,true); render(); }; fbar.appendChild(b); });
-fbar.insertAdjacentHTML('beforeend', `<span class="note" id="focusnote"></span><span class="note">· link one directly: <code>?focus=current|uniform|border|both</code> (works with <code>#m1</code>–<code>#m6</code>)</span>`);
+fbar.insertAdjacentHTML('beforeend', `<span class="note" id="focusnote"></span><span class="note">· link one directly: <code>?focus=brackets|current|uniform|border|both</code> (works with <code>#m1</code>–<code>#m6</code>)</span>`);
 setFocusMode(focusMode, false);
 const tabs=document.getElementById('tabs');
 SCENES.forEach((s,i)=>{ const b=document.createElement('button'); b.textContent=s.name; b.onclick=()=>loadScene(i); tabs.appendChild(b); });
