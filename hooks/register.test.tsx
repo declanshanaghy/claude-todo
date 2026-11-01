@@ -1490,3 +1490,105 @@ test('a done todo from before its time was kept starts its time in the tree at t
   await start($)
   expect(todoAt(db, 1).doneAt).toBe(7000)
 })
+
+// ---------- dividers ----------
+
+// The divider above todo #n as drawn: its whole line, and each Text's own
+// text and props; undefined when none is drawn.
+async function dividerOf(ui: { find: (q: { type: string; key: string }) => Promise<{ text: string; children: unknown[] } | undefined> }, n: number) {
+  const box = await ui.find({ type: 'Box', key: `div:${n}` })
+  if (box === undefined) return undefined
+  type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const texts: Node[] = []
+  const walk = (x: unknown) => {
+    if (typeof x !== 'object' || x === null) return
+    const el = x as Node
+    if (el.type === 'Text') texts.push(el)
+    for (const c of el.children ?? []) walk(c)
+  }
+  for (const c of box.children) walk(c)
+  const own = (t: Node) => (t.children ?? []).filter(c => typeof c === 'string').join('')
+  return { line: box.text, parts: texts.map(t => ({ text: own(t), props: t.props ?? {} })) }
+}
+
+test('a titled divider sits above each todo, sized to the pane, its number in the status color', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles'), running(2, 'Ship it')]) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const d = await dividerOf(ui, 1)
+  // 70 columns less the pane's paddingX of 1 on each side.
+  expect(d?.line).toBe(`── #1 Fix kitty tab titles ${'─'.repeat(68 - 27)}`)
+  expect(d?.line.length).toBe(68)
+  expect(d?.parts.find(p => p.text === '#1')?.props).toMatchObject({ color: 'inactive' })
+  expect(d?.parts.find(p => p.text === '── ')?.props).toMatchObject({ dimColor: true })
+  expect(d?.parts.find(p => p.text.endsWith('───'))?.props).toMatchObject({ dimColor: true })
+  expect((await dividerOf(ui, 2))?.parts.find(p => p.text === '#2')?.props).toMatchObject({ color: 'claude' })
+  await ui.unmount()
+})
+
+test('a divider is never focusable: the arrows walk the same items and the rows keep their room', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'First'), aTodo(2, 'Second')]) })
+  await start($)
+  const arrow = (by: 1 | -1) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: Math.max(0, by), by, bodyRows: 4, contentRows: 40, origin: { kind: 'person' } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await dividerOf(ui, 2)).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'ring:div:2' })).toBeUndefined()
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'add', origin: { kind: 'person' } })
+  for (const key of ['todo:1', 'todo:2']) {
+    await arrow(1)
+    expect(await isLit(ui, key)).toBe(true)
+  }
+  await arrow(-1)
+  expect(await isLit(ui, 'todo:1')).toBe(true)
+  expect((await ui.find({ type: 'Box', key: 'ring:todo:2' }))?.props['padding']).toBe(1)
+  await ui.unmount()
+})
+
+test('at a narrow width the divider cuts the title with … and still fits', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(3, 'Fix kitty tab titles')]) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 22 } })
+  const d = await dividerOf(ui, 3)
+  expect(d?.line).toBe('── #3 Fix kitty… ───')
+  expect(d?.line.length).toBe(20)
+  await ui.unmount()
+  // Too narrow for any title: just the number on the rule.
+  const tiny = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 12 } })
+  expect((await dividerOf(tiny, 3))?.line).toBe('── #3 ────')
+  await tiny.unmount()
+})
+
+test('todoDividers "line" draws a plain dim rule', { options: { todoDividers: 'line' } }, async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const d = await dividerOf(ui, 1)
+  expect(d?.line).toBe('─'.repeat(68))
+  expect(d?.parts.every(p => p.props['dimColor'] === true)).toBe(true)
+  await ui.unmount()
+})
+
+test('todoDividers "none" draws no divider', { options: { todoDividers: 'none' } }, async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await dividerOf(ui, 1)).toBeUndefined()
+  expect(await shown(ui, 1)).toBe(true)
+  await ui.unmount()
+})
+
+test('CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to titled', { options: { todoDividers: 'none' } }, async ($, on) => {
+  const where: Where = { db: seeded([aTodo(1, 'Fix kitty tab titles')]), env: { CLAUDE_TODO_DIVIDERS: 'line' } }
+  engine(on, [], undefined, true, where)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await dividerOf(ui, 1))?.line).toBe('─'.repeat(68))
+  await ui.unmount()
+
+  where.env = { CLAUDE_TODO_DIVIDERS: 'fancy' }
+  await start($)
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await dividerOf(again, 1))?.line).toMatch(/^── #1 Fix kitty tab titles ─+$/)
+  await again.unmount()
+})
