@@ -69,6 +69,86 @@ Agents, calls and turns (an agent's text between calls, kept as rows of the call
 
 A failed run (most often a write the host aborts as the turn it served ends) is reported once and doesn't stop the next write. Only a missing `sqlite3` or data folder makes the pane read-only.
 
+## A todo's life
+
+A todo is always in one of eight states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo.
+
+```mermaid
+%%{init: {"themeVariables": {"fontSize": "20px"}, "state": {"nodeSpacing": 60, "rankSpacing": 70}}}%%
+stateDiagram-v2
+  direction TB
+  [*] --> pending: ＋ add
+
+  pending --> drafting: ▶ Exec · ⚡ Auto · 🔥 Fire
+  drafting --> planning: multi-step
+  drafting --> running: simple → one Agent
+  planning --> running: plan approved → Workflow
+
+  running --> paused: ⏸ Pause
+  paused --> drafting: ⏵ Resume
+  running --> stopped: ■ Stop
+  paused --> stopped: ■ Stop
+  running --> done: landed
+  running --> failed: didn't land
+
+  stopped --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
+  failed --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
+
+  drafting --> pending: ↺ Reset (never ran)
+  planning --> pending: ↺ Reset (never ran)
+  drafting --> stopped: ↺ Reset (has run)
+  planning --> stopped: ↺ Reset (has run)
+
+  pending --> [*]: ✕ Delete (never ran)
+  done --> [*]: expires
+```
+
+Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again.
+
+| State | Mark | Meaning | Who moves it on |
+|---|---|---|---|
+| pending | ○ | Added, never run (or run, then reset before it started again) | You |
+| drafting | ✎ | Claude is writing or refining the prompt, or resuming | Claude, via `mcp__todo__update` |
+| planning | ◇ | Multi-step: plan-mode questions and the execution tree | Claude |
+| running | ▶ (spins) | An Agent or Workflow is working | The agent's end |
+| paused | ⏸ | Halted with its run kept, so Resume picks up where it was | You |
+| stopped | ■ | Halted for good; its worktree and branch are kept | You |
+| done | ✓ | Landed (or committed, with no remote) | Expires after the keep period |
+| failed | ✗ | Finished without landing; its worktree and branch are kept | You |
+
+`drafting` and `planning` belong to the chat: the todo leaves them only when Claude reports, or when you press Reset.
+
+### Buttons by state
+
+Each button is filled with the color of the state it leads to. Destructive buttons ask first, with the ring on the safe choice.
+
+| State | Buttons | Leads to |
+|---|---|---|
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) | drafting · drafting · pending · confirm → removed |
+| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "planning in the chat…") | pending or stopped |
+| running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
+| paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
+| stopped / failed | ✨ Refine · ↻ Restart · ☰ Details · ⏵ Resume (if there's an agent or worktree to pick up) · ✓ Leave (right after a Stop) | drafting · drafting · call browser · drafting · collapses it |
+| done | ☰ Details | call browser |
+| in flight in another session | ⇄ Takeover | confirm → stopped here |
+
+The confirmations:
+
+| Confirm for | Buttons |
+|---|---|
+| Stop | ■ Stop · ↩ Keep |
+| Delete | ✕ Delete · ↩ Cancel |
+| Takeover | ⇄ Takeover · ↩ Cancel |
+
+Pane-wide controls:
+
+| Control | Where | Does |
+|---|---|---|
+| ＋ add todo… | top of the list | adds a pending todo |
+| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo; dimmed while none is pending or the agent cap is full |
+| ↗ Full transcript | under an open subtask's latest calls | opens the call browser; Esc returns to the subtask |
+| status toggles `▶ ○ ✗ ⏸ ■ ✓` · all | header | show or hide each state's todos. The default view is running, pending and failed, and done sorts last (proposed, in the mockup) |
+
 ## Running a todo
 
 ```mermaid
