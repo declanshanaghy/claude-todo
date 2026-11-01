@@ -1,12 +1,14 @@
 import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-code'
 
-import type { AgentNode, Call, Dividers, PaneUi, Todo } from '../types'
+import type { AgentNode, Call, PaneUi, Todo, Turn } from '../types'
+import { clean } from './detail'
 import { type Tone, markOf, statusChip, statusGlyph, tallySummary } from './marks'
 import {
   INFLIGHT,
   addTodo,
   askConfirm,
   cancelConfirm,
+  collapse,
   deleteTodo,
   execTodo,
   fireBlock,
@@ -33,16 +35,15 @@ export type PaneData = {
   list: Todo[]
   nodes: AgentNode[]
   all: Call[]
+  turns: Turn[]
   u: PaneUi
   cap: number
   f: number
-  // What to draw above each todo.
-  dividers: Dividers
   // The session's title, drawn at the header's right; '' draws none.
   sessionTitle: string
 }
 
-// Layout follows docs/mockup.html (scene M3); glyphs and colors follow Claude
+// Layout follows docs/mockup.html (scene 3, Drill down); glyphs and colors follow Claude
 // Code's own transcript: its spinner, ⏺ tool rows and ⎿ results, theme keys only.
 // Every status color and glyph, and the chips' fills, come from marks.tsx.
 
@@ -78,24 +79,77 @@ function ringKeys(node: unknown, out: string[] = []): string[] {
 // The columns the tree draws in: the pane's body less its paddingX of 1.
 const PAD_X = 1
 
-// The rule above a todo, sized to `width` so it never wraps: `── #3 Fix kitty
-// tab titles ─────`, the title cut with … where it doesn't fit, always ending
-// on a little rule. The pane draws lead and tail dim, num and title in the
-// todo's status color. Counted in graphemes, so a cut never splits a
-// character; the Text's truncate-end still guards a wide one.
+// Counted in graphemes, so a cut never splits a character; each Text's
+// truncate-end still guards a wide one.
 const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), x => x.segment)
 
-export function dividerParts(n: number, title: string, width: number) {
-  const num = `#${n}`
-  const lead = '── '
-  // Room left for the title once the lead, number, two spaces and a tail of
-  // at least two rule cells are in.
-  const room = width - lead.length - num.length - 2 - 2
+// A todo's header line, sized to `width` so it never wraps: `▸ ◐ #3 Fix kitty
+// tab titles ──── running 2/5`. The title is cut with … where it doesn't fit,
+// the rule fills the gap and is always at least two cells, and the status at
+// the right is never cut. The pane draws the toggle and rule dim, the mark,
+// number and title in the todo's status color.
+export function headParts(n: number, title: string, right: string, width: number) {
+  // The toggle and its space, the mark, ` #N`, then a space either side of the
+  // rule and the right side.
+  const fixed = 2 + 1 + 1 + `#${n}`.length + 1 + 1 + graphemes(right).length
+  const room = width - fixed - 1 - 2
   const chars = graphemes(title)
   const text = room < 2 ? '' : chars.length <= room ? title : `${chars.slice(0, room - 1).join('').trimEnd()}…`
-  const used = lead.length + num.length + 1 + (text ? graphemes(text).length + 1 : 0)
-  return { lead, num, title: text ? ` ${text}` : '', tail: ` ${'─'.repeat(Math.max(0, width - used))}` }
+  const used = fixed + (text ? 1 + graphemes(text).length : 0)
+  return { title: text ? ` ${text}` : '', rule: ` ${'─'.repeat(Math.max(2, width - used))} ` }
 }
+
+// Text word-wrapped to `width` and kept to `max` lines, the last cut with …
+// when there's more. Drawn line by line, so a long prompt never pushes the
+// todos below it down the pane.
+export function clampLines(text: string, width: number, max = 2) {
+  const w = Math.max(2, width)
+  const rows: string[][] = []
+  let row: string[] = []
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    let g = graphemes(word)
+    while (g.length > 0) {
+      const gap = row.length > 0 ? 1 : 0
+      if (row.length + gap + g.length <= w) {
+        if (gap) row.push(' ')
+        row.push(...g)
+        g = []
+      } else if (row.length > 0) {
+        rows.push(row)
+        row = []
+      } else {
+        rows.push(g.slice(0, w))
+        g = g.slice(w)
+      }
+    }
+  }
+  if (row.length > 0) rows.push(row)
+  if (rows.length <= max) return rows.map(r => r.join(''))
+  const kept = rows.slice(0, max).map(r => r.join(''))
+  const last = graphemes(kept[max - 1] ?? '')
+  kept[max - 1] = `${last.slice(0, w - 1).join('').trimEnd()}…`
+  return kept
+}
+
+// An agent's turns and calls in time order; a step's text comes before its
+// calls. The pane's last few lines and the call browser read the same list.
+export type Entry = { at: number; o: number } & ({ turn: Turn; call?: undefined } | { call: Call; turn?: undefined })
+export function timeline(agentId: string, all: readonly Call[], turns: readonly Turn[]): Entry[] {
+  return [
+    ...turns.filter(x => x.agentId === agentId).map((x, i): Entry => ({ at: x.startedAt, o: i * 2, turn: x })),
+    ...all.filter(c => c.agentId === agentId).map((c, i): Entry => ({ at: c.startedAt, o: i * 2 + 1, call: c })),
+  ].sort((x, y) => x.at - y.at || (x.turn ? -1 : 0) - (y.turn ? -1 : 0) || x.o - y.o)
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// How many of a subtask's newest turns and calls its open row shows.
+export const TAIL = 6
+
+// The first line with text, for a one-line row; a turn's (prose) also drops
+// its markdown marks.
+const oneLine = (text: string) => clean(text).split('\n').map(l => l.trim()).find(Boolean) ?? ''
+const gist = (text: string) => oneLine(text.replace(/[#*`]/g, ''))
 
 // Every focusable item lights the same way: while the ring is on it, a
 // rounded border in Claude's color, as the ring's inversion alone is hard to
@@ -115,7 +169,7 @@ export function ringBox({ Box }: Pick<ElementTable, 'Box'>, ring: string | null,
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f, dividers, sessionTitle }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, turns, u, cap, f, sessionTitle }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -226,7 +280,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
                 await patchUi($, x => ({
                   ...x,
                   justStopped: x.justStopped.filter(n => n !== t.n),
-                  expanded: x.expanded.filter(id => id !== `t${t.n}`),
+                  expanded: collapse(x.expanded, `t${t.n}`),
                 }))
               })}
           </Box>,
@@ -237,125 +291,190 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     }
   }
 
-  const agentRows = (t: Todo) => {
-    const mine = nodes.filter(a => a.todoN === t.n).sort((x, y) => x.startedAt - y.startedAt)
-    let wave: number | undefined
-    return mine.flatMap(a => {
-      const out = []
-      if (t.mode === 'workflow' && a.wave !== undefined && a.wave !== wave) {
-        wave = a.wave
-        out.push(
-          <Box paddingLeft={2}>
-            <Text dimColor>── wave {a.wave} ──</Text>
-          </Box>,
+  // The columns a lit item's content has: the body less its padding and the
+  // ring's cell on either side.
+  const inner = Math.max(0, e.props.bodyColumns - 2 * PAD_X - 2)
+  const callsOf = (agentId: string) => all.filter(c => c.agentId === agentId).length
+
+  // Level 3: a subtask's newest turns and calls, one line each, and the way
+  // into the full call browser. Escape there puts the ring back on its row.
+  const recent = (a: AgentNode) => {
+    const entries = timeline(a.agentId, all, turns)
+    const shown = entries.slice(-TAIL)
+    const rows: JSX.Element[] = []
+    if (entries.length > shown.length) rows.push(<Text dimColor> … {entries.length - shown.length} earlier</Text>)
+    if (entries.length === 0) rows.push(<Text dimColor> No tool calls yet.</Text>)
+    for (const x of shown) {
+      if (x.turn) {
+        rows.push(
+          <Text wrap="truncate-end">
+            <Text color="claude"> ⏺ </Text>
+            {gist(x.turn.text)}
+          </Text>,
         )
+        continue
       }
-      const n = all.filter(c => c.agentId === a.agentId).length
-      // A subtask is one line; its tool calls are browsed in the dialog.
-      out.push(
-        <Box paddingLeft={2} flexDirection="column">
-          {lit(
-            `ag:${a.agentId}`,
-            <Box>
-              <Box flexGrow={1} flexShrink={1} overflow="hidden">
-                <Button key={`ag:${a.agentId}`} plain onPress={() => void openDetail($, { kind: 'agent', agentId: a.agentId })}>
-                  <Text wrap="truncate-end">
-                    {statusGlyph(els, a.status, f)} <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
-                    {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
-                  </Text>
-                </Button>
-              </Box>
-              <Box flexShrink={0}>
-                <Text dimColor> {n} calls</Text>
-              </Box>
-            </Box>,
-          )}
+      const c = x.call
+      const [g, color] = callGlyph(c.state, f)
+      rows.push(
+        <Box>
+          <Box flexGrow={1} flexShrink={1} overflow="hidden">
+            <Text wrap="truncate-end">
+              <Text color={color}> {g} </Text>
+              <Text weight="semibold">{c.tool}</Text>
+              <Text dimColor> {oneLine(c.arg)}</Text>
+            </Text>
+          </Box>
+          <Box flexShrink={0}>
+            <Text dimColor> {c.state === 'run' ? '…' : dur(c.ms)}</Text>
+          </Box>
         </Box>,
       )
+    }
+    rows.push(
+      <Box>
+        {chip(`full:${a.agentId}`, 'Full transcript', () =>
+          openDetail($, { kind: 'agent', agentId: a.agentId }, `ag:${a.agentId}`),
+        )}
+      </Box>,
+    )
+    return (
+      <Box paddingLeft={2} flexDirection="column">
+        {rows}
+      </Box>
+    )
+  }
+
+  // Level 2: one focusable row per subtask, grouped by wave for a Workflow.
+  const agentRows = (t: Todo, mine: AgentNode[]) => {
+    let wave: number | undefined
+    return mine.flatMap(a => {
+      const out: JSX.Element[] = []
+      if (t.mode === 'workflow' && a.wave !== undefined && a.wave !== wave) {
+        wave = a.wave
+        out.push(<Text dimColor> wave {a.wave}</Text>)
+      }
+      const id = `a${t.n}:${a.agentId}`
+      const isOpen = open.has(id)
+      out.push(
+        lit(
+          `ag:${a.agentId}`,
+          <Box>
+            <Box flexGrow={1} flexShrink={1} overflow="hidden">
+              <Button key={`ag:${a.agentId}`} plain onPress={() => void toggle($, id)}>
+                <Text wrap="truncate-end">
+                  <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                  {statusGlyph(els, a.status, f)} <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
+                  {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
+                </Text>
+              </Button>
+            </Box>
+            <Box flexShrink={0}>
+              <Text dimColor> {plural(callsOf(a.agentId), 'call')}</Text>
+            </Box>
+          </Box>,
+        ),
+      )
+      if (isOpen) out.push(recent(a))
       return out
     })
   }
 
-  // A dim rule above each todo, outside every lit() box and keyed without
-  // ring:, so it's never focusable and the arrow keys' order and the room kept
-  // around focusable items stay as they were. A titled rule names the todo,
-  // so its row then leaves out the #N and title (see todoRows).
-  const ruleWidth = Math.max(0, e.props.bodyColumns - 2 * PAD_X)
-  const divider = (t: Todo, color: Color) => {
-    if (dividers === 'none') return []
-    if (dividers === 'line') {
-      return [
-        <Box key={`div:${t.n}`}>
-          <Text dimColor wrap="truncate-end">{'─'.repeat(ruleWidth)}</Text>
+  // Level 0: the todo's one line, its own splitter. Pressing it opens or
+  // closes the todo; closing it closes every level under it.
+  const header = (t: Todo, isOpen: boolean, mine: AgentNode[]) => {
+    const gc = markOf(t.status).color
+    if (u.renaming === t.n && Input) {
+      return lit(
+        `ren:${t.n}`,
+        <Box>
+          <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+          {statusGlyph(els, t.status, f)}
+          <Text> #{t.n} </Text>
+          <Input key={`ren:${t.n}`} value={t.title} submitLabel="rename" autoFocus onSubmit={v => void renameTodo($, t.n, v)} />
         </Box>,
-      ]
+      )
     }
-    const p = dividerParts(t.n, t.title, ruleWidth)
-    return [
-      <Box key={`div:${t.n}`}>
+    const done = mine.filter(a => a.status === 'done').length
+    const isProgress = mine.length > 0 && t.status !== 'pending' && t.status !== 'done'
+    const right = isProgress ? `${t.status} ${done}/${mine.length}` : t.status
+    const p = headParts(t.n, t.title, right, inner)
+    return lit(
+      `todo:${t.n}`,
+      <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
         <Text wrap="truncate-end">
-          <Text dimColor>{p.lead}</Text>
-          <Text color={color}>{p.num}</Text>
-          <Text color={color}>{p.title}</Text>
-          <Text dimColor>{p.tail}</Text>
+          <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+          {statusGlyph(els, t.status, f)}
+          <Text color={gc}>
+            {' '}
+            <Text weight="semibold">#{t.n}</Text>
+            {p.title}
+          </Text>
+          <Text dimColor>{p.rule}</Text>
+          {isProgress || t.status === 'done' ? <Text color={gc}>{right}</Text> : <Text dimColor>{right}</Text>}
         </Text>
-      </Box>,
-    ]
+      </Button>,
+    )
   }
 
   const todoRows = (t: Todo) => {
-    const gc = markOf(t.status).color
     const isOpen = open.has(`t${t.n}`)
-    const mine = nodes.filter(a => a.todoN === t.n)
+    const mine = nodes.filter(a => a.todoN === t.n).sort((x, y) => x.startedAt - y.startedAt)
+    const head = header(t, isOpen, mine)
+    if (!isOpen) return [head]
+    // Level 1: what it was asked to do, in 2 lines; how it ended; what can be
+    // done now; and, once it has agents, the line that opens them.
+    const subsOpen = open.has(`s${t.n}`)
+    const calls = mine.reduce((n, a) => n + callsOf(a.agentId), 0)
     const done = mine.filter(a => a.status === 'done').length
-    const right =
-      mine.length > 0 && t.status !== 'pending' && t.status !== 'done' ? (
-        <Text color={gc}> {t.status} {done}/{mine.length}</Text>
-      ) : (
-        <Text dimColor> {t.status}</Text>
-      )
-    const head =
-      u.renaming === t.n && Input ? (
-        lit(
-          `ren:${t.n}`,
-          <Box>
-            {statusGlyph(els, t.status, f)}
-            <Text> #{t.n} </Text>
-            <Input key={`ren:${t.n}`} value={t.title} submitLabel="rename" autoFocus onSubmit={v => void renameTodo($, t.n, v)} />
-          </Box>,
-        )
-      ) : (
-        lit(
-          `todo:${t.n}`,
-          <Box>
-            <Box flexGrow={1} flexShrink={1} overflow="hidden">
-              <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
-                <Text wrap="truncate-end">
-                  <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-                  {statusGlyph(els, t.status, f)}
-                  {dividers === 'titled' ? (
-                    ''
-                  ) : (
-                    <Text color={gc}>
-                      {' '}
-                      <Text weight="semibold">#{t.n}</Text> {t.title}
-                    </Text>
-                  )}
-                </Text>
-              </Button>
-            </Box>
-            <Box flexShrink={0}>{right}</Box>
-          </Box>,
-        )
-      )
-    if (!isOpen) return [...divider(t, gc), head]
     return [
-      ...divider(t, gc),
       head,
       <Box paddingLeft={2} flexDirection="column">
+        {t.prompt ? (
+          clampLines(`“${clean(t.prompt)}”`, inner - 2).map(l => (
+            <Text dimColor wrap="truncate-end">
+              {' '}
+              {l}
+            </Text>
+          ))
+        ) : (
+          <Text dimColor italic>
+            {' '}
+            no prompt yet: ▶ Exec drafts one
+          </Text>
+        )}
+        {t.status === 'done' && t.summary ? (
+          <Text color={markOf('done').color} wrap="truncate-end">
+            {' '}✓ {gist(t.summary)}
+          </Text>
+        ) : (
+          ''
+        )}
         {actions(t)}
+        {mine.length > 0
+          ? lit(
+              `subs:${t.n}`,
+              <Button key={`subs:${t.n}`} plain onPress={() => void toggle($, `s${t.n}`)}>
+                <Text wrap="truncate-end">
+                  <Text dimColor>{subsOpen ? '▾ ' : '▸ '}</Text>
+                  {plural(mine.length, 'subtask')}
+                  <Text dimColor>
+                    {' '}
+                    · {done} done · {plural(calls, 'call')}
+                    {t.mode === 'workflow' ? ' · workflow' : ''}
+                  </Text>
+                </Text>
+              </Button>,
+            )
+          : ''}
+        {subsOpen ? (
+          <Box paddingLeft={2} flexDirection="column">
+            {agentRows(t, mine)}
+          </Box>
+        ) : (
+          ''
+        )}
       </Box>,
-      ...agentRows(t),
     ]
   }
 

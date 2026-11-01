@@ -4,6 +4,7 @@ import type { On } from 'claude-code'
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
 import { CHIP_SYMBOL, MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
+import { clampLines } from './pane'
 
 const PANE = {
   plugin: 'todo',
@@ -247,6 +248,13 @@ const agentAt = (db: Db, id: string) => {
   if (a === undefined) throw new Error(`no agent ${id}`)
   return a.body as AgentNode
 }
+// From an open todo #n down the drill-down: its subtasks, the subtask's last
+// turns and calls, then its ↗ Full transcript into the call browser.
+const transcript = async (ui: { press: (q: { key: string }) => Promise<unknown> }, n: number, agentId: string) => {
+  await ui.press({ key: `subs:${n}` })
+  await ui.press({ key: `ag:${agentId}` })
+  await ui.press({ key: `full:${agentId}` })
+}
 const callAt = (db: Db, id: string) => {
   const c = db.calls[id]
   if (c === undefined) throw new Error(`no call ${id}`)
@@ -386,12 +394,19 @@ test('M3: a tagged Agent links its spawn and its tool calls show under it', asyn
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Button', key: 'act:1:pause' })).toBeDefined()
-  // The tree keeps the subtask to one line: no tool call rows, no code.
-  expect(await ui.find({ type: 'Button', key: 'call:c1' })).toBeUndefined()
+  // Level 1 sums the subtasks on one line; the subtask rows wait behind it.
+  expect(await ui.find({ type: 'Button', key: 'subs:1', text: '▸ 1 subtask · 0 done · 1 call' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'ag:ag1' })).toBeUndefined()
+  await ui.press({ key: 'subs:1' })
+  expect(await ui.find({ type: 'Button', key: 'ag:ag1', text: /^▸ . Count md files$/ })).toBeDefined()
+  // Level 3: each call is one line, never code; the browser is a press away.
+  expect(await ui.find({ type: 'Text', text: / ⏺ Bash ls \*\.md/ })).toBeUndefined()
+  await ui.press({ key: 'ag:ag1' })
+  expect(await ui.find({ type: 'Text', text: / ⏺ Bash ls \*\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Code' })).toBeUndefined()
 
-  // Pressing the subtask turns the pane into the view-only call browser.
-  await ui.press({ key: 'ag:ag1' })
+  // ↗ Full transcript turns the pane into the view-only call browser.
+  await ui.press({ key: 'full:ag1' })
   expect(await ui.find({ type: 'Code', text: /ls \*\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Code', text: /a\.md/ })).toBeDefined()
   expect(await ui.findAll({ type: 'Button' })).toHaveLength(0)
@@ -492,7 +507,7 @@ test('M3: Esc (the pane losing the keys) closes the call browser', async ($, on)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'ag:ag1' })
+  await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
   await ui.unmount()
 
@@ -646,7 +661,7 @@ test('a restarted session browses the calls it kept', async ($, on) => {
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'ag:ag1' })
+  await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Code', text: /ls \*\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Code', text: /a\.md/ })).toBeDefined()
   await ui.unmount()
@@ -1111,8 +1126,8 @@ test('the header, the status line and the rows draw the same marks in the same o
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
     const row = await ui.find({ type: 'Button', key: `todo:${n}` })
     expect(JSON.stringify(row?.children)).toContain(JSON.stringify(MARK[s].color))
-    // The titled divider above names it, so the row is just ▸ and the mark.
-    expect(row?.text).toBe(`▸ ${MARK[s].symbol}`)
+    // The header line is the todo's only line: ▸, the mark, #N and title.
+    expect(row?.text.startsWith(`▸ ${MARK[s].symbol} #${n} `)).toBe(true)
   }
   expect(JSON.stringify((await ui.find({ type: 'Button', key: 'todo:1' }))?.children)).toContain(JSON.stringify(MARK.running.color))
   await ui.unmount()
@@ -1198,6 +1213,7 @@ test("a Workflow's agents link by its call and nested ones through their parent,
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'subs:1' })
   expect(await ui.find({ type: 'Text', text: /wave 1/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /wave 2/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /⎇/ })).toBeDefined()
@@ -1514,7 +1530,7 @@ test("calls are read in pages of 100 until a short page", async ($, on) => {
   expect(ops.filter(o => o.kind === 'calls').map(o => (o as { after: number }).after)).toEqual([0, 100, 200])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'ag:ag1' })
+  await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Text', text: /250 tool calls/ })).toBeDefined()
   await ui.unmount()
 })
@@ -1530,6 +1546,7 @@ test('a fresh read keeps only the newest 1500 calls of the directory', async ($,
   expect(ops.find(o => o.kind === 'calls')).toMatchObject({ after: 100 })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'subs:1' })
   expect(await ui.find({ type: 'Text', text: /\b700 calls/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\b800 calls/ })).toBeDefined()
   await ui.unmount()
@@ -1665,6 +1682,7 @@ test("a 0.2 session's agents and calls are written out once, following its todos
   expect(callAt(db, 'c1').agentId).toBe('ag1')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:2' })
+  await ui.press({ key: 'subs:2' })
   expect(await ui.find({ type: 'Button', key: 'ag:ag1' })).toBeDefined()
   await ui.unmount()
 
@@ -1723,7 +1741,7 @@ test("a subtask's calls read as their tool would: an Edit as a diff, JSON pretty
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'ag:ag1' })
+  await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Code', text: /-let a = 1\n\+const a = 1/ })).toBeDefined()
   expect(await ui.find({ type: 'Code', text: /"ok": true/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /ok · 1\.5s/ })).toBeDefined()
@@ -1773,13 +1791,16 @@ test("a migration's renumbering moves the pane's open rows with it", async ($, o
   engine(on, [], undefined, true, { db })
   legacyState(on, {
     todos: [legacyTodo(1, 'Mine')],
-    ui: { expanded: ['t1'], confirm: null, renaming: null, justStopped: [], isHidden: false },
+    agents: [agentNode('ag1', 1)],
+    ui: { expanded: ['t1', 's1', 'a1:ag1'], confirm: null, renaming: null, justStopped: [], isHidden: false },
   })
   await start($)
   expect(todoAt(db, 2).title).toBe('Mine')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Button', key: 'act:2:exec' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
+  // Its subtasks line and open subtask move with it.
+  expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1840,127 +1861,214 @@ test('a done todo from before its time was kept starts its time in the tree at t
   expect(todoAt(db, 1).doneAt).toBe(7000)
 })
 
-// ---------- dividers ----------
+// ---------- the drill-down ----------
 
-// The divider above todo #n as drawn: its whole line, and each Text's own
-// text and props; undefined when none is drawn.
-async function dividerOf(ui: { find: (q: { type: string; key: string }) => Promise<{ text: string; children: unknown[] } | undefined> }, n: number) {
-  const box = await ui.find({ type: 'Box', key: `div:${n}` })
-  if (box === undefined) return undefined
+// A Text's own string children, and its props, for each Text under `node`.
+function textParts(node: { children?: unknown[] } | undefined) {
   type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
-  const texts: Node[] = []
+  const out: { text: string; props: Record<string, unknown> }[] = []
   const walk = (x: unknown) => {
     if (typeof x !== 'object' || x === null) return
     const el = x as Node
-    if (el.type === 'Text') texts.push(el)
+    if (el.type === 'Text') out.push({ text: (el.children ?? []).filter(c => typeof c === 'string').join(''), props: el.props ?? {} })
     for (const c of el.children ?? []) walk(c)
   }
-  for (const c of box.children) walk(c)
-  const own = (t: Node) => (t.children ?? []).filter(c => typeof c === 'string').join('')
-  return { line: box.text, parts: texts.map(t => ({ text: own(t), props: t.props ?? {} })) }
+  for (const c of node?.children ?? []) walk(c)
+  return out
 }
+const turnRow = (id: string, agentId: string, text: string, startedAt: number) => ({
+  dir: '/proj', agentId, session: 's1', seq: 1000 + startedAt, body: { kind: 'turn', id, agentId, text, startedAt },
+})
 
-test('a titled divider sits above each todo, sized to the pane, its number and title in the status color', async ($, on) => {
-  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles'), running(2, 'Ship it')]) })
+test('each todo is one line, its own splitter: toggle, mark, #N and title in the status color, a dim rule, the status at the right', async ($, on) => {
+  const db = seeded([aTodo(1, 'Fix kitty tab titles'), running(2, 'Ship it')], [agentNode('ag1', 2, { status: 'done' }), agentNode('ag2', 2, { startedAt: 2 })])
+  engine(on, [], undefined, true, { db })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const d = await dividerOf(ui, 1)
-  // 70 columns less the pane's paddingX of 1 on each side.
-  expect(d?.line).toBe(`── #1 Fix kitty tab titles ${'─'.repeat(68 - 27)}`)
-  expect(d?.line.length).toBe(68)
-  expect(d?.parts.find(p => p.text === '#1')?.props).toMatchObject({ color: 'inactive' })
-  expect(d?.parts.find(p => p.text === ' Fix kitty tab titles')?.props).toMatchObject({ color: 'inactive' })
-  expect(d?.parts.find(p => p.text === '── ')?.props).toMatchObject({ dimColor: true })
-  expect(d?.parts.find(p => p.text.endsWith('───'))?.props).toMatchObject({ dimColor: true })
-  const d2 = await dividerOf(ui, 2)
-  expect(d2?.parts.find(p => p.text === '#2')?.props).toMatchObject({ color: MARK.running.color })
-  expect(d2?.parts.find(p => p.text === ' Ship it')?.props).toMatchObject({ color: MARK.running.color })
-  // The rule names the todo, so its row doesn't again; it stays pressable.
-  const row = await ui.find({ type: 'Button', key: 'todo:1' })
-  expect(row?.text).toBe(`▸ ${MARK.pending.symbol}`)
+  const head = await ui.find({ type: 'Button', key: 'todo:1' })
+  // 70 columns less the pane's paddingX and the ring's cell on each side.
+  expect(head?.text).toMatch(/^▸ ○ #1 Fix kitty tab titles ─+ pending$/)
+  expect(head?.text.length).toBe(66)
+  const parts = textParts(head)
+  expect(parts.find(p => p.text === '#1')?.props).toMatchObject({ weight: 'semibold' })
+  expect(parts.find(p => p.text.includes('Fix kitty tab titles'))?.props).toMatchObject({ color: MARK.pending.color })
+  expect(parts.find(p => p.text.startsWith(' ──'))?.props).toMatchObject({ dimColor: true })
+  expect(parts.find(p => p.text === 'pending')?.props).toMatchObject({ dimColor: true })
+  // A run with subtasks shows its progress in its status color.
+  const run = await ui.find({ type: 'Button', key: 'todo:2' })
+  expect(run?.text).toMatch(/^▸ . #2 Ship it ─+ running 1\/2$/)
+  expect(textParts(run as never).find(p => p.text === 'running 1/2')?.props).toMatchObject({ color: MARK.running.color })
+  // No separate row or rule: the header is the todo's only line until it opens.
+  expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
   await ui.press({ key: 'todo:1' })
-  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toBe(`▾ ${MARK.pending.symbol}`)
+  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▾ ○ #1 /)
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeDefined()
+  await ui.press({ key: 'todo:1' })
+  expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
   await ui.unmount()
 })
 
-for (const mode of ['line', 'none'] as const) {
-  test(`todoDividers "${mode}" keeps the number and title on the row, in the status color`, { options: { todoDividers: mode } }, async ($, on) => {
-    engine(on, [], undefined, true, { db: seeded([running(2, 'Ship it')]) })
-    await start($)
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    const row = await ui.find({ type: 'Button', key: 'todo:2' })
-    expect(row?.text).toMatch(/^▸ . #2 Ship it$/)
-    expect(await ui.find({ type: 'Text', text: /^ #2 Ship it$/ })).toMatchObject({ props: { color: MARK.running.color } })
-    await ui.unmount()
-  })
-}
+test('at a narrow width the header cuts the title with … and keeps the rule and the status whole', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(3, 'Fix kitty tab titles')]) })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 30 } })
+  const head = await ui.find({ type: 'Button', key: 'todo:3' })
+  expect(head?.text).toBe('▸ ○ #3 Fix kit… ── pending')
+  expect(head?.text.length).toBe(26)
+  await ui.unmount()
+  // Too narrow for any title: the number, a little rule and the status.
+  const tiny = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 20 } })
+  expect((await tiny.find({ type: 'Button', key: 'todo:3' }))?.text).toBe('▸ ○ #3 ── pending')
+  await tiny.unmount()
+})
 
-test('a divider is never focusable: the arrows walk the same items and the rows keep their room', async ($, on) => {
-  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'First'), aTodo(2, 'Second')]) })
+test('an old todoDividers setting, from /config or the environment, is ignored', { options: { todoDividers: 'none' } }, async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]), env: { CLAUDE_TODO_DIVIDERS: 'line' } })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'todo:1' }))?.text).toMatch(/^▸ ○ #1 Fix kitty tab titles ─+ pending$/)
+  expect(await ui.find({ type: 'Box', key: 'div:1' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('level 1 shows the prompt in 2 lines, a done todo its summary, the actions, and the subtasks line', async ($, on) => {
+  const long = 'Make both statuslines read colors from the theme lib via a new generator, keeping their output byte for byte identical to what they print today on every terminal we support.'
+  const db = seeded(
+    [
+      aTodo(1, 'Fresh'),
+      aTodo(2, 'Theme', { status: 'done', hasRun: true, mode: 'workflow', prompt: long, summary: '**Both** read the theme\nmore', doneAt: 1000 }),
+    ],
+    [agentNode('ag1', 2, { kind: 'workflow', wave: 1, status: 'done' }), agentNode('ag2', 2, { kind: 'workflow', wave: 2, status: 'done', startedAt: 2 })],
+    [callRow('c1', 'ag1'), callRow('c2', 'ag2'), callRow('c3', 'ag2')],
+  )
+  engine(on, [], undefined, false, { db })
+  mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 50 } })
+  await ui.press({ key: 'todo:1' })
+  expect(await ui.find({ type: 'Text', text: ' no prompt yet: ▶ Exec drafts one' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'subs:1' })).toBeUndefined()
+  await ui.press({ key: 'todo:2' })
+  // 50 columns less the padding, the indent and a cell, quoted, cut to 2 lines.
+  const prompt = clampLines(`“${long}”`, 44)
+  expect(prompt).toHaveLength(2)
+  expect(prompt[0]).toBe('“Make both statuslines read colors from the')
+  expect(prompt[1]?.endsWith('…')).toBe(true)
+  expect(prompt[1]?.length).toBe(44)
+  for (const l of prompt) expect(await ui.find({ type: 'Text', text: ` ${l}` })).toMatchObject({ props: { dimColor: true } })
+  expect(await ui.find({ type: 'Text', text: ' ✓ Both read the theme' })).toMatchObject({ props: { color: MARK.done.color } })
+  expect(await ui.find({ type: 'Button', key: 'act:2:details' })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'subs:2' }))?.text).toBe('▸ 2 subtasks · 2 done · 3 calls · workflow')
+  await ui.unmount()
+})
+
+test('level 2 is one row per subtask, grouped under its wave; level 3 its last 6 turns and calls, one line each', async ($, on) => {
+  const db = seeded(
+    [running(1, 'Theme', { mode: 'workflow' })],
+    [agentNode('ag1', 1, { name: 'explore', kind: 'workflow', wave: 1 }), agentNode('ag2', 1, { name: 'fix', kind: 'workflow', wave: 2, isWorktree: true, startedAt: 2 })],
+    [
+      ...Array.from({ length: 5 }, (_, i) => callRow(`c${i}`, 'ag1', { tool: 'Read', arg: `f${i}.ts`, ms: 1500, startedAt: 10 + i * 10 })),
+      unanswered(callRow('c9', 'ag1', { tool: 'Bash', arg: 'npm test\nmore', state: 'run', startedAt: 100 })),
+    ],
+  )
+  db.calls['turn:a'] = turnRow('turn:a', 'ag1', 'Looking first.', 5)
+  db.calls['turn:b'] = turnRow('turn:b', 'ag1', '\n\n## Found **it**\nthe rest', 90)
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'subs:1' })
+  const all = (await ui.findAll({})).filter(x => x.type === 'Text' || x.type === 'Button').map(x => x.text)
+  expect(all.indexOf(' wave 1')).toBeLessThan(all.findIndex(x => x.includes('explore')))
+  expect(all.indexOf(' wave 2')).toBeGreaterThan(all.findIndex(x => x.includes('explore')))
+  expect((await ui.find({ type: 'Button', key: 'ag:ag2' }))?.text).toMatch(/^▸ . fix ⎇$/)
+  expect(await ui.find({ type: 'Text', text: ' 6 calls' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeUndefined()
+
+  await ui.press({ key: 'ag:ag1' })
+  expect((await ui.find({ type: 'Button', key: 'ag:ag1' }))?.text).toMatch(/^▾ /)
+  // 8 entries, the newest 6 drawn, in time order, the cut said above them.
+  expect(await ui.find({ type: 'Text', text: ' … 2 earlier' })).toBeDefined()
+  const lines = (await ui.findAll({ type: 'Text', text: /^ ⏺ \S/ })).map(x => x.text)
+  // A turn is its first line with text, its markdown marks dropped.
+  expect(lines).toEqual([' ⏺ Read f1.ts', ' ⏺ Read f2.ts', ' ⏺ Read f3.ts', ' ⏺ Read f4.ts', ' ⏺ Found it', ' ⏺ Bash npm test'])
+  // A call reads ⏺ Tool arg and its time, in its state's color; an open one says ….
+  const read = await ui.find({ type: 'Text', text: ' ⏺ Read f4.ts' })
+  expect(textParts({ children: [read] }).find(p => p.text.includes('⏺'))?.props).toMatchObject({ color: 'success' })
+  expect((await ui.findAll({ type: 'Text', text: ' 1.5s' })).length).toBe(4)
+  expect(await ui.find({ type: 'Text', text: ' …' })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'full:ag1' }))?.props['label']).toBe('Full transcript')
+  await ui.unmount()
+})
+
+test('a prompt wraps by word to the width, kept to its lines with … on the last', () => {
+  expect(clampLines('one two three', 20)).toEqual(['one two three'])
+  expect(clampLines('aaaa bbbb cccc dddd', 9)).toEqual(['aaaa bbbb', 'cccc dddd'])
+  expect(clampLines('aaaa bbbb cccc dddd eeee', 9)).toEqual(['aaaa bbbb', 'cccc ddd…'])
+  // A word longer than a line breaks; emoji count as one each and never split.
+  expect(clampLines('abcdefghijkl', 5)).toEqual(['abcde', 'fghi…'])
+  expect(clampLines('😀😀😀😀😀😀', 4, 1)).toEqual(['😀😀😀…'])
+  expect(clampLines('', 10)).toEqual([])
+})
+
+test('the arrow keys walk the drill-down in the order it draws, header by header and level by level', async ($, on) => {
+  const db = seeded([running(1, 'Runs'), aTodo(2, 'Next')], [agentNode('ag1', 1)], [callRow('c1', 'ag1')])
+  engine(on, [], undefined, true, { db })
   await start($)
   const arrow = (by: 1 | -1) =>
     $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: Math.max(0, by), by, bodyRows: 4, contentRows: 40, origin: { kind: 'person' } })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await dividerOf(ui, 2)).toBeDefined()
-  expect(await ui.find({ type: 'Box', key: 'ring:div:2' })).toBeUndefined()
-  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'add', origin: { kind: 'person' } })
-  for (const key of ['todo:1', 'todo:2']) {
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'subs:1' })
+  await ui.press({ key: 'ag:ag1' })
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'fire', origin: { kind: 'person' } })
+  for (const key of ['add', 'todo:1', 'act:1:pause', 'act:1:stop', 'act:1:details', 'subs:1', 'ag:ag1', 'full:ag1', 'todo:2']) {
     await arrow(1)
-    expect(await isLit(ui, key)).toBe(true)
+    expect(`${key}: ${String(await isLit(ui, key))}`).toBe(`${key}: true`)
   }
   await arrow(-1)
-  expect(await isLit(ui, 'todo:1')).toBe(true)
-  expect((await ui.find({ type: 'Box', key: 'ring:todo:2' }))?.props['padding']).toBe(1)
+  expect(await isLit(ui, 'full:ag1')).toBe(true)
   await ui.unmount()
 })
 
-test('at a narrow width the divider cuts the title with … and still fits', async ($, on) => {
-  engine(on, [], undefined, true, { db: seeded([aTodo(3, 'Fix kitty tab titles')]) })
-  await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 22 } })
-  const d = await dividerOf(ui, 3)
-  expect(d?.line).toBe('── #3 Fix kitty… ───')
-  expect(d?.line.length).toBe(20)
-  await ui.unmount()
-  // Too narrow for any title: just the number on the rule.
-  const tiny = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 12 } })
-  expect((await dividerOf(tiny, 3))?.line).toBe('── #3 ────')
-  await tiny.unmount()
-})
-
-test('todoDividers "line" draws a plain dim rule', { options: { todoDividers: 'line' } }, async ($, on) => {
-  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]) })
+test('closing a level closes everything under it, and what is open outlasts a redraw and a reload', async ($, on) => {
+  const db = seeded([running(1, 'Runs')], [agentNode('ag1', 1)], [callRow('c1', 'ag1')])
+  engine(on, [], undefined, true, { db })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const d = await dividerOf(ui, 1)
-  expect(d?.line).toBe('─'.repeat(68))
-  expect(d?.parts.every(p => p.props['dimColor'] === true)).toBe(true)
+  const open = async () => {
+    await ui.press({ key: 'todo:1' })
+    await ui.press({ key: 'subs:1' })
+    await ui.press({ key: 'ag:ag1' })
+    expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
+  }
+  await open()
+  // Closing the subtasks line folds the subtask too: reopened, it starts closed.
+  await ui.press({ key: 'subs:1' })
+  expect(await ui.find({ type: 'Button', key: 'ag:ag1' })).toBeUndefined()
+  await ui.press({ key: 'subs:1' })
+  expect((await ui.find({ type: 'Button', key: 'ag:ag1' }))?.text).toMatch(/^▸ /)
+  expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeUndefined()
+  // Closing the todo folds both levels under it.
+  await ui.press({ key: 'ag:ag1' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'todo:1' })
+  expect((await ui.find({ type: 'Button', key: 'subs:1' }))?.text).toMatch(/^▸ /)
+  expect(await ui.find({ type: 'Button', key: 'ag:ag1' })).toBeUndefined()
+  await ui.press({ key: 'todo:1' })
+  await open()
   await ui.unmount()
-})
-
-test('todoDividers "none" draws no divider', { options: { todoDividers: 'none' } }, async ($, on) => {
-  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'Fix kitty tab titles')]) })
-  await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await dividerOf(ui, 1)).toBeUndefined()
-  expect(await shown(ui, 1)).toBe(true)
-  await ui.unmount()
-})
-
-test('CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to titled', { options: { todoDividers: 'none' } }, async ($, on) => {
-  const where: Where = { db: seeded([aTodo(1, 'Fix kitty tab titles')]), env: { CLAUDE_TODO_DIVIDERS: 'line' } }
-  engine(on, [], undefined, true, where)
-  await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await dividerOf(ui, 1))?.line).toBe('─'.repeat(68))
-  await ui.unmount()
-
-  where.env = { CLAUDE_TODO_DIVIDERS: 'fancy' }
-  await start($)
+  // Drawn again, and after a reload, every level is as it was left.
   const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await dividerOf(again, 1))?.line).toMatch(/^── #1 Fix kitty tab titles ─+$/)
+  expect(await again.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
   await again.unmount()
+  await start($)
+  const reloaded = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await reloaded.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
+  await reloaded.unmount()
 })
+
 test('every action chip is one word under 10 letters, drawn as its symbol only, filled with the color of the status it moves the todo into', async ($, on) => {
   const db = seeded([
     aTodo(1, 'Waiting'),
@@ -2069,7 +2177,7 @@ async function step($: T$, turnId: string, index: number, agentId?: string) {
 const browse = async ($: T$, surface: 'terminal' | 'desktop' = 'terminal', agentId = 'ag1') => {
   const ui = await $.ui.mount({ ...PANE, surface })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: `ag:${agentId}` })
+  await transcript(ui, 1, agentId)
   return ui
 }
 const lines = (n: number, word = 'line') => Array.from({ length: n }, (_, i) => `${word} ${i + 1}`).join('\n')
@@ -2390,14 +2498,14 @@ test('the call browser hands Code and Markdown no control or format character, e
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await ui.press({ key: 'ag:ag1' })
+  await transcript(ui, 1, 'ag1')
   const all = texts(await ui.findAll({ type: 'Code' })).concat(texts(await ui.findAll({ type: 'Markdown' })))
   expect(all.length).toBeGreaterThan(0)
   for (const t of all) expect(t).not.toMatch(/[^\P{C}\t\n]|[\p{Zl}\p{Zp}]/u)
   await ui.unmount()
 })
 
-test('Escape on the dialog closes it and puts the ring back where it was, keeping the keys in the pane', async ($, on) => {
+test('Escape on the dialog closes it and puts the ring back on the subtask row it came from, keeping the keys in the pane', async ($, on) => {
   const openedWith: { id: string; focus?: boolean }[] = []
   const db = seeded([aTodo(1, 'Count', { status: 'done', hasRun: true, mode: 'agent', taskId: 'ag1' })], [agentNode('ag1', 1, { status: 'done' })])
   engine(on, [], undefined, false, { db, openedWith })
@@ -2405,8 +2513,12 @@ test('Escape on the dialog closes it and puts the ring back where it was, keepin
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
-  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'ag:ag1', origin: { kind: 'person' } })
+  await ui.press({ key: 'subs:1' })
   await ui.press({ key: 'ag:ag1' })
+  // The ring is on ↗ Full transcript when it's pressed; Escape puts it back on
+  // the subtask's row, the line the browser came from.
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'full:ag1', origin: { kind: 'person' } })
+  await ui.press({ key: 'full:ag1' })
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
   await ui.unmount()
   // Escape takes the keys from the pane: it's drawn unfocused.

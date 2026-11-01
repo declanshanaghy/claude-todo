@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 139 of 142 cases (97.9%)** are covered by `claude plugin test .`.
+**Coverage: 140 of 143 cases (97.9%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -67,7 +67,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | L3 | A Workflow with `resumeFromRunId` links to the todo with that run, keeping fields the result leaves out; an unknown run links nothing | a resumed Workflow links by its resumeFromRunId, keeping what the result leaves out |
 | L4 | A refused launch records the call id and leaves the todo's status alone | a refused launch links the call but leaves the todo where it was |
 | L5 | A Workflow's agents link by its call and nested agents through their parent; `w<K>:` sets the wave, `@wt` marks a worktree; a stray spawn isn't linked | a Workflow's agents link by its call and nested ones through their parent, grouped by wave |
-| L6 | The tree groups a Workflow's agents under wave headers and marks worktree writers ⎇ | a Workflow's agents link by its call and nested ones through their parent, grouped by wave |
+| L6 | The tree groups a Workflow's agents under wave labels and marks worktree writers ⎇ | a Workflow's agents link by its call and nested ones through their parent, grouped by wave; level 2 is one row per subtask, grouped under its wave; level 3 its last 6 turns and calls, one line each |
 | L7 | A todo agent's call is written with its preview, fields and response | agents and tool calls are kept, so a later session can browse them |
 | L8 | A refused call is recorded as an error with its reason; an agent no todo owns isn't traced | a call's state follows its answer: a refusal is an error with its reason |
 | L9 | The session keeps an agent's newest 200 calls; the database keeps them all | an agent keeps its newest 200 calls in the session |
@@ -161,7 +161,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | G2 | An import a concurrent write beat ('moved') is planned again on the new list | an import a concurrent write beat is planned again on the new list |
 | G3 | A source already imported ('done') adds nothing, and its old copy is cleared | a source imported before (a start that died before clearing it) adds nothing and is cleared |
 | G4 | A 0.2 session's agents and calls are written once, under their renumbered todo | a 0.2 session's agents and calls are written out once, following its todos' renumbering |
-| G5 | Renumbering moves the pane's open rows with it | a migration's renumbering moves the pane's open rows with it |
+| G5 | Renumbering moves the pane's open rows with it, its open subtasks line and subtasks too | a migration's renumbering moves the pane's open rows with it |
 | G6 | Lists the unreleased build kept in `$.store` go to their path's repo, and the keys are deleted | lists the unreleased build kept in $.store are imported under their repo, then deleted |
 | G7 | A stored list whose titles aren't all in the database keeps its key and the old backup keys | a stored list whose titles aren't all in the database keeps its key, and the old keys with it |
 | G8 | A backup is dropped at a later start | a backup is dropped at a later start |
@@ -171,8 +171,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| U1 | The tree keeps a subtask to one line, with no call rows or code | M3: a tagged Agent links its spawn and its tool calls show under it |
-| U2 | Pressing a subtask turns the pane into a call browser, with nothing to press while nothing in it is long enough to fold | M3: a tagged Agent links its spawn and its tool calls show under it |
+| U1 | Level 1 sums a todo's agents on one `▸ N subtasks · d done · c calls` line; their rows wait behind it, and a subtask's calls never draw as code in the tree | M3: a tagged Agent links its spawn and its tool calls show under it |
+| U2 | ↗ Full transcript turns the pane into a call browser, with nothing to press while nothing in it is long enough to fold | M3: a tagged Agent links its spawn and its tool calls show under it |
 | U3 | The pane losing the keys (Esc) closes the dialog | M3: Esc (the pane losing the keys) closes the call browser |
 | U4 | A todo's Details shows its prompt, summary, run ids and agents, with nothing to press | a todo's Details shows its prompt, summary, run ids and agents, with nothing to press |
 | U5 | The call browser shows an Edit as a diff, JSON pretty-printed, durations, and "Running…" for an open call | a subtask's calls read as their tool would: an Edit as a diff, JSON pretty-printed |
@@ -180,22 +180,23 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U7 | The mod's own focus moves light the right item: a confirmation's safe choice, Pause→Resume, Resume→Pause, Stop→Refine, Keep/Cancel→the chip that asked, Take over→Refine, Delete→add input, Rename→the row | every focusable item lights the same border while the ring is on it, and keeps its room otherwise; Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring; Take over stops the other session's agents here and cancelling it puts the ring back; Delete removes the row and puts the ring on the add input; Rename stores the new title and puts the ring back on the row |
 | U8 | In the tree an arrow key walks the ring like Tab, stops at the ends, and the wheel and page keys still scroll | in the tree an arrow key walks the ring like Tab, even when the tree is taller than the pane |
 | U9 | The spinner turns while a todo runs | the spinner turns only while a todo runs |
-| U10 | A titled divider sits above each todo, as wide as the pane's body less its padding, its number in the status color and the rest dim | a titled divider sits above each todo, sized to the pane, its number in the status color |
-| U11 | A divider is never focusable: the arrows walk the same items, and the rows keep their blank room | a divider is never focusable: the arrows walk the same items and the rows keep their room |
-| U12 | At a narrow width the divider cuts the title with … (or drops it) and still fits | at a narrow width the divider cuts the title with … and still fits |
-| U13 | `todoDividers` `line` draws a plain dim rule | todoDividers "line" draws a plain dim rule |
-| U14 | `todoDividers` `none` draws no divider | todoDividers "none" draws no divider |
-| U15 | `CLAUDE_TODO_DIVIDERS` overrides the option, and an unknown value falls back to `titled` | CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to titled |
+| U10 | Each todo is one focusable line, its own splitter: ▸/▾, the mark, #N and title in the status color, a dim rule filling the gap, the status (and d/n subtasks, in its color, while it has run) at the right, as wide as the pane's body less its padding and the ring's room; there is no separate row or divider; pressing it opens and closes the todo | each todo is one line, its own splitter: toggle, mark, #N and title in the status color, a dim rule, the status at the right |
+| U11 | The arrow keys walk the drill-down in drawing order: the header, its chips, the subtasks line, each subtask row, its ↗ Full transcript, then the next todo | the arrow keys walk the drill-down in the order it draws, header by header and level by level |
+| U12 | At a narrow width the header cuts the title with … (or drops it), keeping the rule and the status whole | at a narrow width the header cuts the title with … and keeps the rule and the status whole |
+| U13 | An old `todoDividers` value, in `/config` or `CLAUDE_TODO_DIVIDERS`, is ignored | an old todoDividers setting, from /config or the environment, is ignored |
+| U14 | Level 1 shows the prompt word-wrapped to 2 lines with … (or "no prompt yet: ▶ Exec drafts one"), a ✓ summary line once done, the action chips, and the subtasks line only once it has agents | level 1 shows the prompt in 2 lines, a done todo its summary, the actions, and the subtasks line; a prompt wraps by word to the width, kept to its lines with … on the last |
+| U15 | Level 3 shows a subtask's newest 6 turns and calls in time order, one line each (`⏺ Tool arg   time` in its state's color, `…` while open; a turn's first line with text, markdown marks dropped), `… N earlier` above when cut, and ↗ Full transcript | level 2 is one row per subtask, grouped under its wave; level 3 its last 6 turns and calls, one line each |
 | U16 | Every action chip is labelled in one word but draws only its symbol, padded a cell each side, and fills with the mark color of the status it moves the todo into: Exec and Resume running, Pause paused, Stop and Takeover stopped, Refine and Restart drafting; Delete is the danger color; Rename, Reset, Details, Keep and Cancel are neutral | every action chip is one word under 10 letters, drawn as its symbol only, filled with the color of the status it moves the todo into |
 | U16a | No two actions share a chip symbol (Exec ▶ and Resume ⏵ differ) except the safe way back (Keep, Cancel, Back all ↩), and each symbol is one grapheme, wide or not | no two actions share a chip symbol, apart from the safe way back out of a choice |
 | U17 | Each status but failed has its own color (done never reads as running), and the done/failed toasts name the status by its mark | the palette gives every status its own color, apart from the two ends that halt a run, and the toasts name it by its mark |
+| U18 | Closing a level closes everything under it (the todo its subtasks line and subtasks, the subtasks line its subtasks), and what is open outlasts a redraw and a reload | closing a level closes everything under it, and what is open outlasts a redraw and a reload |
 
 ## The call browser
 
 | ID | Behaviour | Covered by |
 |---|---|---|
 | B13 | Code and Markdown get no control or format character (escapes, C1, zero-width, bidi, separators, a surrogate half a cut leaves), so the host never refuses the dialog's drawing | the call browser hands Code and Markdown no control or format character, even where a cut splits an emoji |
-| B14 | Escape on the dialog closes it, reopens the pane with the keys and puts the ring back where it was | Escape on the dialog closes it and puts the ring back where it was, keeping the keys in the pane |
+| B14 | Escape on the call browser closes it, reopens the pane with the keys and puts the ring back on the subtask row it came from | Escape on the dialog closes it and puts the ring back on the subtask row it came from, keeping the keys in the pane |
 | B15 | A dialog left open across a reload starts closed | a dialog left open across a reload starts closed |
 | B1 | A todo agent's text from each model step is kept as a turn row beside its calls; the main loop's steps and steps with no text are not | an agent's turns are kept beside its calls and read in time order |
 | B2 | The browser interleaves turns and calls by start time, a step's text before its calls, and counts turns in its header | an agent's turns are kept beside its calls and read in time order |

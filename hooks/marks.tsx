@@ -4,7 +4,7 @@ import type { Todo, TodoStatus } from '../types'
 
 // The mod's one palette. Every status has one symbol and one theme color, and
 // everything that names a status reads them from here: the todo and agent
-// rows, the dividers, the pane's header summary, the status line, the
+// rows, the todo header lines, the pane's header summary, the status line, the
 // done/failed toasts, and the action chips, which fill with the color of the
 // status they move the todo into. Nothing else hard-codes a status color, so
 // no two places can drift.

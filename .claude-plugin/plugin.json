@@ -15,17 +15,6 @@
       "description": "How long a done todo stays in the pane's tree before it's hidden; 0 keeps them. The CLAUDE_TODO_DONE_TTL_MINUTES environment variable overrides it.",
       "default": 5,
       "min": 0
-    },
-    "todoDividers": {
-      "type": "string",
-      "title": "Todo dividers",
-      "description": "What the pane draws above each todo: \"titled\" a dim rule with the todo's number and title set into it, \"line\" a plain dim rule, \"none\" nothing. The CLAUDE_TODO_DIVIDERS environment variable overrides it.",
-      "default": "titled",
-      "options": [
-        "titled",
-        "line",
-        "none"
-      ]
     }
   }
 }

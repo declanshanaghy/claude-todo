@@ -37,7 +37,14 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .row{white-space:pre;display:flex;align-items:baseline;min-height:20px}
 /* The rule above each todo (todoDividers): dim, full width, the title cut with … so it never wraps. */
 .divider{color:var(--dim);overflow:hidden}.divider .dt{flex:0 1 auto;padding:0 1ch;overflow:hidden;text-overflow:ellipsis}.divider .fill{flex:1 1 0;min-width:2ch;overflow:hidden}.divider .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
-.ind1{padding-left:2ch}.ind2{padding-left:4ch}.ind3{padding-left:6ch}.ind4{padding-left:8ch}
+/* The todo's header IS its splitter: one focusable line `▸ ◐ #N title ──── status`. */
+.thead{color:var(--dim)}.thead .tt{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}.thead .fill{flex:1 1 0;min-width:2ch;overflow:hidden;padding:0 1ch}.thead .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
+.thead .st{flex:0 0 auto}
+.btn.f .thead .fill,.btn.f.thead .fill{color:var(--term)}
+.flt.off{opacity:.45;text-decoration:line-through}.btn.flt{padding:0 1ch;margin-right:1ch}
+.clamp{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.turnrow .grow{white-space:pre}
+.ind1{padding-left:2ch}.ind2{padding-left:4ch}.ind3{padding-left:6ch}.ind4{padding-left:8ch}.ind6{padding-left:12ch}
 .btn{cursor:pointer;padding:0 1px;border-radius:2px}
 .btn.f:not(.chip){background:var(--fg);color:var(--term)}
 .btn.f:not(.chip) *{color:var(--term)!important}
@@ -121,7 +128,6 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 <h1>/todo pane: interactive mockup</h1>
 <div class="sub">The terminal below simulates Claude Code with the <code>todo</code> mod's right-hand pane. It supports only what the terminal mod API supports: a focus ring, Tab/arrows, Enter or click to press, Esc to leave. There are no hover effects and no single-letter hotkeys.</div>
 <div class="focusbar" id="focusbar"><b style="color:var(--fg)">Focus style:</b></div>
-<div class="focusbar" id="dividerbar"><b style="color:var(--fg)">Dividers:</b></div>
 <div class="tabs" id="tabs"></div>
 <div class="hint" id="hint"></div>
 
@@ -172,22 +178,6 @@ function setFocusMode(m, push){
   document.querySelectorAll('#focusbar button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
   const note=document.getElementById('focusnote'); if(note) note.textContent = FOCUS_MODES.find(x=>x[0]===m)[2];
   if(push){ const u=new URL(location.href); u.searchParams.set('focus', m); history.replaceState(null, '', u); }
-}
-// The todoDividers setting: ?dividers=titled|line|none (titled is the default).
-const DIVIDER_MODES = [['titled','a dim rule with the todo\'s number and title in its status color; the row below then shows just its toggle, mark and status'],['line','a plain dim rule'],['none','no divider']];
-let dividerMode = new URLSearchParams(location.search).get('dividers');
-if(!DIVIDER_MODES.some(m=>m[0]===dividerMode)) dividerMode = 'titled';
-function setDividerMode(m, push){
-  dividerMode = m;
-  document.querySelectorAll('#dividerbar button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
-  const note=document.getElementById('dividernote'); if(note) note.textContent = DIVIDER_MODES.find(x=>x[0]===m)[1];
-  if(push){ const u=new URL(location.href); u.searchParams.set('dividers', m); history.replaceState(null, '', u); }
-}
-// Not focusable: no data-fid, so Tab and the arrows walk past it.
-function dividerRow(t, gc){
-  if(dividerMode==='none') return '';
-  if(dividerMode==='line') return `<div class="row divider"><span class="fill"></span></div>`;
-  return `<div class="row divider">── <span class="${gc}">#${t.n}</span><span class="dt ${gc}">${esc(t.title)}</span><span class="fill"></span></div>`;
 }
 const SPIN = ['◐','◓','◑','◒'];
 let spin = 0, uidN = 0;
@@ -266,7 +256,7 @@ const SUMMARY = {statusline:'merged 2 worktrees · commit 4f2a9c1', countmd:'212
 
 /* ---------- state ---------- */
 let S;
-function T(n, title, status, extra={}){ return Object.assign({id:'t'+n, n, title, status, expanded:false, confirm:null, renaming:false, agents:[], build:null, prompt:null, summary:null, mode:null, runId:null}, extra); }
+function T(n, title, status, extra={}){ return Object.assign({id:'t'+n, n, title, status, expanded:false, subsOpen:false, confirm:null, renaming:false, agents:[], build:null, prompt:null, summary:null, mode:null, runId:null}, extra); }
 function startTodo(t, buildKey, mode){ t.build = buildKey; t.mode = mode; t.agents = BUILD[buildKey](); t.status = 'running'; t.runId = mode==='workflow' ? 'wf_'+Math.random().toString(36).slice(2,8) : null; }
 function advance(t, n, silent=true){ for(let i=0;i<n;i++) step(t, silent); }
 
@@ -295,18 +285,24 @@ const SCENES = [
   setup(){ S.todos=[T(1,'Fix kitty tab titles','pending'), T(2,'Migrate statusline to theme lib','pending')]; S.chat=[['user','/todo add Fix kitty tab titles'],['sys','todo: added #1 Fix kitty tab titles'],['user','/todo add Migrate statusline to theme lib'],['sys','todo: added #2 Migrate statusline to theme lib']]; focusPane('add'); }},
  {name:'2 · Launch task', hint:'#1 is expanded and the ring is on <b>▶ Exec</b>. Press <kbd>enter</kbd>. Claude drafts 3 prompts in an AskUserQuestion dialog. Draft <b>1 or 2</b> is classified <b>multi-step</b> (questions → execution tree → approval → Workflow). Draft <b>3</b> is <b>simple</b> and starts a single background Agent. <b>4</b> lets you type your own.',
   setup(){ const t1=T(1,'Fix kitty tab titles','pending',{expanded:true}); S.todos=[t1, T(2,'Migrate statusline to theme lib','pending')]; S.chat=[['sys','todo: 2 pending']]; focusPane('act:t1:exec'); }},
- {name:'3 · Browse calls', hint:'#2 is a running Workflow (waves 1→3, writers in worktrees) and #3 is a single Agent, both updating live. Each subtask is one line; press one (the ring starts on <b>explore-statusline</b>) and the pane becomes its <b>call browser</b>, read like the transcript: the agent\'s own text between its calls, drawn as markdown, each call\'s input and its <b>⎿</b> result, a picture as a thumbnail. Long results fold to a preview: <kbd>tab</kbd> walks the <b>… +N lines</b> toggles, <kbd>enter</kbd> unfolds one, <kbd>↑↓</kbd> scroll, <kbd>esc</kbd> closes. Only the newest 40 entries are drawn; older ones are a toggle away.',
+ {name:'3 · Drill down', hint:'Every todo is <b>one line</b>: its header is the splitter, <code>▸ ◐ #N title ──── status</code>, and pressing it is the only way to open it. <b>Level 1</b> (#2, #3 open): the prompt in 2 lines, the action chips, and a <b>▸ N subtasks</b> line. <b>Level 2</b> (#2): press that line for one row per subtask, grouped by wave. <b>Level 3</b> (explore-statusline, where the ring starts): press a subtask for its last 6 turns and calls, one line each, plus <b>↗ Full transcript</b> for the call browser. Closing a level closes everything under it. #1 shows a collapsed todo.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,12);
     const t3=T(3,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t3,'countmd','agent'); t3.prompt='Count markdown files under ~/.claude and total size.'; advance(t3,3);
-    S.todos=[T(1,'Fix kitty tab titles','pending'), t2, t3];
+    t2.subsOpen=true; t2.agents[0].expanded=true; S.todos=[T(1,'Fix kitty tab titles','pending'), t2, t3];
     S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running in background · run '+t2.runId+' · 5 agents / cap '+CAP+'</span>'],['user','/todo exec 3'],['tool','Agent([todo:3] Count md files)\n<span class="out">  ⎿ running in background</span>']];
-    focusPane('ag:'+t2.agents[0].id); }},
+    focusPane('agx:'+t2.agents[0].id); }},
  {name:'4 · Pause task', hint:'#2 is running and the ring is on <b>⏸ Pause</b>. Press it: <code>TaskStop</code> halts the run and the run id is kept. Finished agents stay ✓, and the ones in flight show ⏸. Then press <b>⏵ Resume</b>: the Workflow re-runs with <code>resumeFromRunId</code>, so finished agents come back from cache.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); advance(t2,8); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:pause'); }},
  {name:'5 · Stop task', hint:'The ring is on <b>■ Stop</b>. Pressing it shows an inline confirmation, with the ring on the safe choice (<b>Keep</b>). Confirm with <b>■ Stop</b>: execution halts but <b>the todo stays</b>, marked stopped, and a follow-up row asks what to do: <b>Refine prompt &amp; restart</b> (reopens the prompt drafts, current prompt first), <b>Restart as-is</b>, <b>Resume</b>, or <b>Leave stopped</b>.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,10); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:stop'); }},
  {name:'6 · Delete task', hint:'Only todos that have never run can be deleted. The ring is on <b>✕ Delete</b> for #1. Pressing it shows a confirmation with the ring on <b>Cancel</b>. #2 has run, so its action row has no Delete.',
-  setup(){ const t2=T(2,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t2,'countmd','agent'); advance(t2,20); S.todos=[T(1,'Fix kitty tab titles','pending',{expanded:true}), t2]; S.chat=[['sys','todo: 1 pending · 1 done']]; focusPane('act:t1:delete'); }},
+  setup(){ const t2=T(2,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t2,'countmd','agent'); advance(t2,20); S.show=new Set(VIEWS); S.todos=[T(1,'Fix kitty tab titles','pending',{expanded:true}), t2]; S.chat=[['sys','todo: 1 pending · 1 done']]; focusPane('act:t1:delete'); }},
+ {name:'7 · Views', hint:'The row under the title holds one toggle per status: <b>▶ running</b> (drafting and planning count here), <b>○ pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is running, pending and failed, so finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. <b>all</b> lights every toggle; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
+  setup(){ const t2=T(2,'Migrate statusline to theme lib','pending'); startTodo(t2,'statusline','workflow'); advance(t2,6);
+    const t4=T(4,'Count md files in ~/.claude','pending'); startTodo(t4,'countmd','agent'); advance(t4,20);
+    const t6=T(6,'Fix kitty tab titles','pending'); startTodo(t6,'kittySimple','agent'); advance(t6,20);
+    S.todos=[T(1,'Rename theme presets','pending'), t2, T(3,'Bump plugin version','failed',{prompt:'Bump the version and tag it.'}), t4, T(5,'Tidy README badges','paused'), t6, T(7,'Try a lighter palette','stopped'), T(8,'Echo the added number','pending')];
+    S.chat=[['sys','todo: 8 todos · 2 done hidden by the view']]; focusPane('flt:done'); }},
 ];
 
 /* ---------- chat ---------- */
@@ -479,8 +475,11 @@ function findCall(cid){ for(const t of S.todos) for(const a of t.agents) for(con
 
 function press(fid){
   const [kind, id, act] = fid.split(':');
-  if(kind==='todo'){ const t=findTodo(id); t.expanded=!t.expanded; t.confirm=null; }
-  else if(kind==='ag'){ S.browse=id; S.unfold=new Set(); S.earlier=0; S.fid=null; render(); S.fid=focusables()[0]||null; document.getElementById('panebody').scrollTop=1e6; }
+  if(kind==='todo'){ const t=findTodo(id); t.expanded=!t.expanded; t.confirm=null; if(!t.expanded){ t.subsOpen=false; t.agents.forEach(a=>a.expanded=false); } }
+  else if(kind==='flt'){ if(id==='all'){ S.show = S.show.size===VIEWS.length ? new Set(DEFAULT_VIEW) : new Set(VIEWS); } else { S.show.has(id) ? S.show.delete(id) : S.show.add(id); } }
+  else if(kind==='subs'){ const t=findTodo(id); t.subsOpen=!t.subsOpen; if(!t.subsOpen) t.agents.forEach(a=>a.expanded=false); }
+  else if(kind==='agx'){ const {a}=findAgent(id); a.expanded=!a.expanded; }
+  else if(kind==='browse'){ S.browse=id; S.unfold=new Set(); S.earlier=0; S.fid=null; render(); S.fid=focusables()[0]||null; document.getElementById('panebody').scrollTop=1e6; }
   else if(kind==='fold'){ const k=fid.slice(5); if(k==='earlier') S.earlier++; else if(S.unfold.has(k)) S.unfold.delete(k); else S.unfold.add(k); }
   else if(kind==='view'){ S.view=id; S.fid='back'; }
   else if(kind==='back'){ S.view=null; }
@@ -494,7 +493,7 @@ function press(fid){
        refine:()=>{ t.justStopped=false; execTodo(t,true); },
        restart:()=>restartTodo(t),
        resume2:()=>{ t.justStopped=false; resumeTodo(t); },
-       leave:()=>{ t.justStopped=false; t.expanded=false; S.fid='todo:'+t.id; },
+       leave:()=>{ t.justStopped=false; t.expanded=false; t.subsOpen=false; S.fid='todo:'+t.id; },
        rename:()=>{ t.renaming=true; S.fid='ren:'+t.id; },
        delete:()=>{ t.confirm='delete'; S.fid='act:'+t.id+':cancel'; },
        cancel:()=>{ t.confirm=null; S.fid='act:'+t.id+':delete'; },
@@ -509,6 +508,11 @@ function press(fid){
 const MARK={pending:['○','dim'],drafting:['✎','bl'],planning:['◇','te'],running:['▶','gr'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','ma'],failed:['✗','re']};
 function glyph(st){ if(st==='running'||st==='run') return [SPIN[spin],'gr']; return MARK[st] || ({queued:['◌','faint'],ok:['✓','gr']})[st] || ['?','dim']; }
 // tallySummary(): the header's colored counts, in SUMMARY's order.
+// Views: each status in the header is a toggle for its own rows. Default view: pending, running, failed.
+// drafting and planning count as running (they're the start of a run). Done sorts last when shown.
+const VIEWS=['running','pending','failed','paused','stopped','done'];
+const DEFAULT_VIEW=['running','pending','failed'];
+const viewOf = st => (st==='drafting'||st==='planning') ? 'running' : st;
 const tallyHtml = c => ['running','paused','stopped','done','pending'].map(st=>`<span class="${MARK[st][1]}">${MARK[st][0]}${c(st)}</span>`).join(' ');
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
 // Filled action chip, toned like hooks/marks.tsx: the status the action leads to
@@ -576,7 +580,8 @@ function renderBrowser(){
 function renderPane(){
   const body=document.getElementById('panebody');
   const c = st => S.todos.filter(t=>t.status===st).length;
-  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span>${tallyHtml(c)}`;
+  const cv = v => S.todos.filter(t=>viewOf(t.status)===v).length;
+  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
   const fire = S.browse ? '' : B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
   document.getElementById('panecap').innerHTML = fire;
@@ -591,29 +596,56 @@ function renderPane(){
   }
   let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div><div class="row"> </div>`;
   if(S.view) h += `<div class="row">${chipB('back','Back')}</div><div class="row"> </div>`;
-  for(const t of S.todos){
+  // The view toggles: one per status, its mark and count; lit = shown, struck = hidden. "all" flips between everything and the default.
+  const allOn = S.show.size===VIEWS.length;
+  h = `<div class="row">${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', allOn?'default':'all', 'flt dim')}</div>` + h;
+  const list = S.todos.filter(t=>S.show.has(viewOf(t.status))).sort((a,b)=>(a.status==='done')-(b.status==='done') || a.n-b.n);
+  const hidden = S.todos.length-list.length;
+  for(const t of list){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
-    const right = t.status==='done' ? `<span class="ma">${esc(t.summary)}</span>` : t.agents.length && t.status!=='pending' ? `<span class="${gc}">${t.status} ${done}/${t.agents.length}</span>` : `<span class="dim">${t.status}</span>`;
-    h += dividerRow(t, gc);
+    const right = t.status==='done' ? `<span class="ma">done</span>` : t.agents.length && t.status!=='pending' ? `<span class="${gc}">${t.status} ${done}/${t.agents.length}</span>` : `<span class="dim">${t.status}</span>`;
+    const tw = t.expanded?'▾':'▸';
+    // Level 0: the header is the splitter. One focusable line, never wraps: toggle, mark, #N and title in the status color, a dim rule, the status.
     if(t.renaming){
-      h += `<div class="row ind0"><span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span>&nbsp;#${t.n}&nbsp;<span class="inpwrap ${S.area==='pane'&&S.fid==='ren:'+t.id?'f':''}" data-fid="ren:${t.id}"><input class="inp" id="ren_${t.id}" value="${esc(t.title)}"></span></div>`;
+      h += `<div class="row"><span class="dim">${tw} </span><span class="${gc}">${g}</span>&nbsp;#${t.n}&nbsp;<span class="inpwrap ${S.area==='pane'&&S.fid==='ren:'+t.id?'f':''}" data-fid="ren:${t.id}"><input class="inp" id="ren_${t.id}" value="${esc(t.title)}"></span></div>`;
     } else {
-      h += `<div class="row">${B('todo:'+t.id, `<span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span>${dividerMode==='titled' ? '' : ` <span class="${gc}"><b>#${t.n}</b> ${esc(t.title)}</span>`}`, 'grow')}&nbsp;${right}</div>`;
+      h += `<div class="row">${B('todo:'+t.id, `<span class="row thead" style="min-height:0"><span class="dim">${tw} </span><span class="${gc}">${g}&nbsp;<b>#${t.n}</b>&nbsp;</span><span class="tt ${gc}">${esc(t.title)}</span><span class="fill"></span><span class="st">${right}</span></span>`, 'grow')}</div>`;
     }
-    if(!t.expanded) continue;
-    if(t.prompt) h += `<div class="row ind2 dim" style="white-space:normal">“${esc(t.prompt.length>90?t.prompt.slice(0,88)+'…':t.prompt)}”</div>`;
+    if(!t.expanded){ continue; }
+    // Level 1: what it was asked to do (2 lines), what you can do now, and how far it got.
+    h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : '<i>no prompt yet: ▶ Exec drafts one</i>'}</div>`;
+    if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="ma">✓ ${esc(t.summary)}</span></div>`;
     h += actRow(t);
+    if(t.agents.length){
+      const calls=t.agents.reduce((n,a)=>n+a.calls.filter(c=>!c.say).length,0);
+      h += `<div class="row ind2">${B('subs:'+t.id, `<span class="dim">${t.subsOpen?'▾':'▸'} </span>${t.agents.length} subtask${t.agents.length>1?'s':''} <span class="dim">· ${done} done · ${calls} calls${t.mode==='workflow'?' · workflow':''}</span>`, 'grow')}</div>`;
+    }
+    if(!t.subsOpen){ h += `<div class="row"> </div>`; continue; }
+    // Level 2: one line per subtask, grouped by wave for a workflow.
     let wave=0;
     for(const a of t.agents){
-      if(t.mode==='workflow' && a.wave!==wave){ wave=a.wave; h+=`<div class="row ind1 faint">── wave ${wave} ${'─'.repeat(20)}</div>`; }
+      if(t.mode==='workflow' && a.wave!==wave){ wave=a.wave; h+=`<div class="row ind4 faint">wave ${wave}</div>`; }
       const [ag,agc]=glyph(a.status);
-      const tag = a.worktree ? `<span class="ye"> ⎇ ${a.worktree}</span>` : a.role==='research' ? `<span class="dim"> ro</span>` : '';
-      // A subtask is one line; pressing it opens the call browser.
-      h += `<div class="row ind1">${B('ag:'+a.id, `<span class="${agc}">${ag}</span> <span class="${a.kind==='workflow'?'ma':'bl'}">${esc(a.name)}</span>${tag}`, 'grow')}&nbsp;<span class="dim">${a.calls.filter(c=>!c.say).length} calls</span></div>`;
+      const tag = a.worktree ? `<span class="ye"> ⎇</span>` : '';
+      h += `<div class="row ind4">${B('agx:'+a.id, `<span class="dim">${a.expanded?'▾':'▸'} </span><span class="${agc}">${ag}</span> ${esc(a.name)}${tag}`, 'grow')}&nbsp;<span class="dim">${a.calls.filter(c=>!c.say).length} calls</span></div>`;
+      if(!a.expanded) continue;
+      // Level 3: its turns, newest last, one line each; the full view is a press away.
+      const TAIL=6, shown=a.calls.slice(-TAIL);
+      if(a.calls.length>TAIL) h += `<div class="row ind6 faint">… ${a.calls.length-TAIL} earlier</div>`;
+      if(!a.calls.length) h += `<div class="row ind6 dim">waiting for its wave…</div>`;
+      for(const c of shown){
+        if(c.say){ h += `<div class="row ind6 turnrow"><span class="or">⏺&nbsp;</span><span class="grow">${esc(c.say.replace(/[#*`]/g,'').split('\n').find(l=>l.trim())||'')}</span></div>`; continue; }
+        const cc = c.state==='run'?'dim':c.state==='ok'?'gr':'ye';
+        h += `<div class="row ind6 turnrow"><span class="${cc}">⏺&nbsp;</span><span class="grow"><b>${esc(c.tool)}</b> <span class="dim">${esc(c.arg)}</span></span>&nbsp;<span class="dim">${c.state==='run'?'…':esc(c.dur||'')}</span></div>`;
+      }
+      h += `<div class="row ind6">${chipB('browse:'+a.id,'Full transcript')}</div>`;
     }
+    h += `<div class="row"> </div>`;
   }
   if(!S.todos.length) h += `<div class="row dim">No todos. Type a title above.</div>`;
+  else if(!list.length) h += `<div class="row dim">Nothing in this view.</div>`;
+  if(hidden) h += `<div class="row faint">${hidden} hidden by the view · toggle a status above</div>`;
   const keepVal = document.getElementById('addinp')?.value || '';
   body.innerHTML = h;
   document.getElementById('addinp').value = keepVal;
@@ -643,7 +675,7 @@ document.addEventListener('keydown', e => {
     // The call browser: arrows scroll, tab walks the fold toggles, enter flips one, esc closes it.
     e.preventDefault();
     const body=document.getElementById('panebody');
-    if(e.key==='Escape'){ const id=S.browse; S.browse=null; S.fid='ag:'+id; leavePane(); return; }
+    if(e.key==='Escape'){ const id=S.browse; S.browse=null; S.fid='agx:'+id; S.area='pane'; render(); return; }
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){ body.scrollTop += e.key==='ArrowDown'?40:-40; return; }
     if(e.key==='Tab'){ if(focusables().length) move(e.shiftKey?-1:1); return; }
     if(e.key==='Enter' && S.fid?.startsWith('fold:')) press(S.fid);
@@ -699,7 +731,7 @@ setInterval(() => {
 
 /* ---------- boot ---------- */
 function loadScene(i){
-  S={todos:[],chat:[],area:'prompt',fid:null,dialog:null,view:null,browse:null,unfold:new Set(),earlier:0,ctrlX:false,scene:i};
+  S={show:new Set(DEFAULT_VIEW),todos:[],chat:[],area:'prompt',fid:null,dialog:null,view:null,browse:null,unfold:new Set(),earlier:0,ctrlX:false,scene:i};
   document.querySelectorAll('#tabs button').forEach((b,j)=>b.classList.toggle('on',i===j));
   document.getElementById('hint').innerHTML = `<b>Try:</b> ${SCENES[i].hint}`;
   const ai=document.getElementById('addinp'); if(ai) ai.value='';
@@ -709,10 +741,6 @@ const fbar=document.getElementById('focusbar');
 FOCUS_MODES.forEach(([k,label,desc])=>{ const b=document.createElement('button'); b.textContent=label; b.title=desc; b.dataset.mode=k; b.onmousedown=e=>e.preventDefault(); b.onclick=()=>{ setFocusMode(k,true); render(); }; fbar.appendChild(b); });
 fbar.insertAdjacentHTML('beforeend', `<span class="note" id="focusnote"></span><span class="note">· link one directly: <code>?focus=current|uniform|border|both</code> (works with <code>#m1</code>–<code>#m6</code>)</span>`);
 setFocusMode(focusMode, false);
-const dbar=document.getElementById('dividerbar');
-DIVIDER_MODES.forEach(([k,desc])=>{ const b=document.createElement('button'); b.textContent=k; b.title=desc; b.dataset.mode=k; b.onmousedown=e=>e.preventDefault(); b.onclick=()=>{ setDividerMode(k,true); render(); }; dbar.appendChild(b); });
-dbar.insertAdjacentHTML('beforeend', `<span class="note" id="dividernote"></span><span class="note">· link one directly: <code>?dividers=titled|line|none</code></span>`);
-setDividerMode(dividerMode, false);
 const tabs=document.getElementById('tabs');
 SCENES.forEach((s,i)=>{ const b=document.createElement('button'); b.textContent=s.name; b.onclick=()=>loadScene(i); tabs.appendChild(b); });
 const rb=document.createElement('button'); rb.textContent='↺ Reset scene'; rb.onclick=()=>loadScene(S.scene); tabs.appendChild(rb);

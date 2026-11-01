@@ -3,7 +3,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 import type { AgentNode, Call, Detail, ImageRef, Todo, Turn } from '../types'
 import { altOf, sourceOf } from './images'
 import { statusGlyph } from './marks'
-import { callGlyph, dur, ringBox } from './pane'
+import { callGlyph, dur, ringBox, timeline } from './pane'
 import { showEarlier, unfold } from './register'
 
 // The detail dialog, drawn in place of the tree. It reads like Claude Code's
@@ -271,12 +271,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
     if (!a) return <Text dimColor>That subtask is no longer kept.</Text>
     const t = list.find(x => x.n === a.todoN)
     const mine = all.filter(c => c.agentId === a.agentId)
-    // Turns and calls in time order; a step's text comes before its calls.
-    type Entry = { at: number; o: number } & ({ turn: Turn; call?: undefined } | { call: Call; turn?: undefined })
-    const entries: Entry[] = [
-      ...turns.filter(x => x.agentId === a.agentId).map((x, i): Entry => ({ at: x.startedAt, o: i * 2, turn: x })),
-      ...mine.map((c, i): Entry => ({ at: c.startedAt, o: i * 2 + 1, call: c })),
-    ].sort((x, y) => x.at - y.at || (x.turn ? -1 : 0) - (y.turn ? -1 : 0) || x.o - y.o)
+    const entries = timeline(a.agentId, all, turns)
     // The newest windows, newest last, drawn until the budget is spent.
     const window = entries.slice(-WINDOW * (1 + data.earlier))
     const drawn: JSX.Element[] = []

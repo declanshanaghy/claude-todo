@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, Dividers, ImageRef, Kept, PaneUi, Todo, Turn } from '../types'
+import type { AgentNode, Call, Confirm, Detail, ImageRef, Kept, PaneUi, Todo, Turn } from '../types'
 import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
@@ -67,8 +67,6 @@ const ring = atom({ plugin: 'todo', key: 'ring' } as const, null as string | nul
 // whose time is up: the tree leaves them out; the database keeps them.
 const ttl = atom({ plugin: 'todo', key: 'ttl' } as const, 0)
 const expired = atom({ plugin: 'todo', key: 'expired' } as const, [] as number[])
-// What the pane draws above each todo (see dividers below).
-const dividers = atom({ plugin: 'todo', key: 'dividers' } as const, 'titled' as Dividers)
 // The session's title, as the prompt bar shows it; '' while it has none. The
 // engine offers no getter, so the classic SessionStart and UserPromptSubmit
 // events, which carry it, keep it current.
@@ -327,7 +325,7 @@ async function migrate($: $) {
   await update($, agents, l => l.map(a => ({ ...a, todoN: to(a.todoN) })))
   await update($, ui, u => ({
     ...u,
-    expanded: u.expanded.map(x => (/^t\d+$/.test(x) ? `t${to(Number(x.slice(1)))}` : x)),
+    expanded: u.expanded.map(x => x.replace(/^([tsa])(\d+)(?=$|:)/, (_, k: string, n: string) => `${k}${to(Number(n))}`)),
     justStopped: u.justStopped.map(to),
     confirm: u.confirm && { ...u.confirm, n: to(u.confirm.n) },
     renaming: u.renaming === null ? null : to(u.renaming),
@@ -451,8 +449,9 @@ async function openPane($: $, asked: boolean) {
 
 // The view-only detail dialog replaces the tree in the same pane, which
 // already holds the keys; Escape hands them back and the render closes it.
-export async function openDetail($: $, d: Detail) {
-  const at = await read($, ring)
+// `back` is where Escape puts the ring, when not on what opened it.
+export async function openDetail($: $, d: Detail, back?: string) {
+  const at = back ?? (await read($, ring))
   await update($, returnTo, () => at)
   await update($, unfolded, () => [])
   await update($, earlier, () => 0)
@@ -514,10 +513,21 @@ export async function patchUi($: $, fn: (u: PaneUi) => PaneUi) {
   await update($, ui, fn)
 }
 
+// The pane's drill-down keeps what's open as ids in `expanded`: `t3` todo #3,
+// `s3` its subtasks line, `a3:<agentId>` one of its subtasks. Closing a level
+// closes everything under it, so reopening it starts folded.
+const isUnder = (id: string, x: string) => {
+  const m = /^([ts])(\d+)$/.exec(id)
+  if (!m) return false
+  return (m[1] === 't' && x === `s${m[2]}`) || x.startsWith(`a${m[2]}:`)
+}
+
+export const collapse = (expanded: readonly string[], id: string) => expanded.filter(x => x !== id && !isUnder(id, x))
+
 export async function toggle($: $, id: string) {
   await patchUi($, u => ({
     ...u,
-    expanded: u.expanded.includes(id) ? u.expanded.filter(x => x !== id) : [...u.expanded, id],
+    expanded: u.expanded.includes(id) ? collapse(u.expanded, id) : [...u.expanded, id],
   }))
 }
 
@@ -811,16 +821,6 @@ async function ttlMs($: $, option: unknown) {
   return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60_000 : DONE_TTL_MINUTES * 60_000
 }
 
-const DIVIDERS: readonly Dividers[] = ['titled', 'line', 'none']
-
-// The rule above each todo: the CLAUDE_TODO_DIVIDERS variable, else the
-// todoDividers option (/config), else titled; an unknown value is titled.
-async function dividerStyle($: $, option: unknown): Promise<Dividers> {
-  const env = (await $.env.get('CLAUDE_TODO_DIVIDERS'))?.trim().toLowerCase()
-  const want = env ? env : option
-  return DIVIDERS.find(d => d === want) ?? 'titled'
-}
-
 async function expire($: $) {
   const keep = await read($, ttl)
   const now = await $.clock.now()
@@ -929,8 +929,6 @@ export const register: Register = (on, options) => {
     }
     const keep = await ttlMs($, options['doneTtlMinutes'])
     await update($, ttl, () => keep)
-    const rule = await dividerStyle($, options['todoDividers'])
-    await update($, dividers, () => rule)
     await expire($)
     $.clock.every(EXPIRE_MS, () => void expire($).catch(() => undefined))
     // A tick that fails (the module reloading under it) is tried again next tick.
@@ -1258,7 +1256,7 @@ export const register: Register = (on, options) => {
       u: await read($, ui),
       cap: await read($, cpuCap),
       f: await read($, spin),
-      dividers: await read($, dividers),
+      turns: await read($, turns),
       sessionTitle: await read($, sessionTitle),
     })
   })
