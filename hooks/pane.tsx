@@ -69,8 +69,18 @@ export function callGlyph(s: Call['state'], f: number): [string, Color] {
   }
 }
 
-type Tone = 'primary' | 'danger' | 'default'
-const TONE: Record<Tone, Color> = { primary: 'claude', danger: 'error', default: 'subtle' }
+// A chip's fill. resume, restart, refine and details are their actions' own
+// colors (green, orange, yellow, teal), the same wherever they're drawn.
+type Tone = 'primary' | 'danger' | 'default' | 'resume' | 'restart' | 'refine' | 'details'
+const TONE: Record<Tone, Color> = {
+  primary: 'claude',
+  danger: 'error',
+  default: 'subtle',
+  resume: 'success',
+  restart: 'claude',
+  refine: 'warning',
+  details: 'planMode',
+}
 
 // The focusable elements' keys in the order the last drawing placed them, for
 // the arrow keys to walk (see the ui.scroll hook in register.tsx). Read from
@@ -153,14 +163,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'default') => (
       chip(`act:${t.n}:${k}`, label, onPress, tone)
     )
-    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }))
+    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }), 'details')
     const c = u.confirm?.n === t.n ? u.confirm.kind : null
     if (c === 'stop') {
       return [
         <Text color="error">Stop #{t.n}? Execution halts; the todo is kept.</Text>,
         <Box gap={1}>
           {btn('stopyes', '■ Stop', () => haltTodo($, t, 'stopped'), 'danger')}
-          {btn('keep', 'Keep running', () => cancelConfirm($, t.n, 'stop'), 'primary')}
+          {btn('keep', 'Keep', () => cancelConfirm($, t.n, 'stop'), 'primary')}
         </Box>,
       ]
     }
@@ -168,7 +178,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Text color="error">Take over #{t.n}? It's marked stopped here; its run in the other session isn't stopped.</Text>,
         <Box gap={1}>
-          {btn('takeyes', '⇄ Take over', () => takeOver($, t), 'danger')}
+          {btn('takeyes', '⇄ Takeover', () => takeOver($, t), 'danger')}
           {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'), 'primary')}
         </Box>,
       ]
@@ -178,7 +188,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Box gap={1}>
           <Text dimColor>{t.status} in another session</Text>
-          {btn('takeover', '⇄ Take over', () => askConfirm($, t.n, 'takeover'))}
+          {btn('takeover', '⇄ Takeover', () => askConfirm($, t.n, 'takeover'))}
           {details}
         </Box>,
       ]
@@ -221,7 +231,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'paused':
         return [
           <Box gap={1}>
-            {btn('resume', '▶ Resume', () => resumeTodo($, t), 'primary')}
+            {btn('resume', '▶ Resume', () => resumeTodo($, t), 'resume')}
             {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'danger')}
             {details}
           </Box>,
@@ -232,14 +242,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           ...(fresh ? [<Text color="suggestion">Stopped. What next?</Text>] : []),
           <Box gap={1}>
-            {btn('refine', '✎ Refine prompt & restart', () => execTodo($, t, true), 'primary')}
-            {btn('restart', '↻ Restart as-is', () => restartTodo($, t))}
+            {btn('refine', '✎ Refine', () => execTodo($, t, true), 'refine')}
+            {btn('restart', '↻ Restart', () => restartTodo($, t), 'restart')}
             {details}
           </Box>,
           <Box gap={1}>
-            {t.taskId && btn('resume', '▶ Resume', () => resumeTodo($, t))}
+            {t.taskId && btn('resume', '▶ Resume', () => resumeTodo($, t), 'resume')}
             {fresh &&
-              btn('leave', 'Leave stopped', async () => {
+              btn('leave', 'Leave', async () => {
                 await patchUi($, x => ({
                   ...x,
                   justStopped: x.justStopped.filter(n => n !== t.n),
@@ -396,7 +406,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       ) : (
         <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
       )}
-      {view?.agentId ? chip('back', '↩ Main conversation', () => $.ui.view({})) : ''}
+      {view?.agentId ? chip('back', '↩ Back', () => $.ui.view({})) : ''}
       <Text> </Text>
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
       {list.flatMap(todoRows)}

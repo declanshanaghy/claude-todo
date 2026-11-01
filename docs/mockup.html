@@ -7,7 +7,7 @@
 <style>
 :root{
   --bg:#0d1016; --term:#11141b; --panebg:#0f1219; --line:#262b36; --fg:#d6d9e0; --dim:#6b7383; --faint:#3a4150;
-  --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757;
+  --cyan:#56d4dd; --green:#7ee787; --yellow:#e3b341; --red:#ff7b72; --magenta:#d2a8ff; --blue:#79c0ff; --orange:#d97757; --teal:#48968c;
   --chrome:#181c25; --chromefg:#aab1bf; --subtle:#8b93a3; --inv:#11141b;
   --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
 }
@@ -46,6 +46,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
 .chip{--tone:var(--subtle)}.chip.tone-primary{--tone:var(--orange)}.chip.tone-danger{--tone:var(--red)}
+.chip.tone-resume{--tone:var(--green)}.chip.tone-restart{--tone:var(--orange)}.chip.tone-refine{--tone:var(--yellow)}.chip.tone-details{--tone:var(--teal)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
 /* current: Claude Code inverts the focused element, so the fill becomes text color */
 .fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
@@ -281,7 +282,7 @@ const SCENES = [
     focusPane('ag:'+t2.agents[0].id); }},
  {name:'4 · Pause task', hint:'#2 is running and the ring is on <b>⏸ Pause</b>. Press it: <code>TaskStop</code> halts the run and the run id is kept. Finished agents stay ✓, and the ones in flight show ⏸. Then press <b>▶ Resume</b>: the Workflow re-runs with <code>resumeFromRunId</code>, so finished agents come back from cache.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); advance(t2,8); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:pause'); }},
- {name:'5 · Stop task', hint:'The ring is on <b>■ Stop</b>. Pressing it shows an inline confirmation, with the ring on the safe choice (<b>Keep running</b>). Confirm with <b>■ Stop</b>: execution halts but <b>the todo stays</b>, marked stopped, and a follow-up row asks what to do: <b>Refine prompt &amp; restart</b> (reopens the prompt drafts, current prompt first), <b>Restart as-is</b>, <b>Resume</b>, or <b>Leave stopped</b>.',
+ {name:'5 · Stop task', hint:'The ring is on <b>■ Stop</b>. Pressing it shows an inline confirmation, with the ring on the safe choice (<b>Keep</b>). Confirm with <b>■ Stop</b>: execution halts but <b>the todo stays</b>, marked stopped, and a follow-up row asks what to do: <b>Refine prompt &amp; restart</b> (reopens the prompt drafts, current prompt first), <b>Restart as-is</b>, <b>Resume</b>, or <b>Leave stopped</b>.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,10); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:stop'); }},
  {name:'6 · Delete task', hint:'Only todos that have never run can be deleted. The ring is on <b>✕ Delete</b> for #1. Pressing it shows a confirmation with the ring on <b>Cancel</b>. #2 has run, so its action row has no Delete.',
   setup(){ const t2=T(2,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t2,'countmd','agent'); advance(t2,20); S.todos=[T(1,'Fix kitty tab titles','pending',{expanded:true}), t2]; S.chat=[['sys','todo: 1 pending · 1 done']]; focusPane('act:t1:delete'); }},
@@ -459,17 +460,18 @@ function press(fid){
 /* ---------- pane render ---------- */
 function glyph(st){ return ({pending:['○','dim'],drafting:['✎','bl'],planning:['◇','ma'],running:[SPIN[spin],'cy'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','gr'],queued:['◌','faint'],run:[SPIN[spin],'cy'],ok:['✓','gr']})[st] || ['?','dim']; }
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
-// Filled action chip, toned like hooks/pane.tsx: 'primary' | 'danger' | 'default'.
+// Filled action chip, toned like hooks/pane.tsx: 'primary' | 'danger' | 'default',
+// and the actions' own colors: resume green, restart orange, refine yellow, details teal.
 function chipB(fid, label, tone='default'){ return B(fid, `<span class="fill">${esc(label)}</span>`, `chip tone-${tone}`); }
 function actRow(t){
   const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone);
-  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','danger')} ${a('keep','Keep running','primary')}</div>`;
+  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','danger')} ${a('keep','Keep','primary')}</div>`;
   if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete','danger')} ${a('cancel','Cancel','primary')}</div>`;
   switch(t.status){
     case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','primary')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
     case 'running': return `<div class="row ind2">${a('pause','⏸ Pause')} ${a('stop','■ Stop','danger')}</div>`;
-    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','primary')} ${a('stop','■ Stop','danger')}</div>`;
-    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine prompt & restart','primary')} ${a('restart','↻ Restart as-is')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume')} ${a('leave','Leave stopped')}</div>`;
+    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','resume')} ${a('stop','■ Stop','danger')}</div>`;
+    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine','refine')} ${a('restart','↻ Restart','restart')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume','resume')} ${a('leave','Leave')}</div>`;
     case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';
@@ -481,7 +483,7 @@ function renderPane(){
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span><span class="cy">▶${c('running')}</span> <span class="ye">⏸${c('paused')}</span> <span class="re">■${c('stopped')}</span> <span class="gr">✓${c('done')}</span>`;
   document.getElementById('panecap').textContent = `cap ${CAP} agents`;
   let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div><div class="row"> </div>`;
-  if(S.view) h += `<div class="row">${chipB('back','↩ Main conversation')}</div><div class="row"> </div>`;
+  if(S.view) h += `<div class="row">${chipB('back','↩ Back')}</div><div class="row"> </div>`;
   for(const t of S.todos){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;

@@ -1592,3 +1592,24 @@ test('CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to 
   expect((await dividerOf(again, 1))?.line).toMatch(/^── #1 Fix kitty tab titles ─+$/)
   await again.unmount()
 })
+test('action chips are one word under 10 letters, and Resume, Restart, Refine and Details carry their own colors', async ($, on) => {
+  const db = seeded([aTodo(1, 'Stopped one', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'p', taskId: 'ag1' })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  const fill = async (key: string) => {
+    const chip = await ui.find({ type: 'Button', key: `act:1:${key}` })
+    const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
+    const label = chip?.props['label']
+    return { label: typeof label === 'string' ? label : '', color: text?.props['backgroundColor'] }
+  }
+  const expected = { resume: 'success', restart: 'claude', refine: 'warning', details: 'planMode' } as const
+  for (const [key, color] of Object.entries(expected)) {
+    const { label, color: got } = await fill(key)
+    expect(got).toBe(color)
+    const word = label.replace(/^\W+\s*/u, '')
+    expect(word).toMatch(/^\p{L}{1,9}$/u)
+  }
+  await ui.unmount()
+})
