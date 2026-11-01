@@ -1007,50 +1007,76 @@ test('open: a placed pane counts in its header and clears the status line; an un
   expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
 })
 
-// The session title as drawn: the one Text in the prompt bar's border color,
-// and the header row's texts in order, to see where it sits.
-type Found = { type?: string; text?: string; props?: Record<string, unknown>; children?: unknown[] }
-const titleOf = async (ui: Drawing & { drawn: () => Promise<unknown> }) => {
-  const header = ((await ui.drawn()) as Found).children?.[0] as Found | undefined
-  const texts: Found[] = []
-  const walk = (n: unknown) => {
-    if (typeof n !== 'object' || n === null) return
-    const f = n as Found
-    if (f.type === 'Text') texts.push(f)
-    else for (const c of f.children ?? []) walk(c)
-  }
-  walk(header)
-  const t = texts.find(x => x.props?.['color'] === 'promptBorder')
-  // A Text's whole text, its nested Texts' included.
+// The header row as drawn: the pane's first child.
+type Found = { type?: string; key?: unknown; text?: string; props?: Record<string, unknown>; children?: unknown[] }
+const headerOf = async (ui: { drawn: () => Promise<unknown> }) => ((await ui.drawn()) as Found).children?.[0] as Found
+// Every Text's whole text and every Box's props under a node.
+const textsIn = (n: unknown): string[] => {
+  if (typeof n !== 'object' || n === null) return []
+  const f = n as Found
   const all = (x: unknown): string =>
     typeof x === 'string' || typeof x === 'number' ? String(x) : ((x as Found | null)?.children ?? []).map(all).join('')
-  return t === undefined ? undefined : { text: all(t), isLast: texts.at(-1) === t, first: texts[0] && all(texts[0]) }
+  return f.type === 'Text' ? [all(f)] : (f.children ?? []).flatMap(textsIn)
+}
+const boxesIn = (n: unknown): Found[] => {
+  if (typeof n !== 'object' || n === null) return []
+  const f = n as Found
+  return [...(f.type === 'Box' ? [f] : []), ...(f.children ?? []).flatMap(boxesIn)]
 }
 
-test('the header shows the session title at its right in the prompt bar color, following each change', async ($, on) => {
-  engine(on, [])
+test('the header draws no session title; the title still follows each change, for the drafter\'s prompt', async ($, on) => {
+  const { clock, spawns } = drafterEngine(on)
   // The settings hooks beneath: none at start, one names the session on a prompt.
   on('classic.SessionStart', () => ({}))
   on('classic.UserPromptSubmit', (_, e) => (e.prompt === 'name it' ? { sessionTitle: 'Named by a hook' } : {}))
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  // No title: none drawn.
-  expect(await titleOf(ui)).toBeUndefined()
 
   await $.classic.SessionStart({ source: 'resume', session_title: 'Fix the pane' })
-  // In the prompt bar's border color, at the header's right end, Todos at its left.
-  expect(await titleOf(ui)).toEqual({ text: 'Fix the pane', isLast: true, first: 'Todos 0' })
-  expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeUndefined()
+  expect(textsIn(await headerOf(ui)).some(t => t.includes('Fix the pane'))).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /Fix the pane/ })).toBeUndefined()
+  await todo($, 'add First')
+  await clock.settle()
+  expect(spawns.at(-1)?.prompt).toContain('Session: Fix the pane')
 
   // A rename reaches the next prompt's event; a hook's title wins over it.
   await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'Renamed' })
-  expect((await titleOf(ui))?.text).toBe('Renamed')
+  await todo($, 'add Second')
+  await clock.settle()
+  expect(spawns.at(-1)?.prompt).toContain('Session: Renamed')
   await $.classic.UserPromptSubmit({ prompt: 'name it', session_title: 'Renamed' })
-  expect((await titleOf(ui))?.text).toBe('Named by a hook')
+  expect(await ui.find({ type: 'Text', text: /Named by a hook/ })).toBeUndefined()
+  await todo($, 'add Third')
+  await clock.settle()
+  expect(spawns.at(-1)?.prompt).toContain('Session: Named by a hook')
 
   // A fresh session with no title clears it.
-  await $.classic.SessionStart({ source: 'clear' })
-  expect(await titleOf(ui)).toBeUndefined()
+  await $.classic.SessionStart({ source: 'startup' })
+  await todo($, 'add Fourth')
+  await clock.settle()
+  expect(spawns.at(-1)?.prompt).toContain('Session: (untitled)')
+  await ui.unmount()
+})
+
+test('the header is one row at a narrow width, never wrapped, with 🔥 Fire flush at its right end', async ($, on) => {
+  engine(on, [], undefined, true, { db: seeded([aTodo(1, 'One'), aTodo(2, 'Two', { status: 'failed', hasRun: true })]) })
+  on('classic.SessionStart', () => ({}))
+  await start($)
+  await $.classic.SessionStart({ source: 'resume', session_title: 'A long session title' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 24 } })
+  const header = await headerOf(ui)
+  // A row: no column, and nothing in it wraps.
+  expect(header.type).toBe('Box')
+  expect(header.props?.['flexDirection']).not.toBe('column')
+  expect(boxesIn(header).filter(b => b.props?.['flexWrap'] !== undefined && b.props['flexWrap'] !== 'nowrap')).toEqual([])
+  // Two parts: the toggles, which grow and clip, then Fire, which never shrinks.
+  const [toggles, fire] = header.children as Found[]
+  expect(header.children).toHaveLength(2)
+  expect(toggles?.props).toMatchObject({ flexGrow: 1, overflow: 'hidden' })
+  expect(fire?.props?.['flexShrink']).toBe(0)
+  expect(JSON.stringify(fire)).toContain('"fire"')
+  expect(textsIn(header).at(-1)?.trim()).toBe('🔥')
+  expect(textsIn(header).some(t => t.includes('A long session title'))).toBe(false)
   await ui.unmount()
 })
 

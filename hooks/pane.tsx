@@ -43,8 +43,6 @@ export type PaneData = {
   u: PaneUi
   cap: number
   f: number
-  // The session's title, drawn at the header's right; '' draws none.
-  sessionTitle: string
   // The todos whose exec waits for its drafting subagent's prompts.
   waiting: number[]
 }
@@ -217,7 +215,7 @@ export function ringBox({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, ring:
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, sessionTitle, waiting }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, waiting }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -559,14 +557,18 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       width={e.props.bodyColumns}
       paddingX={PAD_X}
     >
-      {/* Centered: the toggles' and 🔥 Fire's ring boxes keep a blank cell
-          above and below them, so top-aligned, Todos sat a row above them. */}
+      {/* One line at any width: Todos and the toggles take the room left of
+          🔥 Fire and are clipped, never wrapped, so Fire sits flush at the
+          right end. Centered: the ring boxes keep a blank cell above and below
+          them, so top-aligned, Todos sat a row above them. */}
       <Box alignItems="center">
-        <Box flexGrow={1} flexWrap="wrap" alignItems="center">
-          <Text>
-            <Text weight="semibold">Todos </Text>
-            <Text dimColor>{list.length}</Text>
-          </Text>
+        <Box flexGrow={1} flexShrink={1} overflow="hidden" alignItems="center">
+          <Box flexShrink={0}>
+            <Text>
+              <Text weight="semibold">Todos </Text>
+              <Text dimColor>{list.length}</Text>
+            </Text>
+          </Box>
           {/* One toggle per view, each its mark and count; then all, which
               reads default while every view is lit. The counts are the whole
               list's, whatever the view shows. */}
@@ -583,18 +585,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
             color, dimmed while nothing is pending or the cap is full; the cap
             itself is only told when a press is refused, not drawn. */}
         {fault ? '' : <Box flexShrink={0}>{chip('fire', 'Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
-        {/* The engine's frame takes only a plain tab label, drawn while more
-            than one pane is open, so the title rides the header's right end in
-            the prompt bar's border color, cut short before it wraps. */}
-        {sessionTitle ? (
-          <Box flexShrink={1} overflow="hidden" marginLeft={1}>
-            <Text color="promptBorder" wrap="truncate-end">
-              {sessionTitle}
-            </Text>
-          </Box>
-        ) : (
-          ''
-        )}
       </Box>
       {fault ? <Text color="error">⚠ {fault}</Text> : ''}
       {Input && !fault ? (

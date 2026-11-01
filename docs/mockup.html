@@ -30,7 +30,10 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .chat{flex:1 1 58%;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
 .chatlog{flex:1;padding:10px 14px;overflow:auto;max-height:620px}
 .pane{flex:0 0 42%;min-width:0;background:var(--panebg);display:flex;flex-direction:column;outline:none}
-.panehead{padding:6px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;color:var(--dim)}
+.panehead{padding:6px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;color:var(--dim);white-space:nowrap}
+/* The header is one line at any width: Todos and the toggles grow and clip, never wrap; 🔥 Fire never shrinks, flush right. */
+#panetitle{flex:1 1 auto;min-width:0;overflow:hidden}
+#panecap{flex:none}
 .pane.has-focus .panehead{color:var(--fg);border-bottom-color:var(--orange)}
 .pane.has-focus{box-shadow:inset 2px 0 0 var(--orange)}
 .panebody{padding:6px 8px 10px;overflow:auto;max-height:640px}
@@ -303,7 +306,7 @@ const SCENES = [
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,10); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:stop'); }},
  {name:'6 · Delete task', hint:'Only todos that have never run can be deleted. The ring is on <b>✕ Delete</b> for #1. Pressing it shows a confirmation with the ring on <b>Cancel</b>. #2 has run, so its action row has no Delete.',
   setup(){ const t2=T(2,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t2,'countmd','agent'); advance(t2,20); S.show=new Set(VIEWS); S.todos=[T(1,'Fix kitty tab titles','pending',{expanded:true}), t2]; S.chat=[['sys','todo: 1 pending · 1 done']]; focusPane('act:t1:delete'); }},
- {name:'7 · Views', hint:'The row under the title holds one toggle per status: <b>▶ running</b> (drafting and planning count here), <b>○ pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is running, pending and failed, so finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. <b>all</b> lights every toggle; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
+ {name:'7 · Views', hint:'The header, after Todos and before 🔥 Fire, holds one toggle per status on its one line: <b>▶ running</b> (drafting and planning count here), <b>○ pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is running, pending and failed, so finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. <b>all</b> lights every toggle; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending'); startTodo(t2,'statusline','workflow'); advance(t2,6);
     const t4=T(4,'Count md files in ~/.claude','pending'); startTodo(t4,'countmd','agent'); advance(t4,20);
     const t6=T(6,'Fix kitty tab titles','pending'); startTodo(t6,'kittySimple','agent'); advance(t6,20);
@@ -469,7 +472,7 @@ function restartTodo(t){ startTodo(t, t.build, t.mode); t.justStopped=false; cha
 function addTodo(title){ const n=Math.max(0,...S.todos.map(t=>t.n))+1; S.todos.push(T(n,title,'pending')); toast(`＋ added #${n}`); return n; }
 
 /* ---------- focus model ---------- */
-// The header's 🔥 Fire comes first, then the body's items, as the pane's ring walks them.
+// The header's toggles and then 🔥 Fire come first, then the body's items, as the pane's ring walks them.
 function focusables(){ return [...document.querySelectorAll('#pane [data-fid]')].map(el=>el.dataset.fid); }
 function focusPane(fid){ S.area='pane'; S.fid = fid || S.fid || focusables()[0]; render(); }
 function leavePane(){ S.area = S.dialog ? 'dialog' : 'prompt'; render(); }
@@ -587,7 +590,10 @@ function renderPane(){
   const body=document.getElementById('panebody');
   const c = st => S.todos.filter(t=>t.status===st).length;
   const cv = v => S.todos.filter(t=>viewOf(t.status)===v).length;
-  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>`;
+  // The view toggles ride the header after Todos: one per status, its mark and count; lit = shown, struck = hidden. "all" flips between everything and the default.
+  const allOn = S.show.size===VIEWS.length;
+  const toggles = S.browse ? '' : ` ${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', allOn?'default':'all', 'flt dim')}`;
+  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>${toggles}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
   const fire = S.browse ? '' : B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
   document.getElementById('panecap').innerHTML = fire;
@@ -602,9 +608,6 @@ function renderPane(){
   }
   let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div><div class="row"> </div>`;
   if(S.view) h += `<div class="row">${chipB('back','Back')}</div><div class="row"> </div>`;
-  // The view toggles: one per status, its mark and count; lit = shown, struck = hidden. "all" flips between everything and the default.
-  const allOn = S.show.size===VIEWS.length;
-  h = `<div class="row">${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', allOn?'default':'all', 'flt dim')}</div>` + h;
   const list = S.todos.filter(t=>S.show.has(viewOf(t.status))).sort((a,b)=>(a.status==='done')-(b.status==='done') || a.n-b.n);
   const hidden = S.todos.length-list.length;
   for(const t of list){

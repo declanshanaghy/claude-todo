@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 166 of 169 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 167 of 170 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -21,9 +21,10 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C11 | The status line counts todos by status while the pane isn't drawn, and clears when the list empties | the status line counts todos by status and clears with the last one |
 | C12 | The agent cap shown is CPU count − 4 | M1: /todo add stores a title-only todo and the pane lists it |
 | C13 | Viewing an agent's transcript offers the way back to the main conversation | the pane opens at start, stays closed across a reload once hidden, and offers the way back from a transcript |
-| C14 | The header draws the session's title at its right end in the prompt bar's border color (`promptBorder`), Todos at its left; with no title it draws none | the header shows the session title at its right in the prompt bar color, following each change |
-| C15 | The title follows each change: set at session start, updated on each prompt, a hook's `sessionTitle` winning over the event's, cleared by a start with none | the header shows the session title at its right in the prompt bar color, following each change |
+| C14 | The header draws no session title, whatever the session is called | the header draws no session title; the title still follows each change, for the drafter's prompt |
+| C15 | The session title the drafter's prompt names follows each change: set at session start, updated on each prompt, a hook's `sessionTitle` winning over the event's, cleared by a start with none | the header draws no session title; the title still follows each change, for the drafter's prompt |
 | C16 | `/todo exec auto` takes the keyword before or after the target; with no target it runs the lowest-numbered pending todo, and says so when none is pending | /todo exec auto runs a named todo with the keyword before or after it, or the lowest-numbered pending one, and says when none is |
+| C17 | The header is one row at any width: Todos and the toggles grow and clip, never wrapping, and 🔥 Fire, which never shrinks, sits flush at its right end | the header is one row at a narrow width, never wrapped, with 🔥 Fire flush at its right end |
 
 ## The counts: the pane's header or the status line
 

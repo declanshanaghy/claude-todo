@@ -1127,7 +1127,7 @@ async function setUp($: $, options: Options) {
 }
 
 export const register: Register = (on, options) => {
-  // The pane's header draws the session's title, so it follows each change:
+  // A drafter's prompt names the session, so its title follows each change:
   // set at start (a resume brings its old one), and on every prompt, where a
   // rename or a hook's sessionTitle shows up.
   on('classic.SessionStart', async ($, e, next) => {
@@ -1552,7 +1552,6 @@ export const register: Register = (on, options) => {
       cap: await read($, cpuCap),
       f: await read($, spin),
       turns: await read($, turns),
-      sessionTitle: await read($, sessionTitle),
       waiting: Object.keys(await read($, waiting)).map(Number),
     })
   })
