@@ -109,6 +109,11 @@ export type Tone = TodoStatus | 'danger' | 'details' | 'edit' | 'stay'
 // them all.
 export const GREYS: readonly Color[] = ['subtle', 'inactive', 'promptBorder', MARK.pending.color]
 
+// A dimmed (disabled) chip's fill: a grey, so it reads as a button that can't
+// act. Its symbol is an emoji (🔥), which a terminal draws in its own colors
+// whatever the text's color or dim, so only the cell's fill can mute it.
+export const DISABLED_FILL: Color = 'subtle'
+
 // The chips that move no status still each wear a hue of their own, on the
 // same wheel as the statuses, so none reads as disabled: Rename a lime (90°),
 // Details a cyan (180°), the rest a magenta (300°), and Delete a rose (330°),
@@ -239,10 +244,11 @@ export const withTip = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, key: 
 // Text child carries the tone's fill around its symbol, padded a cell each
 // side. A todo's action chip that can't act now is never drawn: it is left
 // out instead. A persistent header control (🔥 Fire) is never hidden: while
-// it can't act it is dimmed, dropping the fill for dim text in its tone's
-// color, and stays pressable, so the ring still reaches it and a press says
-// why. Dim is the only disabled look: an enabled chip always fills with a
-// tone's color, and no tone is grey (GREYS).
+// it can't act it is dimmed: its tone's fill gives way to a grey one
+// (DISABLED_FILL) under dim text, and it stays pressable, so the ring still
+// reaches it and a press says why. Grey and dim are the only disabled look:
+// an enabled chip always fills with a tone's color, and no tone is grey
+// (GREYS).
 //
 // The engine inverts a Button under the focus ring or the pointer, which
 // would swap the fill with the dark text and turn the chip black. So the chip
@@ -251,6 +257,10 @@ export const withTip = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, key: 
 // and its label alone), is drawn already inverted, in its tone's focused
 // color. Inverting it again changes nothing, so it brightens either way.
 export const lifted = (tone: Tone) => ({ inverse: true, color: toneFocus(tone), backgroundColor: 'inverseText' as Color })
+
+// A dimmed chip under the ring or the pointer, drawn already inverted the
+// same way, so the engine's inversion leaves its grey fill grey.
+export const greyed = { inverse: true, color: DISABLED_FILL, backgroundColor: 'inverseText' as Color, dimColor: true }
 
 export const statusChip = (
   { Text, Button }: Pick<ElementTable, 'Text' | 'Button'>,
@@ -263,9 +273,15 @@ export const statusChip = (
 ) =>
   isDimmed ? (
     <Button key={key} label={label} plain dimColor onPress={() => void onPress()}>
-      <Text weight="semibold" color={toneColor(tone)} dimColor>
-        {` ${CHIP_SYMBOL[label] ?? label} `}
-      </Text>
+      {isFocused ? (
+        <Text weight="semibold" {...greyed}>
+          {` ${CHIP_SYMBOL[label] ?? label} `}
+        </Text>
+      ) : (
+        <Text weight="semibold" backgroundColor={DISABLED_FILL} color="inverseText" dimColor hover={greyed}>
+          {` ${CHIP_SYMBOL[label] ?? label} `}
+        </Text>
+      )}
     </Button>
   ) : (
     <Button key={key} label={label} plain onPress={() => void onPress()}>

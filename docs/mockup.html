@@ -86,10 +86,12 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 /* The hint line while the ring is on one of the todo's chips: `✎ Rename: give the todo a new title`. */
 .chiphint{overflow:hidden;text-overflow:ellipsis}
 .clamp1{white-space:normal;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
-/* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
-.chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
+/* A dimmed chip (🔥 Fire with nothing to run): a grey fill (DISABLED_FILL, the theme's subtle) under dim text, as a terminal draws its emoji in full color whatever the text's color or dim; still a focus stop. */
+.chip.off .fill{background:var(--subtle);color:var(--inv)}
 /* current: the ring's inversion alone, which statusChip pre-inverts, so the focused chip brightens */
 .fm-current .chip.f .fill{background:var(--tf);color:var(--inv)}
+/* ...except a dimmed one, pre-inverted to stay grey under the ring. */
+.fm-current .chip.f.off .fill{background:var(--subtle);color:var(--inv)}
 /* uniform / both: one neutral fill; only the focused chip turns orange + bold */
 .fm-uniform .chip .fill,.fm-both .chip .fill{background:var(--subtle);font-weight:400}
 .fm-uniform .chip.f .fill,.fm-both .chip.f .fill{background:var(--orange);font-weight:700}

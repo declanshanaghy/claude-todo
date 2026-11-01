@@ -1063,27 +1063,34 @@ export const noneRunnable = (list: readonly Todo[]) => {
   return next ? `${NONE_PENDING} ${stillPrompting(next.n)}` : NONE_PENDING
 }
 
-// Why 🔥 Fire can't launch the next todo right now, or null when it can:
-// nothing is pending (a prompting todo is skipped), or this directory's live
-// agents already fill the cap.
-export function fireBlock(list: readonly Todo[], nodes: readonly AgentNode[], cap: number): string | null {
-  if (!nextRunnable(list)) return noneRunnable(list)
+// What 🔥 Fire would do now: the todo it launches, or why it can't launch
+// one. Nothing pending (a prompting todo is skipped, and so is a stopped or
+// failed one, which only ▶ Exec restarts), or this directory's live agents
+// already fill the cap. The header's dimmed look (fireBlock) and a press
+// (fireNext) both read this, so the chip is dimmed exactly when a press
+// would only say why.
+export function fireTarget(list: readonly Todo[], nodes: readonly AgentNode[], cap: number): Todo | string {
+  const t = nextRunnable(list)
+  if (!t) return noneRunnable(list)
   const live = nodes.filter(a => a.status === 'running').length
-  return live >= cap ? `The agent cap is reached (${live} of ${cap} running).` : null
+  return live >= cap ? `The agent cap is reached (${live} of ${cap} running).` : t
+}
+
+// Why 🔥 Fire can't launch the next todo right now, or null when it can.
+export function fireBlock(list: readonly Todo[], nodes: readonly AgentNode[], cap: number): string | null {
+  const to = fireTarget(list, nodes, cap)
+  return typeof to === 'string' ? to : null
 }
 
 // 🔥 Fire: what `/todo exec auto` with no target does, from the pane, where a
 // press may submit at once. Pressed while blocked, it says why instead.
 export async function fireNext($: $) {
-  const list = await read($, todos)
-  const why = fireBlock(list, await read($, agents), await read($, cpuCap))
-  const t = nextRunnable(list)
-  if (why !== null || !t) {
-    const said = why ?? noneRunnable(list)
-    $.ui.toast(said)
-    return said
+  const to = fireTarget(await read($, todos), await read($, agents), await read($, cpuCap))
+  if (typeof to === 'string') {
+    $.ui.toast(to)
+    return to
   }
-  return execTodo($, t, false, true)
+  return execTodo($, to, false, true)
 }
 
 const execNote = (t: Todo, auto: boolean) =>

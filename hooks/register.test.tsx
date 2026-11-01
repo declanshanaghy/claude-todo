@@ -3,11 +3,11 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { CHIP, CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor, toneFocus } from './marks'
+import { CHIP, CHIP_SYMBOL, DISABLED_FILL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor, toneFocus } from './marks'
 import { clampLines, headParts } from './pane'
 import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
-import { HELP, TODO_VERBS, VERBS } from './register'
+import { HELP, NONE_PENDING, TODO_VERBS, VERBS, fireBlock, fireTarget, stillPrompting } from './register'
 import { TABLE } from './transitions'
 
 const PANE = {
@@ -1158,13 +1158,15 @@ test('/todo resume refuses a todo the chip is not offered on, naming its status 
 })
 
 // 🔥 Fire's look: filled in running's color while it can launch, dimmed
-// (no fill, dim text in running's color) while it can't.
+// (a grey fill under dim text) while it can't. `color` is the fill it shows:
+// under the ring it is drawn pre-inverted, so its fill is its text color.
 async function fireLook(ui: Drawing) {
   const chip = (await ui.find({ type: 'Button', key: 'fire' })) as Found | undefined
   expect(chip?.props?.['label']).toBe('Fire')
   const fill = (chip?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null && 'props' in c)?.props
-  const isDimmed = chip?.props?.['dimColor'] === true && fill?.['dimColor'] === true && fill['backgroundColor'] === undefined
-  return { isDimmed, color: isDimmed ? fill['color'] : fill?.['backgroundColor'] }
+  const shown = fill?.['inverse'] === true ? fill['color'] : fill?.['backgroundColor']
+  const isDimmed = chip?.props?.['dimColor'] === true && fill?.['dimColor'] === true && shown === DISABLED_FILL
+  return { isDimmed, color: isDimmed ? shown : fill?.['backgroundColor'] }
 }
 
 test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is dimmed while none is pending', async ($, on) => {
@@ -1204,7 +1206,7 @@ test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is
   expect(submitted.at(-1)).toContain('Execute todo #3 "Fix kitty tab titles" in auto mode')
 
   // Nothing pending: Fire stays, dimmed, and the ring stays on it.
-  expect(await fireLook(ui)).toMatchObject({ isDimmed: true, color: MARK.running.color })
+  expect(await fireLook(ui)).toMatchObject({ isDimmed: true, color: DISABLED_FILL })
   expect(await isLit(ui, 'fire')).toBe(true)
   await clock.settle()
   expect(await isLit(ui, 'fire')).toBe(true)
@@ -1241,6 +1243,43 @@ test('🔥 Fire is dimmed while the running agents fill the cap, and a press say
   expect(toasts).toContain('The agent cap is reached (6 of 6 running).')
   expect(submitted).toHaveLength(0)
   expect(todoAt(db, 2).status).toBe('pending')
+  await ui.unmount()
+})
+
+// Each state where 🔥 Fire can't launch: the dimmed look (fireBlock) and a
+// press (fireNext) read the one fireTarget answer, so the chip is dimmed
+// exactly when a press would only toast why, and launches what it names.
+test('🔥 Fire is dimmed whenever nothing is fireable, and its look and press read one answer', async ($, on) => {
+  const prompting = `No pending todo to run. ${stillPrompting(3)}`
+  const busy = [1, 2].map(i => agentNode(`a${i}`, 1))
+  const stopped = aTodo(4, 'Stopped', { status: 'stopped', hasRun: true })
+  const cases: [string, Todo[], AgentNode[], string | number][] = [
+    ['no todos', [], [], NONE_PENDING],
+    ['all running or done', [running(1, 'Busy'), aTodo(2, 'Finished', { status: 'done', hasRun: true })], busy.slice(0, 1), NONE_PENDING],
+    ['only prompting', [aTodo(3, 'Drafting', { status: 'prompting' })], [], prompting],
+    ['stopped and failed, which only Exec restarts', [stopped, aTodo(5, 'Broke', { status: 'failed', hasRun: true })], [], NONE_PENDING],
+    ['the cap reached', [aTodo(6, 'Waiting')], busy, 'The agent cap is reached (2 of 2 running).'],
+    ['a pending one under the cap', [stopped, aTodo(8, 'Later'), aTodo(7, 'Waiting')], busy.slice(0, 1), 7],
+  ]
+  for (const [name, list, nodes, want] of cases) {
+    const to = fireTarget(list, nodes, 2)
+    expect(`${name}: ${typeof to === 'string' ? to : to.n}`).toBe(`${name}: ${want}`)
+    expect(`${name}: ${fireBlock(list, nodes, 2)}`).toBe(`${name}: ${typeof want === 'string' ? want : null}`)
+  }
+
+  // In the pane: zero todos dims it and a press only says why; one pending
+  // todo lights it.
+  const submitted: string[] = []
+  const toasts: string[] = []
+  engine(on, submitted, undefined, true, { db: seeded([]), toasts })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await fireLook(ui)).toMatchObject({ isDimmed: true, color: DISABLED_FILL })
+  await ui.press({ key: 'fire' })
+  expect(toasts).toContain(NONE_PENDING)
+  expect(submitted).toHaveLength(0)
+  await todo($, 'add Count md files')
+  expect(await fireLook(ui)).toMatchObject({ isDimmed: false, color: MARK.running.color })
   await ui.unmount()
 })
 
@@ -3438,13 +3477,15 @@ test('an enabled chip is never grey or dim, in any state: only a disabled one is
   for (const t of ['danger', 'details', 'edit', 'stay', 'running', 'paused', 'stopped', 'drafting'] as const) expect(GREYS).not.toContain(toneColor(t))
 })
 
-test('a disabled chip keeps its own muted look: dimmed, no fill, its tone in dim text', async ($, on) => {
+test('a disabled chip keeps its own muted look: dimmed, a grey fill, dim text', async ($, on) => {
   const db = seeded([aTodo(1, 'Stopped one', { status: 'stopped', hasRun: true, prompt: 'p' })])
   engine(on, [], undefined, true, { db })
   await start($)
   const ui = await mountAll($)
   const [fire] = (await chipsDrawn(ui)).filter(c => c.label === 'Fire')
-  expect(fire).toEqual({ label: 'Fire', isDimmed: true, fill: undefined, isDimText: true })
+  expect(fire).toEqual({ label: 'Fire', isDimmed: true, fill: DISABLED_FILL, isDimText: true })
+  // A grey, so it reads as disabled, and one no enabled chip's tone wears.
+  expect(GREYS).toContain(DISABLED_FILL)
   await ui.unmount()
 })
 
