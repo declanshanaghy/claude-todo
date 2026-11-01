@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 115 of 118 cases (97.5%)** are covered by `claude plugin test .`.
+**Coverage: 121 of 124 cases (97.6%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -18,9 +18,20 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C8 | `/todo exec` finds a todo by number, `#n` or a case-insensitive title fragment; no match says so | /todo exec finds a todo by number or title fragment, submits once the command answered, and refuses one in flight |
 | C9 | `/todo exec` submits its prompt from a timer once the command has answered (the host refuses a submit from inside `command.run`) | /todo exec finds a todo by number or title fragment, submits once the command answered, and refuses one in flight |
 | C10 | `/todo exec` refuses a todo already in flight | /todo exec finds a todo by number or title fragment, submits once the command answered, and refuses one in flight |
-| C11 | The status line counts todos by status and clears when the list empties | the status line counts todos by status and clears with the last one |
+| C11 | The status line counts todos by status while the pane isn't drawn, and clears when the list empties | the status line counts todos by status and clears with the last one |
 | C12 | The agent cap shown is CPU count − 4 | M1: /todo add stores a title-only todo and the pane lists it |
 | C13 | Viewing an agent's transcript offers the way back to the main conversation | the pane opens at start, stays closed across a reload once hidden, and offers the way back from a transcript |
+
+## The counts: the pane's header or the status line
+
+| ID | Behaviour | Covered by |
+|---|---|---|
+| K1 | A placed pane counts in its header and the status line stays clear; one that waits unplaced (`isPlaced` false) leaves the counts to the status line | open: a placed pane counts in its header and clears the status line; an unplaced one leaves the counts to it |
+| K2 | `noshow` (its `ui.close`) hands the counts to the status line, and `show` takes them back | noshow hands the counts to the status line, and show takes them back |
+| K3 | The person closing the pane with its × hands the counts to the status line; drawing it again takes them back | closing the pane with its × hands the counts to the status line; drawing it again takes them back (the kit can't raise the person's `ui.close`, so the test has the engine forget the pane and the sync tick notice; the hook itself is the one K2 runs) |
+| K4 | A narrower terminal that unseats the pane hands the counts to the status line within a sync tick; a render of the pane takes them back | a narrower terminal that unseats the pane hands the counts to the status line until it is drawn again |
+| K5 | The detail dialog covers the header, so the status line counts until it closes | the dialog covers the header, so the status line counts until it closes |
+| K6 | The header, the status line and the rows show the same marks (▶ ⏸ ■ ✓ ○) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
 
 ## Launching and prompts
 
