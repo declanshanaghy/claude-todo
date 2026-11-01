@@ -162,14 +162,14 @@ export function timeline(agentId: string, all: readonly Call[], turns: readonly 
   ].sort((x, y) => x.at - y.at || (x.turn ? -1 : 0) - (y.turn ? -1 : 0) || x.o - y.o)
 }
 
-// Where the ring goes when the chip it was on is no longer drawn (a chip is
-// left out while it can't act): a todo's chip hands it to that todo's header,
-// 🔥 Fire to the header's last toggle. Undefined while the ring is drawn, or
-// when nothing fits.
+// Where the ring goes when the chip it was on is no longer drawn (a todo's
+// chip is left out while it can't act): to that todo's header. 🔥 Fire is a
+// header control, never left out, only dimmed, so it needs no new home.
+// Undefined while the ring is drawn, or when nothing fits.
 export function rehome(ring: string | null, drawn: readonly string[]) {
   if (ring === null || drawn.includes(ring)) return undefined
   const n = /^act:(\d+):/.exec(ring)?.[1]
-  const to = n !== undefined ? `todo:${n}` : ring === 'fire' ? 'view:all' : undefined
+  const to = n !== undefined ? `todo:${n}` : undefined
   return to !== undefined && drawn.includes(to) ? to : undefined
 }
 
@@ -234,8 +234,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
 
   // An action chip fills with the color of the status it moves the todo into
   // (marks.tsx), so the buttons, rows and summaries share one palette.
-  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') =>
-    lit(key, statusChip(els, key, label, onPress, tone))
+  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral', isDimmed = false) =>
+    lit(key, statusChip(els, key, label, onPress, tone, isDimmed))
 
   const open = new Set(u.expanded)
   const agentView = e.props.view as { agentId?: string } | undefined
@@ -612,9 +612,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         </Box>
         {/* 🔥 Fire is `/todo exec auto` with no target: the next pending todo,
             in auto mode. It launches into running, so it wears running's
-            color. It is drawn only while it can launch: nothing pending or a
-            full cap leaves it out until something is runnable. */}
-        {fault || fireBlock(list, nodes, cap) !== null ? '' : <Box flexShrink={0}>{chip('fire', 'Fire', () => fireNext($), 'running')}</Box>}
+            color. A persistent header control, it is never hidden: while
+            nothing is pending or the cap is full it is dimmed (disabled),
+            still a focus stop, and a press only says why. */}
+        {fault ? '' : <Box flexShrink={0}>{chip('fire', 'Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
       </Box>
       {fault ? <Text color="error">⚠ {fault}</Text> : ''}
       {Input && !fault ? (

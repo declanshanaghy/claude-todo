@@ -11,10 +11,11 @@ The pane sits in a narrow column beside the chat, so it has to be as compact and
 3. **Only a confirmation adds a line:** one question line above its one row of choices, with the focus ring starting on the safe choice.
 4. **Focus never changes an item's size.** Every focusable element goes through `ringBox`/`lit` (`hooks/pane.tsx`). The lit item gets an orange `[ ]` in the cell on either side, and every other item keeps those two cells blank. Never use a border or vertical room for focus.
 5. **Chips:** a symbol plus a one-word label under 10 letters. The fill is the color of the status the action moves the todo to. Symbols and colors come only from `hooks/marks.tsx`, which is also what the rows, counts and statusline use, so never hard-code a status color.
-6. **Rows truncate and never wrap.** Titles and rules are cut with `…` to `e.props.bodyColumns`.
-7. **Counts show in exactly one place**: the pane's header while it's drawn, else the statusline.
-8. **Text for `Code` or `Markdown` goes through `clean()` (`hooks/detail.tsx`) after any truncation.** The host refuses a whole drawing over a single control character, and a refused drawing wedges the pane.
-9. **Change `docs/mockup.html` with the pane**, so the two never disagree.
+6. **Hidden or dimmed:** a todo's action chips appear only in states where they act, never dimmed. A persistent header control (🔥 Fire) is never hidden: while it can't act it is drawn dimmed (`statusChip`'s `isDimmed`), stays a focus stop, and a press only says why.
+7. **Rows truncate and never wrap.** Titles and rules are cut with `…` to `e.props.bodyColumns`.
+8. **Counts show in exactly one place**: the pane's header while it's drawn, else the statusline.
+9. **Text for `Code` or `Markdown` goes through `clean()` (`hooks/detail.tsx`) after any truncation.** The host refuses a whole drawing over a single control character, and a refused drawing wedges the pane.
+10. **Change `docs/mockup.html` with the pane**, so the two never disagree.
 
 The tests enforce 1–4. A new element or state needs a test there too.
 

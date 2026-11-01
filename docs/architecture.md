@@ -158,7 +158,7 @@ Pane-wide controls:
 | Control | Where | Does |
 |---|---|---|
 | ＋ add todo… | top of the list | adds a pending todo |
-| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); left out while none is pending or the agent cap is full, and back once one is runnable |
+| 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); dimmed (disabled, never hidden) while none is pending or the agent cap is full, still a focus stop whose press only toasts why, and filled again once one is runnable |
 | ↗ Full transcript | under an open subtask's latest calls | opens the call browser; Esc returns to the subtask |
 | status toggles `▶ ◔ ● ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, prompting, pending and failed (a view stored before prompting had a toggle shows it wherever it showed pending); done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
 

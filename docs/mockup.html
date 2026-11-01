@@ -60,6 +60,8 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .chip.tone-prompting{--tone:var(--periwinkle)}.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
 .chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--red)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
+/* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
+.chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
 /* current: Claude Code inverts the focused element, so the fill becomes text color */
 .fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
 /* uniform / both: one neutral fill; only the focused chip turns orange + bold */
@@ -398,8 +400,8 @@ function autoExec(t){
   });
 }
 // 🔥 Fire (fireBlock/fireNext in hooks/register.tsx): `/todo exec auto` with no
-// target, left out of the header while nothing is pending or the running agents
-// fill the cap; a ring that was on it moves to the header's last toggle.
+// target, dimmed (never hidden) while nothing is pending or the running agents
+// fill the cap; a press then only toasts why.
 const nextRunnable = () => S.todos.filter(t=>t.status==='pending').sort((a,b)=>a.n-b.n)[0];
 function fireBlock(){
   if(!nextRunnable()){ const p=S.todos.filter(t=>t.status==='prompting').sort((a,b)=>a.n-b.n)[0]; return 'No pending todo to run.'+(p?' '+stillPrompting(p):''); }
@@ -595,14 +597,12 @@ function renderPane(){
   const c = st => S.todos.filter(t=>t.status===st).length;
   const cv = v => S.todos.filter(t=>viewOf(t.status)===v).length;
   // The view toggles ride the header after Todos: one per status, its mark and count; lit = shown, struck = hidden. "all" flips between everything and the default.
-  // Fire is drawn only while it can launch; a ring left on it moves to the last toggle.
-  const canFire = !S.browse && !fireBlock();
-  if(!canFire && S.fid==='fire') S.fid='flt:all';
+  // Fire is a header control: never hidden, only dimmed while it can't launch.
   const allOn = S.show.size===VIEWS.length;
   const toggles = S.browse ? '' : ` ${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', allOn?'default':'all', 'flt dim')}`;
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>${toggles}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
-  const fire = canFire ? B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, 'chip tone-running')+' ' : '';
+  const fire = S.browse ? '' : B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
   document.getElementById('panecap').innerHTML = fire;
   if(S.browse){
     body.innerHTML = renderBrowser();

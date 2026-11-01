@@ -1034,7 +1034,17 @@ test('/todo resume refuses a todo the chip is not offered on, naming its status 
   expect(todoAt(db, 5).status).toBe('paused')
 })
 
-test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is left out while none is pending', async ($, on) => {
+// 🔥 Fire's look: filled in running's color while it can launch, dimmed
+// (no fill, dim text in running's color) while it can't.
+async function fireLook(ui: Drawing) {
+  const chip = (await ui.find({ type: 'Button', key: 'fire' })) as Found | undefined
+  expect(chip?.props?.['label']).toBe('Fire')
+  const fill = (chip?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null && 'props' in c)?.props
+  const isDimmed = chip?.props?.['dimColor'] === true && fill?.['dimColor'] === true && fill['backgroundColor'] === undefined
+  return { isDimmed, color: isDimmed ? fill['color'] : fill?.['backgroundColor'] }
+}
+
+test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is dimmed while none is pending', async ($, on) => {
   const submitted: string[] = []
   const toasts: string[] = []
   const db = seeded([
@@ -1046,13 +1056,8 @@ test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is
   const clock = mock.clock(on, { now: 1000 })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const fill = async () => {
-    const chip = await ui.find({ type: 'Button', key: 'fire' })
-    expect(chip?.props['label']).toBe('Fire')
-    return (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)?.props
-  }
   // Live: filled with running's color, like Exec and Auto.
-  expect((await fill())?.['backgroundColor']).toBe(MARK.running.color)
+  expect(await fireLook(ui)).toMatchObject({ isDimmed: false, color: MARK.running.color })
   // The arrow keys reach it: it is the first stop, above the add input.
   const arrow = (by: 1 | -1) =>
     $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 0, by, bodyRows: 60, contentRows: 60, origin: { kind: 'person' } })
@@ -1075,19 +1080,31 @@ test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and is
   await clock.settle()
   expect(submitted.at(-1)).toContain('Execute todo #3 "Fix kitty tab titles" in auto mode')
 
-  // Nothing pending: Fire is gone, and the ring it was on moves to the
-  // header's last toggle. `/todo exec auto` still says why.
-  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeUndefined()
-  expect(await isLit(ui, 'view:all')).toBe(true)
-  expect((await todo($, 'exec auto')).text).toBe('No pending todo to run.')
+  // Nothing pending: Fire stays, dimmed, and the ring stays on it.
+  expect(await fireLook(ui)).toMatchObject({ isDimmed: true, color: MARK.running.color })
+  expect(await isLit(ui, 'fire')).toBe(true)
+  await clock.settle()
+  expect(await isLit(ui, 'fire')).toBe(true)
+  // A press re-checks and only says why.
+  await ui.press({ key: 'fire' })
+  await clock.settle()
+  expect(toasts).toContain('No pending todo to run.')
   expect(submitted).toHaveLength(2)
-  // Something runnable again: it comes back.
+  expect((await todo($, 'exec auto')).text).toBe('No pending todo to run.')
+  // Still a stop for the arrow keys, between the last toggle and add.
+  await arrow(-1)
+  expect(await isLit(ui, 'view:all')).toBe(true)
+  await arrow(1)
+  expect(await isLit(ui, 'fire')).toBe(true)
+  await arrow(1)
+  expect(await isLit(ui, 'add')).toBe(true)
+  // Something runnable again: it fills again.
   await todo($, 'add Another')
-  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeDefined()
+  expect(await fireLook(ui)).toMatchObject({ isDimmed: false, color: MARK.running.color })
   await ui.unmount()
 })
 
-test('🔥 Fire is left out while the running agents fill the cap', async ($, on) => {
+test('🔥 Fire is dimmed while the running agents fill the cap, and a press says so', async ($, on) => {
   const submitted: string[] = []
   const toasts: string[] = []
   // The engine's cap is 6 (10 CPUs less 4): six running agents fill it.
@@ -1096,7 +1113,9 @@ test('🔥 Fire is left out while the running agents fill the cap', async ($, on
   engine(on, submitted, undefined, true, { db, toasts })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeUndefined()
+  expect((await fireLook(ui)).isDimmed).toBe(true)
+  await ui.press({ key: 'fire' })
+  expect(toasts).toContain('The agent cap is reached (6 of 6 running).')
   expect(submitted).toHaveLength(0)
   expect(todoAt(db, 2).status).toBe('pending')
   await ui.unmount()
@@ -2185,7 +2204,7 @@ test("a todo is prompting from its drafter's spawn until its drafts are stored, 
 })
 
 test('Exec, Auto, 🔥 Fire and /todo exec never start a prompting todo, and say its prompts are still being drafted', async ($, on) => {
-  const { db, clock, submitted } = drafterEngine(on)
+  const { db, clock, submitted, toasts } = drafterEngine(on)
   await start($)
   await todo($, 'add Fix kitty tab titles')
   await clock.settle()
@@ -2198,10 +2217,17 @@ test('Exec, Auto, 🔥 Fire and /todo exec never start a prompting todo, and say
   expect((await todo($, 'exec auto 1')).text).toBe(still)
   expect((await todo($, 'auto 1')).text).toBe(still)
   expect((await todo($, 'resume 1')).text).toBe(still)
-  // Nothing else pending: `/todo exec auto` and Fire skip it, saying why; Fire is left out.
+  // Nothing else pending: `/todo exec auto` and Fire skip it, saying why.
+  // Fire is dimmed, never hidden: the ring reaches it and keeps it.
   expect((await todo($, 'exec auto')).text).toBe(`No pending todo to run. ${still}`)
-  expect(await ui.find({ type: 'Button', key: 'fire' })).toBeUndefined()
+  expect((await fireLook(ui)).isDimmed).toBe(true)
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'fire', origin: { kind: 'person' } })
   await clock.settle()
+  expect(await isLit(ui, 'fire')).toBe(true)
+  await ui.press({ key: 'fire' })
+  await clock.settle()
+  expect(toasts).toContain(`No pending todo to run. ${still}`)
+  expect(await isLit(ui, 'fire')).toBe(true)
   expect(submitted).toHaveLength(0)
   expect(todoAt(db, 1).status).toBe('prompting')
   await ui.unmount()
