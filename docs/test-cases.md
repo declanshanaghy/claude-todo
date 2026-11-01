@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 141 of 144 cases (97.9%)** are covered by `claude plugin test .`.
+**Coverage: 150 of 153 cases (98%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -34,7 +34,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | K3 | The person closing the pane with its × hands the counts to the status line; drawing it again takes them back | closing the pane with its × hands the counts to the status line; drawing it again takes them back (the kit can't raise the person's `ui.close`, so the test has the engine forget the pane and the sync tick notice; the hook itself is the one K2 runs) |
 | K4 | A narrower terminal that unseats the pane hands the counts to the status line within a sync tick; a render of the pane takes them back | a narrower terminal that unseats the pane hands the counts to the status line until it is drawn again |
 | K5 | The detail dialog covers the header, so the status line counts until it closes | the dialog covers the header, so the status line counts until it closes |
-| K6 | The header, the status line and the rows show the same marks (▶ ⏸ ■ ✓ ○) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
+| K6 | The header, the status line and the rows show the same marks (▶ ○ ✗ ⏸ ■ ✓) in the same order; the header and rows draw them in the same theme colors | the header, the status line and the rows draw the same marks in the same order and colors |
+| K7 | The status line's counts are the whole list's, whatever the view hides; drafting and planning count as running | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
 
 ## Launching and prompts
 
@@ -43,7 +44,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | E1 | ▶ Exec submits the exec protocol and marks the todo drafting | M2: Exec submits the exec protocol and marks the todo drafting |
 | E1a | Exec, restart and resume all carry the git rules: own worktree branch, commit as it goes, the project's checks before landing, rebase onto `origin/<base>` resolving parallel todos' conflicts by keeping both sides, retry a rejected push, never force-push, abort and keep the branch on an unresolvable conflict; a lone Agent runs with `isolation: "worktree"` and a Workflow's merge agent is the only one that pushes | every protocol puts the work on its own worktree branch and lands it only after the checks pass |
 | E1c | ⚡ Auto (in the running color) submits the auto protocol: Claude drafts the one best prompt and records it with no AskUserQuestion, and plans multi-step work on stated defaults with no plan mode or approval; plain Exec still asks | Auto drafts the one best prompt and runs it with no questions, planning multi-step work on defaults |
-| E1d | 🔥 Fire in the header runs `/todo exec auto`'s no-target path: the lowest-numbered pending todo in auto mode, filled in the running color; it is the first stop the arrow keys reach, above the add input | 🔥 Fire in the header auto-runs the lowest-numbered pending todo, and dims while none is pending or the cap is full |
+| E1d | 🔥 Fire in the header runs `/todo exec auto`'s no-target path: the lowest-numbered pending todo in auto mode, filled in the running color; it comes after the header's view toggles and before the add input in the arrow keys' order | 🔥 Fire in the header auto-runs the lowest-numbered pending todo, and dims while none is pending or the cap is full |
 | E1e | 🔥 Fire dims (no fill, dim text in the running color) while nothing is pending or the running agents fill the cap, and a press then toasts why and launches nothing | 🔥 Fire dims and launches nothing while the running agents fill the cap |
 | E1b | `mcp__todo__update` stores the todo's branch and landed commit, and Details shows them | mcp__todo__update reports a change and mcp__todo__list reads the backlog; a todo's Details shows its prompt, summary, run ids and agents, with nothing to press |
 | D1 | A done todo leaves the tree its lifetime after it finished; a failed one stays; `mcp__todo__list` keeps both | a done todo leaves the tree 5 minutes after it finished; a failed one stays, and the list keeps both |
@@ -167,6 +168,19 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | G8 | A backup is dropped at a later start | a backup is dropped at a later start |
 | G9 | A backup survives the start that wrote it | migration: session todos move in, backed up, deduped, renumbered on a clash, once |
 
+## The view
+
+| ID | Behaviour | Covered by |
+|---|---|---|
+| V1 | The header draws one toggle per view (▶ running, ○ pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| V2 | The default view shows running (with drafting and planning), pending and failed, and hides paused, stopped and done | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| V3 | Pressing a toggle shows or hides its view's todos; done todos, when shown, sort after all others, the rest by number | each status toggle shows or hides its todos, done sorts last, and all flips to default and back |
+| V4 | `all` lights every view and reads `default` while they all are; pressing it then restores the default view | each status toggle shows or hides its todos, done sorts last, and all flips to default and back |
+| V5 | A dim footer says `N hidden by the view` while the view hides any; `Nothing in this view.` while it hides them all; an empty list says only how to add one | each status toggle shows or hides its todos, done sorts last, and all flips to default and back; the view outlasts a redraw and a reload, and a list with no todos only says to add one |
+| V6 | The view is kept with the pane's UI state, across redraws, reloads and sessions | the view outlasts a redraw and a reload, and a list with no todos only says to add one |
+| V7 | A todo in hand stays in the list whatever the view: the one the ring is on (so Pause keeps it under the ring on ⏵ Resume) and one just stopped, until ✓ Leave | a todo in hand stays in the default view: paused under the ring, or just stopped and asking what next |
+| V8 | Each state draws exactly the chips docs/architecture.md's "Buttons by state" lists (pending with and without a run, drafting, planning, running, paused, stopped right after a Stop or not, with or without work to resume, failed, done, in flight in another session, and each confirmation), and each chip leads to the state the doc gives | each state draws exactly the chips docs/architecture.md lists for it, and each leads where the doc says |
+
 ## Pane, dialog and focus
 
 | ID | Behaviour | Covered by |
@@ -178,10 +192,10 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U5 | The call browser shows an Edit as a diff, JSON pretty-printed, durations, and "Running…" for an open call | a subtask's calls read as their tool would: an Edit as a diff, JSON pretty-printed |
 | U6 | The ring's item gets the round border, every other item a blank cell; nothing lights without the keys | every focusable item lights the same border while the ring is on it, and keeps its room otherwise |
 | U7 | The mod's own focus moves light the right item: a confirmation's safe choice, Pause→Resume, Resume→Pause, Stop→Refine, Keep/Cancel→the chip that asked, Take over→Refine, Delete→add input, Rename→the row | every focusable item lights the same border while the ring is on it, and keeps its room otherwise; Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring; Take over stops the other session's agents here and cancelling it puts the ring back; Delete removes the row and puts the ring on the add input; Rename stores the new title and puts the ring back on the row |
-| U8 | In the tree an arrow key walks the ring like Tab, stops at the ends, and the wheel and page keys still scroll | in the tree an arrow key walks the ring like Tab, even when the tree is taller than the pane |
+| U8 | In the tree an arrow key walks the ring like Tab, stops at the ends (the first being the header's first view toggle, then the rest, 🔥 Fire, the add input, the list), and the wheel and page keys still scroll | in the tree an arrow key walks the ring like Tab, even when the tree is taller than the pane |
 | U9 | The spinner turns while a todo runs | the spinner turns only while a todo runs |
 | U10 | Each todo is one focusable line, its own splitter: ▸/▾, #N and title in the status color, a dim rule filling the gap, the status's mark (and d/n subtasks while it has run; a running one spins) at the right in its color, with the status word as the line's label, as wide as the pane's body less its padding and the ring's room; there is no separate row or divider; pressing it opens and closes the todo | each todo is one line, its own splitter: toggle, #N and title in the status color, a dim rule, the status mark at the right |
-| U11 | The arrow keys walk the drill-down in drawing order: the header, its chips, the subtasks line, each subtask row, its ↗ Full transcript, then the next todo | the arrow keys walk the drill-down in the order it draws, header by header and level by level |
+| U11 | The arrow keys walk the drill-down in drawing order: the todo's header, its chips, the subtasks line, each subtask row, its ↗ Full transcript, then the next todo | the arrow keys walk the drill-down in the order it draws, header by header and level by level |
 | U12 | At a narrow width the header cuts the title with … (or drops it), keeping the rule and the status mark whole | at a narrow width the header cuts the title with … and keeps the rule and the status mark whole |
 | U12a | The header's width sums count terminal cells, so a two-cell emoji in the title or at the right end never makes it wrap | the header sums in terminal cells, so a wide title or mark never pushes it past its width |
 | U13 | An old `todoDividers` value, in `/config` or `CLAUDE_TODO_DIVIDERS`, is ignored | an old todoDividers setting, from /config or the environment, is ignored |

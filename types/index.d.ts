@@ -90,6 +90,10 @@ export type Turn = {
 
 export type Confirm = 'stop' | 'delete' | 'takeover'
 
+// A status the header toggles in or out of the list. drafting and planning
+// are the start of a run, so they show (and count) as running.
+export type View = Exclude<TodoStatus, 'drafting' | 'planning'>
+
 export type PaneUi = {
   // What the drill-down has open: `t<n>` a todo, `s<n>` its subtasks line,
   // `a<n>:<agentId>` one subtask's recent turns and calls.
@@ -99,6 +103,9 @@ export type PaneUi = {
   justStopped: number[]
   // /todo noshow: keep the pane closed until /todo show.
   isHidden: boolean
+  // The statuses the list shows, toggled in the header; absent (stored by an
+  // earlier version), the default view.
+  view?: View[]
 }
 
 // What the view-only detail dialog shows.

@@ -41,7 +41,7 @@ flowchart LR
 |---|---|---|
 | Todos, agents, tool calls and turns | One SQLite file in Claude Code's plugin data folder, keyed by directory | Shared by every session and every copy of the mod; survives restarts |
 | The session's copy of its directory's rows | `$.state` atoms | The pane draws from them, and a write to one redraws it |
-| Pane layout (open rows, confirmations, focus ring) | `$.state` atoms | Per session; nothing else needs it |
+| Pane layout (open rows, confirmations, focus ring, the view) | `$.state` atoms | Per session; nothing else needs it. What's open and the view outlast a reload |
 | Settings | `/config` (`pluginConfigs`) or environment variables | Claude Code's standard plugin options |
 
 A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list.
@@ -71,7 +71,7 @@ A failed run (most often a write the host aborts as the turn it served ends) is 
 
 ## A todo's life
 
-A todo is always in one of eight states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo.
+A todo is always in one of eight states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire and ⏵ Resume launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. Buttons that change no status (✎ Rename, ☰ Details, ✓ Leave, ↩) and ↺ Reset, which only hands the todo back, are neutral grey.
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "20px"}, "state": {"nodeSpacing": 60, "rankSpacing": 70}}}%%
@@ -120,25 +120,25 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 
 ### Buttons by state
 
-Each button is filled with the color of the state it leads to. Destructive buttons ask first, with the ring on the safe choice.
+Each button is filled with the color of the state it leads to (the launchers in running's, as above). Destructive buttons ask first, with the ring on the safe choice. A test ("each state draws exactly the chips docs/architecture.md lists for it") draws every row below and presses every button, so this table and the pane can't drift.
 
 | State | Buttons | Leads to |
 |---|---|---|
-| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) | drafting · drafting · pending · confirm → removed |
-| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "planning in the chat…") | pending or stopped |
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details | drafting · drafting · pending · confirm → removed · call browser |
+| drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…", "continuing in the chat…" once it has run, "planning in the chat…") | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
 | stopped / failed | ✨ Refine · ↻ Restart · ☰ Details · ⏵ Resume (if there's an agent or worktree to pick up) · ✓ Leave (right after a Stop) | drafting · drafting · call browser · drafting · collapses it |
 | done | ☰ Details | call browser |
-| in flight in another session | ⇄ Takeover | confirm → stopped here |
+| in flight in another session | ⇄ Takeover · ☰ Details | confirm → stopped here · call browser |
 
 The confirmations:
 
 | Confirm for | Buttons |
 |---|---|
-| Stop | ■ Stop · ↩ Keep |
-| Delete | ✕ Delete · ↩ Cancel |
-| Takeover | ⇄ Takeover · ↩ Cancel |
+| Stop | ■ Stop · ↩ Keep (back to running or paused) |
+| Delete | ✕ Delete · ↩ Cancel (back to pending) |
+| Takeover | ⇄ Takeover · ↩ Cancel (left in flight there) |
 
 Pane-wide controls:
 
@@ -147,7 +147,7 @@ Pane-wide controls:
 | ＋ add todo… | top of the list | adds a pending todo |
 | 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo; dimmed while none is pending or the agent cap is full |
 | ↗ Full transcript | under an open subtask's latest calls | opens the call browser; Esc returns to the subtask |
-| status toggles `▶ ○ ✗ ⏸ ■ ✓` · all | header | show or hide each state's todos. The default view is running, pending and failed, and done sorts last (proposed, in the mockup) |
+| status toggles `▶ ○ ✗ ⏸ ■ ✓` · all | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is running, pending and failed; done sorts last when shown. `all` lights every one and reads `default` while they all are, pressing it then restores the default. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view. The view is kept with the pane's layout; the counts and the status line always count the whole list |
 
 ## Running a todo
 

@@ -1,6 +1,6 @@
 import type { Color, ElementTable } from 'claude-code'
 
-import type { Todo, TodoStatus } from '../types'
+import type { Todo, TodoStatus, View } from '../types'
 
 // The mod's one palette. Every status has one symbol and one theme color, and
 // everything that names a status reads them from here: the todo and agent
@@ -14,8 +14,8 @@ export const MARK: Record<TodoStatus, Mark> = {
   pending: { symbol: '○', color: 'inactive' },
   drafting: { symbol: '✎', color: 'suggestion' },
   planning: { symbol: '◇', color: 'planMode' },
-  // A row spins instead while it runs (SPIN), in this color. Green, as Exec
-  // and Resume start a run and their chips share it.
+  // A row spins instead while it runs (SPIN), in this color. Green, as Exec,
+  // Auto, Fire and Resume start a run and their chips share it.
   running: { symbol: '▶', color: 'success' },
   paused: { symbol: '⏸', color: 'warning' },
   stopped: { symbol: '■', color: 'error' },
@@ -44,13 +44,23 @@ export function markText(s: TodoStatus, rest = '', f?: number): [string, Color] 
   return [`${g}${rest}`, color]
 }
 
-export const countOf = (list: readonly Todo[], s: TodoStatus) => list.filter(t => t.status === s).length
+// The views the pane's header toggles, one per status the summaries count,
+// in their order; drafting and planning count (and show) as running. The
+// header and the status line both draw exactly these, so either one reads the
+// same, and their counts add up to the whole list.
+export type { View }
 
-// The statuses the summaries count, in their order. The header and the status
-// line both draw exactly these, so either one reads the same.
-export const SUMMARY: readonly TodoStatus[] = ['running', 'paused', 'stopped', 'done', 'pending']
+export const SUMMARY: readonly View[] = ['running', 'pending', 'failed', 'paused', 'stopped', 'done']
 
-export type Tally = Mark & { status: TodoStatus; count: number }
+// What a fresh pane shows: the work that's live or waiting on you. Paused,
+// stopped and done todos are a toggle away.
+export const DEFAULT_VIEW: readonly View[] = ['running', 'pending', 'failed']
+
+export const viewOf = (s: TodoStatus): View => (s === 'drafting' || s === 'planning' ? 'running' : s)
+
+export const countOf = (list: readonly Todo[], v: View) => list.filter(t => viewOf(t.status) === v).length
+
+export type Tally = Mark & { status: View; count: number }
 
 export const tally = (list: readonly Todo[]): Tally[] => SUMMARY.map(status => ({ status, ...MARK[status], count: countOf(list, status) }))
 
@@ -79,15 +89,25 @@ export function statusGlyph({ Text }: Els, s: TodoStatus, f = 0) {
   return <Text color={color}>{g}</Text>
 }
 
-// The colored counts, as Text children to set inside a line of text:
-// `▶1 ⏸0 ■2 ✓4 ○3`.
-export const tallySummary = ({ Text }: Els, list: readonly Todo[]) =>
-  tally(list).map((m, i) => (
-    <Text color={m.color}>
-      {i > 0 ? ' ' : ''}
-      {tallyMark(m)}
-    </Text>
-  ))
+// A view's toggle: its mark and count in its color, `▶1`. Lit while the view
+// shows its todos; dim and struck through while it hides them. A Button with
+// its view's name as label, so the focus ring and a screen reader reach it.
+export const viewToggle = (
+  { Text, Button }: Pick<ElementTable, 'Text' | 'Button'>,
+  m: Tally,
+  isShown: boolean,
+  onPress: () => unknown,
+) => (
+  <Button key={`view:${m.status}`} label={m.status} plain onPress={() => void onPress()}>
+    {isShown ? (
+      <Text color={m.color}>{tallyMark(m)}</Text>
+    ) : (
+      <Text color={m.color} dimColor strikethrough>
+        {tallyMark(m)}
+      </Text>
+    )}
+  </Button>
+)
 
 // Each action chip draws one symbol, not its word, so a row of them stays
 // compact; the word stays the Button's label, for screen readers and tests.

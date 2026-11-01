@@ -255,6 +255,13 @@ const transcript = async (ui: { press: (q: { key: string }) => Promise<unknown> 
   await ui.press({ key: `ag:${agentId}` })
   await ui.press({ key: `full:${agentId}` })
 }
+// The pane with every view lit, for a case about the rows rather than the view.
+// The view is kept across mounts and reloads, so a second mount finds it lit.
+const mountAll = async ($: T$, props: { bodyColumns?: number } = {}) => {
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, ...props } })
+  if ((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label'] === 'all') await ui.press({ key: 'view:all' })
+  return ui
+}
 const callAt = (db: Db, id: string) => {
   const c = db.calls[id]
   if (c === undefined) throw new Error(`no call ${id}`)
@@ -342,7 +349,7 @@ test('every protocol puts the work on its own worktree branch and lands it only 
   ])
   engine(on, submitted, undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   for (const [n, act] of [[1, 'exec'], [2, 'restart'], [3, 'resume']] as const) {
     await ui.press({ key: `todo:${n}` })
     await ui.press({ key: `act:${n}:${act}` })
@@ -659,7 +666,7 @@ test('a restarted session browses the calls it kept', async ($, on) => {
   }
   engine(on, [], undefined, true, { id: 's2', db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Code', text: /ls \*\.md/ })).toBeDefined()
@@ -771,11 +778,16 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
     await arrow(1)
     expect(await lit(ui, key)).toBe(true)
   }
-  // Up walks back; it stops at the first element.
+  // Up walks back; it stops at the first element, the header's first toggle.
   await arrow(-1)
   expect(await lit(ui, 'act:1:details')).toBe(true)
-  for (let i = 0; i < 10; i++) await arrow(-1)
-  expect(await lit(ui, 'fire')).toBe(true)
+  for (let i = 0; i < 20; i++) await arrow(-1)
+  expect(await lit(ui, 'view:running')).toBe(true)
+  // The header's toggles come first, then 🔥 Fire, then add, then the list.
+  for (const key of ['view:pending', 'view:failed', 'view:paused', 'view:stopped', 'view:done', 'view:all', 'fire', 'add', 'todo:1']) {
+    await arrow(1)
+    expect(await lit(ui, key)).toBe(true)
+  }
   // The wheel and page keys still scroll.
   expect((await $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 4, by: 4, bodyRows: 4, contentRows: 40, origin: { kind: 'person' } })).deny).toBeUndefined()
   await ui.unmount()
@@ -945,7 +957,7 @@ test('the status line counts todos by status and clears with the last one', asyn
   const { statuses } = engine(on, [], undefined, true, { unplaced: 'the terminal is too narrow' })
   await start($)
   await todo($, 'add One')
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:delete' })
@@ -956,13 +968,18 @@ test('the status line counts todos by status and clears with the last one', asyn
 
 // ---------- the counts: the pane's header or the status line, never both ----------
 
-// The header summary as drawn: each colored mark's text and color, in order.
-type Drawn = { props?: { color?: unknown }; children?: unknown[] }
+// The header's view toggles as drawn: each one's mark and count, its color,
+// whether it's lit (neither dim nor struck), in order.
+type Drawn = { props?: Record<string, unknown>; children?: unknown[] }
 const headerMarks = async (ui: Drawing) => {
-  const header = (await ui.find({ type: 'Text', text: /^Todos / })) as { children?: unknown[] } | undefined
-  return ((header?.children ?? []) as Drawn[])
-    .filter(c => typeof c === 'object' && c.props?.color !== undefined)
-    .map(c => ({ text: (c.children ?? []).join('').trim(), color: c.props?.color }))
+  const out: { view: string; text: string; color: unknown; isLit: boolean }[] = []
+  for (const view of SUMMARY) {
+    const b = (await ui.find({ type: 'Button', key: `view:${view}` })) as Drawn | undefined
+    const t = (b?.children ?? []).find((c): c is Drawn => typeof c === 'object' && c !== null && 'props' in c)
+    if (t === undefined) continue
+    out.push({ view, text: (t.children ?? []).join(''), color: t.props?.['color'], isLit: t.props?.['dimColor'] !== true && t.props?.['strikethrough'] !== true })
+  }
+  return out
 }
 
 test('open: a placed pane counts in its header and clears the status line; an unplaced one leaves the counts to it', async ($, on) => {
@@ -975,13 +992,13 @@ test('open: a placed pane counts in its header and clears the status line; an un
   // Never both: the status line said nothing while the header counted.
   expect(statuses.filter(x => x !== undefined)).toEqual([])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '⏸0', '■0', '✓0', '○1'])
+  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '○1', '✗0', '⏸0', '■0', '✓0'])
   await ui.unmount()
 
   where.unplaced = 'the terminal is too narrow'
   await start($)
   await clock.settle()
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
 })
 
 // The session title as drawn: the one Text in the prompt bar's border color,
@@ -1016,7 +1033,7 @@ test('the header shows the session title at its right in the prompt bar color, f
 
   await $.classic.SessionStart({ source: 'resume', session_title: 'Fix the pane' })
   // In the prompt bar's border color, at the header's right end, Todos at its left.
-  expect(await titleOf(ui)).toEqual({ text: 'Fix the pane', isLast: true, first: 'Todos 0 · ▶0 ⏸0 ■0 ✓0 ○0' })
+  expect(await titleOf(ui)).toEqual({ text: 'Fix the pane', isLast: true, first: 'Todos 0' })
   expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeUndefined()
 
   // A rename reaches the next prompt's event; a hook's title wins over it.
@@ -1038,9 +1055,9 @@ test('noshow hands the counts to the status line, and show takes them back', asy
   await todo($, 'add One')
   expect(statuses.at(-1)).toBeUndefined()
   await todo($, 'noshow')
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
   await todo($, 'add Two')
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○2')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○2 ✗0 ⏸0 ■0 ✓0')
   await todo($, 'show')
   await clock.settle()
   expect(statuses.at(-1)).toBeUndefined()
@@ -1056,7 +1073,7 @@ test('closing the pane with its × hands the counts to the status line; drawing 
   // so the engine just forgets the pane, as the × leaves it: the next tick sees.
   isOpen.delete('todo')
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
   // The person opens it again: its render takes the counts back.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await clock.advance(1)
@@ -1074,7 +1091,7 @@ test('a narrower terminal that unseats the pane hands the counts to the status l
   expect(statuses.at(-1)).toBeUndefined()
   where.unplaced = 'the terminal is too narrow'
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
   // Widened: the pane is drawn again.
   delete where.unplaced
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1093,7 +1110,7 @@ test('the dialog covers the header, so the status line counts until it closes', 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:details' })
-  expect(statuses.at(-1)).toBe('todo ▶0 ⏸0 ■0 ✓0 ○1')
+  expect(statuses.at(-1)).toBe('todo ▶0 ○1 ✗0 ⏸0 ■0 ✓0')
   await ui.unmount()
   const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
   await clock.advance(1)
@@ -1115,12 +1132,12 @@ test('the header, the status line and the rows draw the same marks in the same o
   await start($)
   await clock.settle()
   const line = statuses.at(-1)
-  expect(line).toBe('todo ▶1 ⏸1 ■1 ✓1 ○2')
+  expect(line).toBe('todo ▶1 ○2 ✗0 ⏸1 ■1 ✓1')
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   const header = await headerMarks(ui)
   expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
-  expect(header.map(m => m.color)).toEqual(['success', 'warning', 'error', 'merged', 'inactive'])
+  expect(header.map(m => m.color)).toEqual(['success', 'inactive', 'error', 'warning', 'error', 'merged'])
   expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
   // Each row's glyph is its status's mark; a running row spins in its color.
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
@@ -1131,6 +1148,222 @@ test('the header, the status line and the rows draw the same marks in the same o
     expect(row?.text.endsWith(` ${MARK[s].symbol}`)).toBe(true)
   }
   expect(JSON.stringify((await ui.find({ type: 'Button', key: 'todo:1' }))?.children)).toContain(JSON.stringify(MARK.running.color))
+  await ui.unmount()
+})
+
+// ---------- the view: the header's status toggles ----------
+
+// The todos' numbers in the order the list draws them.
+const rowsDrawn = async (ui: { findAll: (q: { type: string }) => Promise<{ key: string | undefined }[]> }) =>
+  (await ui.findAll({ type: 'Button' })).flatMap(b => {
+    const m = /^todo:(\d+)$/.exec(b.key ?? '')
+    return m ? [Number(m[1])] : []
+  })
+
+const viewed = () =>
+  seeded([
+    aTodo(1, 'Finished first', { status: 'done', hasRun: true, doneAt: 1000 }),
+    aTodo(2, 'Waiting'),
+    running(3, 'Runs'),
+    aTodo(4, 'Drafting', { status: 'drafting', owner: 's1' }),
+    aTodo(5, 'Broke', { status: 'failed', hasRun: true }),
+    running(6, 'Held', { status: 'paused' }),
+    aTodo(7, 'Halted', { status: 'stopped', hasRun: true }),
+    aTodo(8, 'Planning', { status: 'planning', owner: 's1' }),
+  ])
+
+test('the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole', async ($, on) => {
+  const { statuses } = engine(on, [], undefined, false, { db: viewed(), unplaced: 'the terminal is too narrow' })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  await clock.settle()
+  // The status line counts every todo, whatever the pane shows.
+  expect(statuses.at(-1)).toBe('todo ▶3 ○1 ✗1 ⏸1 ■1 ✓1')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
+  const marks = await headerMarks(ui)
+  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '○1', '✗1', '⏸1 hidden', '■1 hidden', '✓1 hidden'])
+  // A hidden view's toggle is dim and struck through, in its own color.
+  const struck = (await ui.find({ type: 'Button', key: 'view:done' })) as Drawn | undefined
+  expect(JSON.stringify(struck?.children)).toContain('"strikethrough":true')
+  expect(marks.find(m => m.view === 'done')?.color).toBe(MARK.done.color)
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('3 hidden by the view')
+  await ui.unmount()
+})
+
+test('each status toggle shows or hides its todos, done sorts last, and all flips to default and back', async ($, on) => {
+  engine(on, [], undefined, true, { db: viewed() })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Done shown: it sorts after every other todo.
+  await ui.press({ key: 'view:done' })
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8, 1])
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('2 hidden by the view')
+  // Running off hides drafting and planning with it.
+  await ui.press({ key: 'view:running' })
+  expect(await rowsDrawn(ui)).toEqual([2, 5, 1])
+  // All lights every view, and reads default while they all are.
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8, 1])
+  expect((await headerMarks(ui)).every(m => m.isLit)).toBe(true)
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('default')
+  expect(await ui.find({ type: 'Text', text: /hidden by the view/ })).toBeUndefined()
+  // Pressed then, it puts the default view back.
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
+  // A view with nothing in it says so.
+  for (const v of ['running', 'pending', 'failed']) await ui.press({ key: `view:${v}` })
+  expect(await rowsDrawn(ui)).toEqual([])
+  expect(await ui.find({ type: 'Text', text: 'Nothing in this view.' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('8 hidden by the view')
+  await ui.unmount()
+})
+
+test('the view outlasts a redraw and a reload, and a list with no todos only says to add one', async ($, on) => {
+  const db = viewed()
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'view:stopped' })
+  await ui.press({ key: 'view:pending' })
+  await ui.unmount()
+  await start($)
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(again)).toEqual([3, 4, 5, 7, 8])
+  await again.unmount()
+
+  db.todos['/proj'] = {}
+  db.rev['/proj'] = (db.rev['/proj'] ?? 0) + 1
+  await start($)
+  const empty = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await empty.find({ type: 'Text', text: 'No todos yet. Type a title above.' })).toBeDefined()
+  expect(await empty.find({ type: 'Text', text: 'Nothing in this view.' })).toBeUndefined()
+  expect(await empty.find({ type: 'Text', text: /hidden by the view/ })).toBeUndefined()
+  await empty.unmount()
+})
+
+test('a todo in hand stays in the default view: paused under the ring, or just stopped and asking what next', async ($, on) => {
+  const db = seeded([running(1, 'Pause me'), running(2, 'Stop me')])
+  engine(on, [], undefined, true, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:pause' })
+  // Pause put the ring on ⏵ Resume, so #1 stays while the ring is on it.
+  expect(todoAt(db, 1).status).toBe('paused')
+  expect(await isLit(ui, 'act:1:resume')).toBe(true)
+  await ui.press({ key: 'todo:2' })
+  await ui.press({ key: 'act:2:stop' })
+  await ui.press({ key: 'act:2:stopyes' })
+  // The ring moved to #2's Refine: #1 leaves the view, #2 stays until Leave.
+  expect(await rowsDrawn(ui)).toEqual([2])
+  expect(await ui.find({ type: 'Text', text: 'Stopped. What next?' })).toBeDefined()
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'view:running', origin: { kind: 'person' } })
+  expect(await rowsDrawn(ui)).toEqual([2])
+  await ui.press({ key: 'act:2:leave' })
+  expect(await rowsDrawn(ui)).toEqual([])
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('2 hidden by the view')
+  await ui.unmount()
+})
+
+// ---------- conformance: docs/architecture.md, "Buttons by state" ----------
+
+// Where a press leaves the todo: a status, `removed`, `browser` (the call
+// browser's dialog), or the chips the confirmation it asks draws instead.
+type Lead = Todo['status'] | 'removed' | 'browser' | { confirm: string[] }
+type StateRow = { state: string; todo: (n: number) => Todo; before?: string[]; chips: Record<string, Lead> }
+
+const BY_STATE: StateRow[] = [
+  {
+    state: 'pending, never ran',
+    todo: n => aTodo(n, 'Waiting'),
+    chips: { exec: 'drafting', auto: 'drafting', rename: 'pending', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+  },
+  { state: 'pending, confirming Delete', todo: n => aTodo(n, 'Waiting'), before: ['delete'], chips: { deleteyes: 'removed', cancel: 'pending' } },
+  { state: 'pending, has run', todo: n => aTodo(n, 'Again', { hasRun: true }), chips: { exec: 'drafting', auto: 'drafting', rename: 'pending', details: 'browser' } },
+  { state: 'drafting, never ran', todo: n => aTodo(n, 'Drafting', { status: 'drafting', owner: 's1' }), chips: { reset: 'pending' } },
+  { state: 'drafting, has run', todo: n => aTodo(n, 'Drafting', { status: 'drafting', hasRun: true, owner: 's1' }), chips: { reset: 'stopped' } },
+  { state: 'planning, never ran', todo: n => aTodo(n, 'Planning', { status: 'planning', owner: 's1' }), chips: { reset: 'pending' } },
+  { state: 'planning, has run', todo: n => aTodo(n, 'Planning', { status: 'planning', hasRun: true, owner: 's1' }), chips: { reset: 'stopped' } },
+  { state: 'running', todo: n => running(n, 'Runs'), chips: { pause: 'paused', stop: { confirm: ['stopyes', 'keep'] }, details: 'browser' } },
+  { state: 'running, confirming Stop', todo: n => running(n, 'Runs'), before: ['stop'], chips: { stopyes: 'stopped', keep: 'running' } },
+  {
+    state: 'paused',
+    todo: n => running(n, 'Held', { status: 'paused' }),
+    chips: { resume: 'drafting', stop: { confirm: ['stopyes', 'keep'] }, details: 'browser' },
+  },
+  { state: 'paused, confirming Stop', todo: n => running(n, 'Held', { status: 'paused' }), before: ['stop'], chips: { stopyes: 'stopped', keep: 'paused' } },
+  {
+    state: 'stopped, right after a Stop',
+    todo: n => running(n, 'Halted'),
+    before: ['stop', 'stopyes'],
+    chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting', leave: 'stopped' },
+  },
+  {
+    state: 'stopped, nothing to pick up',
+    todo: n => aTodo(n, 'Halted', { status: 'stopped', hasRun: true }),
+    chips: { refine: 'drafting', restart: 'drafting', details: 'browser' },
+  },
+  {
+    state: 'stopped, its agent kept',
+    todo: n => aTodo(n, 'Halted', { status: 'stopped', hasRun: true, mode: 'agent', taskId: `ag${n}` }),
+    chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting' },
+  },
+  {
+    state: 'failed',
+    todo: n => aTodo(n, 'Broke', { status: 'failed', hasRun: true, mode: 'agent', taskId: `ag${n}` }),
+    chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting' },
+  },
+  // Done far ahead of the test clock, so it can't leave the tree mid-table.
+  { state: 'done', todo: n => aTodo(n, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }), chips: { details: 'browser' } },
+  {
+    state: 'in flight in another session',
+    todo: n => running(n, 'Elsewhere', { owner: 'other' }),
+    chips: { takeover: { confirm: ['takeyes', 'cancel'] }, details: 'browser' },
+  },
+  {
+    state: 'in flight in another session, confirming Takeover',
+    todo: n => running(n, 'Elsewhere', { owner: 'other' }),
+    before: ['takeover'],
+    chips: { takeyes: 'stopped', cancel: 'running' },
+  },
+]
+
+test('each state draws exactly the chips docs/architecture.md lists for it, and each leads where the doc says', { timeoutMs: 30_000 }, async ($, on) => {
+  // A copy of each row's todo per chip, so every press starts from that state.
+  const presses = BY_STATE.flatMap(r => Object.keys(r.chips).map(chip => ({ r, chip })))
+  const db = seeded(presses.map(({ r }, i) => r.todo(i + 1)))
+  engine(on, [], undefined, true, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  await start($)
+  let ui = await mountAll($)
+  const chipsOf = async (n: number) =>
+    (await ui.findAll({ type: 'Button' })).flatMap(b => (b.key?.startsWith(`act:${n}:`) ? [b.key.slice(`act:${n}:`.length)] : [])).sort()
+  for (const [i, { r, chip }] of presses.entries()) {
+    const n = i + 1
+    await ui.press({ key: `todo:${n}` })
+    for (const k of r.before ?? []) await ui.press({ key: `act:${n}:${k}` })
+    expect(`${r.state}: ${(await chipsOf(n)).join(' ')}`).toBe(`${r.state}: ${Object.keys(r.chips).sort().join(' ')}`)
+    await ui.press({ key: `act:${n}:${chip}` })
+    const lead = r.chips[chip]
+    const at = `${r.state} → ${chip}`
+    if (lead === 'browser') {
+      // The dialog replaces the tree; a reload closes it.
+      expect(`${at}: ${String((await ui.find({ type: 'Button', key: `todo:${n}` })) === undefined)}`).toBe(`${at}: true`)
+      await ui.unmount()
+      await start($)
+      ui = await mountAll($)
+    } else if (lead === 'removed') {
+      expect(`${at}: ${String(db.todos['/proj']?.[n] === undefined)}`).toBe(`${at}: true`)
+    } else if (typeof lead === 'object') {
+      expect(`${at}: ${(await chipsOf(n)).join(' ')}`).toBe(`${at}: ${[...lead.confirm].sort().join(' ')}`)
+    } else {
+      expect(`${at}: ${todoAt(db, n).status}`).toBe(`${at}: ${lead}`)
+    }
+  }
   await ui.unmount()
 })
 
@@ -1316,7 +1549,7 @@ test("resuming a Workflow marks its interrupted agents stopped, as the run respa
   )
   engine(on, submitted, undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:resume' })
   expect(submitted.at(-1)).toContain('{scriptPath: "/tmp/s.js", resumeFromRunId: "wf_abc"}')
@@ -1335,7 +1568,7 @@ test('Refine clears the old run from the database and asks for a refined prompt'
   )
   engine(on, submitted, undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:refine' })
   expect(db.agents['ag1']).toBeUndefined()
@@ -1373,7 +1606,7 @@ test('a dropped restart puts the stopped todo back, run ids and all', async ($, 
   const db = seeded([aTodo(1, 'Count', { status: 'stopped', hasRun: true, mode: 'workflow', taskId: 'task9', runId: 'wf_abc' })])
   engine(on, [], undefined, true, { db, toasts, drop: 'a hook refused it' })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:restart' })
   expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', taskId: 'task9', runId: 'wf_abc' })
@@ -1387,7 +1620,7 @@ test('a dropped resume puts the paused todo back', async ($, on) => {
   const db = seeded([running(1, 'Count', { status: 'paused' })])
   engine(on, [], undefined, true, { db, toasts, drop: 'a Stop stands' })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:resume' })
   expect(todoAt(db, 1)).toMatchObject({ status: 'paused', taskId: 'ag1' })
@@ -1529,7 +1762,7 @@ test("calls are read in pages of 100 until a short page", async ($, on) => {
   const { ops } = engine(on, [], undefined, true, { db })
   await start($)
   expect(ops.filter(o => o.kind === 'calls').map(o => (o as { after: number }).after)).toEqual([0, 100, 200])
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await transcript(ui, 1, 'ag1')
   expect(await ui.find({ type: 'Text', text: /250 tool calls/ })).toBeDefined()
@@ -1545,7 +1778,7 @@ test('a fresh read keeps only the newest 1500 calls of the directory', async ($,
   const { ops } = engine(on, [], undefined, true, { db })
   await start($)
   expect(ops.find(o => o.kind === 'calls')).toMatchObject({ after: 100 })
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'subs:1' })
   expect(await ui.find({ type: 'Text', text: /\b700 calls/ })).toBeDefined()
@@ -1712,7 +1945,7 @@ test("a todo's Details shows its prompt, summary, run ids and agents, with nothi
   )
   engine(on, [], undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:details' })
   expect(await ui.find({ type: 'Text', text: /#1 Split the module/ })).toBeDefined()
@@ -1820,7 +2053,7 @@ test('a done todo leaves the tree 5 minutes after it finished; a failed one stay
   expect(todoAt(db, 1)).toMatchObject({ status: 'done', doneAt: 1000 })
   expect(todoAt(db, 2).doneAt).toBeUndefined()
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await clock.advance(4 * 60_000)
   expect(await shown(ui, 1)).toBe(true)
   await clock.advance(60_000 + 5000)
@@ -1837,7 +2070,7 @@ test('CLAUDE_TODO_DONE_TTL_MINUTES overrides the option; 0 keeps done todos', as
   engine(on, [], undefined, false, { db: seeded(done), env: { CLAUDE_TODO_DONE_TTL_MINUTES: '0' } })
   const clock = mock.clock(on, { now: 1000 })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await clock.advance(60 * 60_000)
   expect(await shown(ui, 1)).toBe(true)
   await ui.unmount()
@@ -1847,7 +2080,7 @@ test('the doneTtlMinutes option sets the time in the tree', { options: { doneTtl
   engine(on, [], undefined, false, { db: seeded([aTodo(1, 'Old', { status: 'done', hasRun: true, doneAt: 1000 })]) })
   const clock = mock.clock(on, { now: 1000 })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   expect(await shown(ui, 1)).toBe(true)
   await clock.advance(60_000 + 5000)
   expect(await shown(ui, 1)).toBe(false)
@@ -1958,7 +2191,7 @@ test('level 1 shows the prompt in 2 lines, a done todo its summary, the actions,
   engine(on, [], undefined, false, { db })
   mock.clock(on, { now: 1000 })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 50 } })
+  const ui = await mountAll($, { bodyColumns: 50 })
   await ui.press({ key: 'todo:1' })
   expect(await ui.find({ type: 'Text', text: ' no prompt yet: ▶ Exec drafts one' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'subs:1' })).toBeUndefined()
@@ -2093,7 +2326,7 @@ test('every action chip is one word under 10 letters, drawn as its symbol only, 
   ])
   engine(on, [], undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   const fill = async (key: string) => {
     const chip = await ui.find({ type: 'Button', key })
     const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
@@ -2396,7 +2629,7 @@ test('an agent stopped by the person leaves Resume offered, which starts a fresh
   await $.turn.complete({ agentId: 'ag1', isAborted: true, answer: '' } as never)
   expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', isAgentGone: true, taskId: 'ag1' })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:resume' })
   const text = submitted.at(-1) ?? ''
@@ -2426,7 +2659,7 @@ test('a paused lone Agent is woken first, with the fallback spelled out if the w
   const db = seeded([aTodo(1, 'Count', { status: 'paused', hasRun: true, mode: 'agent', taskId: 'ag1', owner: 's1' })], [agentNode('ag1', 1, { status: 'paused' })])
   engine(on, submitted, undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:resume' })
   const text = submitted.at(-1) ?? ''
@@ -2446,7 +2679,7 @@ test('a Workflow resume merges the branches its interrupted writers kept, and fa
   )
   engine(on, submitted, undefined, true, { db, worktrees: porcelain(['/proj/.claude/worktrees/agent-w1', 'worktree-agent-w1']) })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:resume' })
   const text = submitted.at(-1) ?? ''
@@ -2509,7 +2742,7 @@ test('the call browser hands Code and Markdown no control or format character, e
   )
   engine(on, [], undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await transcript(ui, 1, 'ag1')
   const all = texts(await ui.findAll({ type: 'Code' })).concat(texts(await ui.findAll({ type: 'Markdown' })))
@@ -2524,7 +2757,7 @@ test('Escape on the dialog closes it and puts the ring back on the subtask row i
   engine(on, [], undefined, false, { db, openedWith })
   const clock = mock.clock(on, { now: 1000 })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'subs:1' })
   await ui.press({ key: 'ag:ag1' })
@@ -2540,7 +2773,7 @@ test('Escape on the dialog closes it and puts the ring back on the subtask row i
   await clock.advance(1)
   await blurred.unmount()
   expect(openedWith.slice(before)).toEqual([{ id: 'todo', focus: true }])
-  const back = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const back = await mountAll($)
   expect(await back.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
   expect((await back.find({ type: 'Box', key: 'ring:ag:ag1' }))?.props['borderStyle']).toBe('round')
   await back.unmount()
@@ -2550,13 +2783,13 @@ test('a dialog left open across a reload starts closed', async ($, on) => {
   const db = seeded([aTodo(1, 'Count', { status: 'done', hasRun: true })])
   engine(on, [], undefined, true, { db })
   await start($)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountAll($)
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:details' })
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeUndefined()
   await ui.unmount()
   await start($)
-  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const again = await mountAll($)
   expect(await again.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
   await again.unmount()
 })

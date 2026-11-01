@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, ImageRef, Kept, PaneUi, Todo, Turn } from '../types'
+import type { AgentNode, Call, Confirm, Detail, ImageRef, Kept, PaneUi, Todo, Turn, View } from '../types'
 import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
-import { statusToast, tallyText } from './marks'
+import { DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
 import { drawPane, focusOrder } from './pane'
 import { execPrompt, restartPrompt, resumePrompt } from './protocol'
 
@@ -46,9 +46,12 @@ const turns = atom({ plugin: 'todo', key: 'turns' } as const, [], { shape: 'turn
 const unfolded = atom({ plugin: 'todo', key: 'unfolded' } as const, [] as string[])
 const earlier = atom({ plugin: 'todo', key: 'earlier' } as const, 0)
 const thumbs = atom({ plugin: 'todo', key: 'thumbs' } as const, {} as Record<string, string>)
+// The pane's layout, kept across reloads and sessions: what's open, a pending
+// confirmation, the view the header toggles. `view` is optional, so the tag
+// stays: what an earlier version stored (without one) reads as the default.
 const ui = atom(
   { plugin: 'todo', key: 'ui' } as const,
-  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false },
+  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, view: [...DEFAULT_VIEW] },
   { shape: 'ui-2' },
 )
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
@@ -529,6 +532,23 @@ export async function toggle($: $, id: string) {
     ...u,
     expanded: u.expanded.includes(id) ? collapse(u.expanded, id) : [...u.expanded, id],
   }))
+}
+
+// A header toggle shows or hides one view's todos. `all` lights every view;
+// pressed while they all are (it reads `default` then), it puts the default
+// view back. Kept in SUMMARY's order, so the stored view reads the same way.
+export const viewIn = (u: PaneUi): readonly View[] => u.view ?? DEFAULT_VIEW
+
+export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
+  if (v === 'all') return [...(view.length === SUMMARY.length ? DEFAULT_VIEW : SUMMARY)]
+  const on = new Set(view)
+  if (on.has(v)) on.delete(v)
+  else on.add(v)
+  return SUMMARY.filter(x => on.has(x))
+}
+
+export async function toggleView($: $, v: View | 'all') {
+  await patchUi($, u => ({ ...u, view: nextView(viewIn(u), v) }))
 }
 
 async function focus($: $, key: string) {

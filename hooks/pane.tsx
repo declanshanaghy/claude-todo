@@ -2,7 +2,7 @@ import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-c
 
 import type { AgentNode, Call, PaneUi, Todo, Turn } from '../types'
 import { clean } from './detail'
-import { type Tone, markOf, markText, statusChip, statusGlyph, tallySummary } from './marks'
+import { SUMMARY, type Tone, markOf, markText, statusChip, statusGlyph, tally, viewOf, viewToggle } from './marks'
 import {
   INFLIGHT,
   addTodo,
@@ -22,6 +22,8 @@ import {
   setTodoStatus,
   takeOver,
   toggle,
+  toggleView,
+  viewIn,
 } from './register'
 
 // What the render hook in register.tsx read from $.state for this draw.
@@ -159,6 +161,27 @@ export function timeline(agentId: string, all: readonly Call[], turns: readonly 
   ].sort((x, y) => x.at - y.at || (x.turn ? -1 : 0) - (y.turn ? -1 : 0) || x.o - y.o)
 }
 
+// The todo the ring is on, from any of its keys: its row, its actions, its
+// subtasks line, one of its subtasks or that subtask's way into the browser.
+export function ringTodo(ring: string | null, nodes: readonly AgentNode[]) {
+  if (ring === null) return undefined
+  const n = /^(?:todo|ren|act|subs):(\d+)/.exec(ring)?.[1]
+  if (n !== undefined) return Number(n)
+  const id = /^(?:ag|full):(.+)$/.exec(ring)?.[1]
+  return id === undefined ? undefined : nodes.find(a => a.agentId === id)?.todoN
+}
+
+// The todos the view shows, in the order the list draws them: by number, done
+// last. A todo the person is in the middle of stays whatever its status: one
+// just stopped (asking what next) or the one the ring is on, so Pause or Stop
+// never takes the row out from under the ring.
+export function inView(list: readonly Todo[], view: readonly string[], keep: ReadonlySet<number>) {
+  const on = new Set(view)
+  return list
+    .filter(t => on.has(viewOf(t.status)) || keep.has(t.n))
+    .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || a.n - b.n)
+}
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 // How many of a subtask's newest turns and calls its open row shows.
@@ -200,7 +223,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     lit(key, statusChip(els, key, label, onPress, tone, isDimmed))
 
   const open = new Set(u.expanded)
-  const view = e.props.view as { agentId?: string } | undefined
+  const agentView = e.props.view as { agentId?: string } | undefined
 
   const actions = (t: Todo) => {
     const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => (
@@ -250,7 +273,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           <Box gap={1}>
             {btn('exec', 'Exec', () => execTodo($, t, false), 'running')}
-            {/* Auto goes straight to running, so it wears running's fill too. */}
+            {/* Exec and Auto start a run (through drafting), so both wear running's fill. */}
             {btn('auto', 'Auto', () => execTodo($, t, false, true), 'running')}
             {btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
             {!t.hasRun && btn('delete', 'Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
@@ -497,21 +520,39 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     ]
   }
 
+  // The view: what the header's toggles light, plus the todo in hand.
+  const keep = new Set(u.justStopped)
+  const held = ringTodo(ring, nodes)
+  if (held !== undefined) keep.add(held)
+  const view = viewIn(u)
+  const shown = inView(list, view, keep)
+  const hidden = list.length - shown.length
+  const isAll = SUMMARY.every(v => view.includes(v))
+
   const tree = (
     <Box
       flexDirection="column"
       width={e.props.bodyColumns}
       paddingX={PAD_X}
     >
-      {/* Centered: 🔥 Fire's ring box keeps a blank cell above and below it,
-          so top-aligned, the chip sat a row below Todos and its counts. */}
+      {/* Centered: the toggles' and 🔥 Fire's ring boxes keep a blank cell
+          above and below them, so top-aligned, Todos sat a row above them. */}
       <Box alignItems="center">
-        <Box flexGrow={1}>
+        <Box flexGrow={1} flexWrap="wrap" alignItems="center">
           <Text>
             <Text weight="semibold">Todos </Text>
-            <Text dimColor>{list.length} · </Text>
-            {tallySummary(els, list)}
+            <Text dimColor>{list.length}</Text>
           </Text>
+          {/* One toggle per view, each its mark and count; then all, which
+              reads default while every view is lit. The counts are the whole
+              list's, whatever the view shows. */}
+          {tally(list).map(m => lit(`view:${m.status}`, viewToggle(els, m, view.includes(m.status), () => toggleView($, m.status))))}
+          {lit(
+            'view:all',
+            <Button key="view:all" label={isAll ? 'default' : 'all'} plain dimColor onPress={() => void toggleView($, 'all')}>
+              <Text dimColor>{isAll ? 'default' : 'all'}</Text>
+            </Button>,
+          )}
         </Box>
         {/* 🔥 Fire is `/todo exec auto` with no target: the next pending todo,
             in auto mode. It launches into running, so it wears running's
@@ -543,10 +584,12 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       ) : (
         <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
       )}
-      {view?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
+      {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
       <Text> </Text>
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
-      {list.flatMap(todoRows)}
+      {list.length > 0 && shown.length === 0 ? <Text dimColor>Nothing in this view.</Text> : ''}
+      {shown.flatMap(todoRows)}
+      {hidden > 0 ? <Text dimColor>{hidden} hidden by the view</Text> : ''}
     </Box>
   )
   drawnOrder = ringKeys(tree)
