@@ -1,6 +1,6 @@
 import type { Color, EngineInterface, RenderInput } from 'claude-code'
 
-import type { AgentNode, Call, PaneUi, Todo } from '../types'
+import type { AgentNode, Call, Dividers, PaneUi, Todo } from '../types'
 import {
   INFLIGHT,
   addTodo,
@@ -33,6 +33,8 @@ export type PaneData = {
   u: PaneUi
   cap: number
   f: number
+  // What to draw above each todo.
+  dividers: Dividers
 }
 
 // Layout follows docs/mockup.html (scene M3); glyphs and colors follow Claude
@@ -88,9 +90,30 @@ function ringKeys(node: unknown, out: string[] = []): string[] {
   return out
 }
 
+// The columns the tree draws in: the pane's body less its paddingX of 1.
+const PAD_X = 1
+
+// The rule above a todo, sized to `width` so it never wraps: `── #3 Fix kitty
+// tab titles ─────`, the title cut with … where it doesn't fit, always ending
+// on a little rule. Counted in graphemes, so a cut never splits a character;
+// the Text's truncate-end still guards a wide one.
+const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), x => x.segment)
+
+export function dividerParts(n: number, title: string, width: number) {
+  const num = `#${n}`
+  const lead = '── '
+  // Room left for the title once the lead, number, two spaces and a tail of
+  // at least two rule cells are in.
+  const room = width - lead.length - num.length - 2 - 2
+  const chars = graphemes(title)
+  const text = room < 2 ? '' : chars.length <= room ? title : `${chars.slice(0, room - 1).join('').trimEnd()}…`
+  const used = lead.length + num.length + 1 + (text ? graphemes(text).length + 1 : 0)
+  return { lead, num, text: text ? ` ${text} ` : ' ', tail: '─'.repeat(Math.max(0, width - used)) }
+}
+
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f }: PaneData) {
+export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, nodes, all, u, cap, f, dividers }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -271,6 +294,31 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     })
   }
 
+  // A dim rule above each todo, outside every lit() box and keyed without
+  // ring:, so it's never focusable and the arrow keys' order and the room kept
+  // around focusable items stay as they were.
+  const ruleWidth = Math.max(0, e.props.bodyColumns - 2 * PAD_X)
+  const divider = (t: Todo, color: Color) => {
+    if (dividers === 'none') return []
+    if (dividers === 'line') {
+      return [
+        <Box key={`div:${t.n}`}>
+          <Text dimColor wrap="truncate-end">{'─'.repeat(ruleWidth)}</Text>
+        </Box>,
+      ]
+    }
+    const p = dividerParts(t.n, t.title, ruleWidth)
+    return [
+      <Box key={`div:${t.n}`}>
+        <Text wrap="truncate-end">
+          <Text dimColor>{p.lead}</Text>
+          <Text color={color}>{p.num}</Text>
+          <Text dimColor>{p.text}{p.tail}</Text>
+        </Text>
+      </Box>,
+    ]
+  }
+
   const todoRows = (t: Todo) => {
     const [g, gc] = todoGlyph(t.status, f)
     const isOpen = open.has(`t${t.n}`)
@@ -308,8 +356,9 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
           </Box>,
         )
       )
-    if (!isOpen) return [head]
+    if (!isOpen) return [...divider(t, gc), head]
     return [
+      ...divider(t, gc),
       head,
       <Box paddingLeft={2} flexDirection="column">
         {actions(t)}
@@ -322,7 +371,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
     <Box
       flexDirection="column"
       width={e.props.bodyColumns}
-      paddingX={1}
+      paddingX={PAD_X}
     >
       <Box>
         <Box flexGrow={1}>

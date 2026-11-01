@@ -60,6 +60,10 @@ export type Call = {
 
 export type Confirm = 'stop' | 'delete' | 'takeover'
 
+// What the pane draws above each todo: a dim rule with its number and title
+// set in, a plain dim rule, or nothing.
+export type Dividers = 'titled' | 'line' | 'none'
+
 export type PaneUi = {
   expanded: string[]
   confirm: { n: number; kind: Confirm } | null
@@ -104,6 +108,8 @@ declare module 'claude-code' {
       // A done todo's time in the tree in ms (0 keeps it), and the todos past it.
       ttl: number
       expired: number[]
+      // What the pane draws above each todo.
+      dividers: Dividers
     }
   }
 }

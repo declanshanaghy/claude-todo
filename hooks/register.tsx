@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentNode, Call, Confirm, Detail, PaneUi, Todo } from '../types'
+import type { AgentNode, Call, Confirm, Detail, Dividers, PaneUi, Todo } from '../types'
 import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos } from './db'
 import { drawDetail } from './detail'
 import { drawPane, focusOrder } from './pane'
@@ -51,6 +51,8 @@ const ring = atom({ plugin: 'todo', key: 'ring' } as const, null as string | nul
 // whose time is up: the tree leaves them out; the database keeps them.
 const ttl = atom({ plugin: 'todo', key: 'ttl' } as const, 0)
 const expired = atom({ plugin: 'todo', key: 'expired' } as const, [] as number[])
+// What the pane draws above each todo (see dividers below).
+const dividers = atom({ plugin: 'todo', key: 'dividers' } as const, 'titled' as Dividers)
 
 const CALLS_PER_AGENT = 200
 const CALLS_TOTAL = 1500
@@ -607,6 +609,16 @@ async function ttlMs($: $, option: unknown) {
   return Number.isFinite(minutes) && minutes >= 0 ? minutes * 60_000 : DONE_TTL_MINUTES * 60_000
 }
 
+const DIVIDERS: readonly Dividers[] = ['titled', 'line', 'none']
+
+// The rule above each todo: the CLAUDE_TODO_DIVIDERS variable, else the
+// todoDividers option (/config), else titled; an unknown value is titled.
+async function dividerStyle($: $, option: unknown): Promise<Dividers> {
+  const env = (await $.env.get('CLAUDE_TODO_DIVIDERS'))?.trim().toLowerCase()
+  const want = env ? env : option
+  return DIVIDERS.find(d => d === want) ?? 'titled'
+}
+
 async function expire($: $) {
   const keep = await read($, ttl)
   const now = await $.clock.now()
@@ -692,6 +704,8 @@ export const register: Register = (on, options) => {
     }
     const keep = await ttlMs($, options['doneTtlMinutes'])
     await update($, ttl, () => keep)
+    const rule = await dividerStyle($, options['todoDividers'])
+    await update($, dividers, () => rule)
     await expire($)
     $.clock.every(EXPIRE_MS, () => void expire($).catch(() => undefined))
     // A tick that fails (the module reloading under it) is tried again next tick.
@@ -956,6 +970,7 @@ export const register: Register = (on, options) => {
       u: await read($, ui),
       cap: await read($, cpuCap),
       f: await read($, spin),
+      dividers: await read($, dividers),
     })
   })
 }
