@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 180 of 184 cases (97.8%)** are covered by `claude plugin test .`.
+**Coverage: 181 of 185 cases (97.8%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -73,8 +73,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| R1 | Adding a todo answers at once; then, from a timer, the plugin spawns the drafter itself: its own registered agent type (haiku, tools Read, Grep, Glob and `mcp__todo__drafts` only), in the background, its description tagged `[todo-drafts:N]` and its prompt carrying the launch's key | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
-| R2 | `mcp__todo__drafts` stores up to 3 drafts on the todo without touching its prompt or run, and a pending todo's level 1 hints "3 drafts ready"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R1 | Adding a todo answers at once; then, from a timer, the plugin spawns the drafter itself: its own registered agent type (haiku, tools Read, Grep and Glob only), in the background, its description tagged `[todo-drafts:N]` and its prompt carrying the launch's key | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
+| R2 | The drafter's answer (its JSON, fenced or not), or a `mcp__todo__drafts` call, stores up to 3 drafts on the todo without touching its prompt or run, and a pending todo's level 1 hints "3 drafts ready"; an unknown todo, or drafts without a label and a prompt, answer as errors | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 | R3 | The drafter never links as a todo's run: its spawn, its tool calls and its end add no agent, call or tool-use id and change no status | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 | R4 | With drafts stored, ▶ Exec asks ONE AskUserQuestion offering them (labels and whole prompts, plus Other) without drafting; ⚡ Auto takes the first; ✨ Refine still refines the chosen prompt | Exec offers the stored drafts without drafting, Auto takes the first, Refine is unchanged |
 | R5 | A rename clears the drafts and launches a new drafter; drafts sent under the old launch's key are refused as stale; the same title again drafts nothing | a rename clears the drafts and drafts again; drafts the old drafter sends late are refused as stale |
@@ -84,6 +84,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | R9 | A drafter that ends without drafts or fails puts its todo back to pending with a toast, a refused spawn never holds it, and ▶ Exec then drafts in the chat; 🔥 Fire takes the lowest-numbered pending todo | a drafter that ends without drafts, fails or can't start leaves its todo pending, and Exec drafts in the chat |
 | R11 | A prompting todo can be renamed (it stays prompting under the new drafter; the old one's end and late drafts don't release it) or deleted (its drafter's late drafts find nothing) | a prompting todo can be renamed, staying prompting under its new drafter, or deleted |
 | R12 | A todo left prompting with no drafter goes back to pending at the next sync tick: this session's as soon as its drafter isn't tracked (a /clear or restart lost it), another session's once 2 minutes have passed | a prompting todo whose drafter isn't running goes back to pending at the next sync: this session's at once, another's after the wait |
+| R13 | A drafter's answer stores drafts only under its own launch's key (an old one, after a rename, is stale), and an answer without JSON stores none and leaves the todo pending | a drafter's answer stores its drafts only under its own launch's key, and one without JSON stores none |
 | R10 | The drafter's agent type is hidden from the model's own agent listing (`agent.offer`); other types are offered as ever | adding a todo spawns a small read-only drafter in the background, whose drafts are stored and never linked as its run |
 
 ## Linking and tracing

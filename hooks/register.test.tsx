@@ -1982,21 +1982,21 @@ test('adding a todo spawns a small read-only drafter in the background, whose dr
   expect(spawns).toHaveLength(0)
   await clock.settle()
 
-  expect(registered[0]).toMatchObject({ name: 'drafter', model: 'haiku', tools: ['Read', 'Grep', 'Glob', 'mcp__todo__drafts'] })
+  expect(registered[0]).toMatchObject({ name: 'drafter', model: 'haiku', tools: ['Read', 'Grep', 'Glob'] })
   expect(spawns).toHaveLength(1)
   expect(spawns[0]).toMatchObject({ model: 'haiku', description: '[todo-drafts:1] Draft prompts for #1' })
   expect(spawns[0]?.subagentType ?? spawns[0]?.subagent_type).toBe('todo:drafter')
-  expect(spawns[0]?.prompt).toContain('mcp__todo__drafts once: {n: 1, key: "1.1"')
+  expect(spawns[0]?.prompt).toContain('only this JSON object')
+  expect(spawns[0]?.prompt).toContain('{"n": 1, "key": "1.1", "drafts": [')
   expect(spawns[0]?.prompt).toContain('read-only')
 
-  const stored = await storeDrafts($, 1, '1.1')
-  expect(stored.result).toBe('Stored 3 drafts for #1.')
-  expect(todoAt(db, 1)).toMatchObject({ status: 'pending', drafts: DRAFTS, toolUseIds: [], hasRun: false })
-  expect(todoAt(db, 1).prompt).toBeUndefined()
-  // Its spawn, its own calls and its end never touch the todo or its subtasks.
+  // Its spawn and its own calls never touch the todo or its subtasks.
   await $.tool.call({ tool: 'Agent', tool_use_id: 'tuD', description: '[todo-drafts:1] Draft prompts for #1', prompt: 'p' } as never)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', command: 'grep -rl title', agentId: 'dr1' } as never)
-  await turnDone($, 'dr1', 'Stored 3 drafts.')
+  // Its drafts come back as its answer (a fence around the JSON is fine).
+  await turnDone($, 'dr1', '```json\n' + JSON.stringify({ n: 1, key: '1.1', drafts: DRAFTS }) + '\n```')
+  expect(todoAt(db, 1)).toMatchObject({ status: 'pending', drafts: DRAFTS, toolUseIds: [], hasRun: false })
+  expect(todoAt(db, 1).prompt).toBeUndefined()
   expect(Object.keys(db.agents)).toHaveLength(0)
   expect(Object.keys(db.calls)).toHaveLength(0)
   expect(todoAt(db, 1)).toMatchObject({ status: 'pending', toolUseIds: [], drafts: DRAFTS })
@@ -2079,6 +2079,27 @@ test('a rename clears the drafts and drafts again; drafts the old drafter sends 
   expect(spawns).toHaveLength(2)
   expect(todoAt(db, 1).drafts).toEqual(DRAFTS)
   await ui.unmount()
+})
+
+test("a drafter's answer stores its drafts only under its own launch's key, and one without JSON stores none", async ($, on) => {
+  const { db, clock } = drafterEngine(on)
+  await start($)
+  await todo($, 'add Old title')
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:rename' })
+  await ui.input({ key: 'ren:1', text: 'New title' })
+  await ui.unmount()
+  await clock.settle()
+  // The first drafter, asked for the old title, answers late: stale.
+  await turnDone($, 'dr1', JSON.stringify({ n: 1, key: '1.1', drafts: DRAFTS }))
+  expect(todoAt(db, 1).drafts).toBeUndefined()
+  // The second answers with no JSON: nothing stored, and the todo is no
+  // longer prompting.
+  await turnDone($, 'dr2', 'I could not draft anything useful.')
+  expect(todoAt(db, 1).drafts).toBeUndefined()
+  expect(todoAt(db, 1).status).toBe('pending')
 })
 
 test('drafts that arrive once a todo is running are kept without touching its run or its chosen prompt', async ($, on) => {

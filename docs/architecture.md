@@ -20,7 +20,7 @@ flowchart LR
     A -. "tool calls, turns<br/>(seen through hooks)" .-> H
     H -- "atoms: the session's copy" --> P
     H -- "$.agent.spawn on add, rename" --> D
-    D -- "mcp__todo__drafts" --> H
+    D -- "its answer: drafts as JSON" --> H
   end
   S2["Other sessions<br/>in the same repo"]
   DB[("SQLite<br/>todos · agents · calls<br/>migrated · backups")]
@@ -174,7 +174,7 @@ sequenceDiagram
   H->>D: from a timer: $.agent.spawn "[todo-drafts:N] …" with a fresh key
   H->>H: status prompting (owner, start time): Exec, Auto, Fire refuse it
   D->>D: a few Grep, Glob, Read calls
-  D->>H: mcp__todo__drafts {n, key, 3 drafts}
+  D->>H: its answer: {n, key, 3 drafts} as JSON
   H->>H: store them on the todo, status pending (an older key's are stale and refused)
 ```
 

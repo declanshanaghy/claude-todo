@@ -98,8 +98,8 @@ Session: ${ctx.sessionTitle || '(untitled)'}
 The directory's other todos:
 ${others}
 1. Look around the repo just enough to make the prompts concrete (a few Grep, Glob or Read calls: the README, the files the title points at). Keep it short.
-2. Call mcp__todo__drafts once: {n: ${t.n}, key: "${key}", drafts: [{label, prompt}, …]} with exactly 3 drafts, best first. A label is a short name of at most 5 words. A prompt is the whole, self-contained task for an agent that hasn't seen this conversation: what to change, where, and how to tell it's done.
-3. Answer with one line: how many drafts you stored.`
+2. Write exactly 3 drafts, best first. A label is a short name of at most 5 words. A prompt is the whole, self-contained task for an agent that hasn't seen this conversation: what to change, where, and how to tell it's done.
+3. Your final answer is only this JSON object, nothing before or after it: {"n": ${t.n}, "key": "${key}", "drafts": [{"label": "…", "prompt": "…"}, …]}`
 }
 
 export function restartPrompt(t: Todo, cap: number): string {

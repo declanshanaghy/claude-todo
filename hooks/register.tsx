@@ -658,8 +658,8 @@ function queueDrafts($: $, n: number) {
 }
 
 // The plugin spawns the drafter itself: a small, read-only agent type it
-// registered, in the background. It stores its drafts through
-// mcp__todo__drafts with the key it was given; it is never linked as the
+// registered, in the background. It answers with its drafts and the key it
+// was given, as JSON its turn.complete reads; it is never linked as the
 // todo's run. Each launch gets a new key, so a rename's stale drafts are told
 // apart from the ones the new title asked for. Once it's spawned, a pending
 // todo turns prompting (nothing may start it) until its drafts are stored, or
@@ -771,9 +771,28 @@ async function storeDrafts($: $, a: { n?: unknown; key?: unknown; drafts?: unkno
 
 // A drafter's turn ended: if it stored nothing, its todo isn't prompting any
 // more, and ▶ Exec drafts in the chat.
-async function drafterEnded($: $, id: string, failed: boolean) {
+// The drafts in a drafter's answer: the JSON object it was asked for, found
+// from its first { to its last }, so a fence or a stray line around it is
+// fine. Undefined when there's none.
+export function draftsIn(answer: string): unknown[] | undefined {
+  const from = answer.indexOf('{')
+  const to = answer.lastIndexOf('}')
+  if (from === -1 || to <= from) return undefined
+  try {
+    const v = JSON.parse(answer.slice(from, to + 1)) as { drafts?: unknown }
+    return Array.isArray(v.drafts) ? v.drafts : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function drafterEnded($: $, id: string, failed: boolean, answer = '') {
   const who = (await read($, drafters))[id]
   if (!who) return
+  // Its drafts come back as its answer: a tool call from a background
+  // drafter's loop never reached the mod's tool.call hook.
+  const sent = failed ? undefined : draftsIn(answer)
+  if (sent) await storeDrafts($, { n: who.n, key: who.key, drafts: sent })
   await update($, drafters, d => Object.fromEntries(Object.entries(d).filter(([k]) => k !== id)))
   if ((await read($, drafting))[who.n]?.key !== who.key) return
   await update($, drafting, d => omit(d, who.n))
@@ -1171,8 +1190,8 @@ async function setUp($: $, options: Options) {
       name: 'drafter',
       description: "Drafts candidate prompts for a todo-pane todo; spawned by the todo plugin only.",
       prompt:
-        'You draft candidate prompts for a todo in a todo list. You only read: never edit or write files, and never change git state. Follow the task you are given and store your drafts with mcp__todo__drafts.',
-      tools: ['Read', 'Grep', 'Glob', 'mcp__todo__drafts'],
+        'You draft candidate prompts for a todo in a todo list. You only read: never edit or write files, and never change git state. Follow the task you are given and answer with your drafts as the JSON it asks for.',
+      tools: ['Read', 'Grep', 'Glob'],
       model: 'haiku',
       effort: 'low',
       maxTurns: 12,
@@ -1584,7 +1603,7 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
     if (id !== undefined && (await read($, drafters))[id]) {
-      await drafterEnded($, id, e.isAborted || ('reason' in e && e.reason === 'refusal'))
+      await drafterEnded($, id, e.isAborted || ('reason' in e && e.reason === 'refusal'), e.answer)
     } else if (id !== undefined) {
       const node = (await read($, agents)).find(a => a.agentId === id)
       if (node?.status === 'running' && e.isAborted) {
