@@ -1,0 +1,62 @@
+name: Badges
+
+# Recomputes the README's computed badges after every CI run and once a day
+# (so "this week" ages out), and commits them as shields.io endpoint JSON to
+# the orphan `badges` branch, which the README reads through
+# raw.githubusercontent.com.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+# contents: write pushes the badges branch; actions: read lists CI's runs and
+# jobs. Nothing else.
+permissions:
+  contents: write
+  actions: read
+
+# One writer at a time, so pushes to the branch never race.
+concurrency:
+  group: badges
+  cancel-in-progress: false
+
+jobs:
+  badges:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Always main's code: a workflow_run never checks out the branch that ran.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+
+      - name: Compute the badges
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/badges.mjs "$RUNNER_TEMP/badges"
+          node scripts/coverage.mjs --badge "$RUNNER_TEMP/badges/coverage.json" || true
+
+      - name: Commit them to the badges branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git fetch --depth=1 origin badges; then
+            git worktree add "$RUNNER_TEMP/branch" FETCH_HEAD
+            git -C "$RUNNER_TEMP/branch" switch -c badges
+          else
+            git worktree add --orphan -b badges "$RUNNER_TEMP/branch"
+          fi
+          cp "$RUNNER_TEMP"/badges/*.json "$RUNNER_TEMP/branch/"
+          cd "$RUNNER_TEMP/branch"
+          git add -A
+          if git diff --cached --quiet; then echo "No badge changed"; exit 0; fi
+          git commit -q -m "Badges for ${GITHUB_SHA::7}"
+          git push origin HEAD:badges
