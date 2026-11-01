@@ -229,7 +229,8 @@ export function inView(list: readonly Todo[], view: readonly string[], keep: Rea
     .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || a.n - b.n)
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+const noun = (n: number, word: string) => `${word}${n === 1 ? '' : 's'}`
+const plural = (n: number, word: string) => `${n} ${noun(n, word)}`
 
 // How many of a subtask's newest turns and calls its open row shows.
 export const TAIL = 6
@@ -649,10 +650,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const isAll = SUMMARY.every(v => view.includes(v))
   // The cycle's next view names the toggle: all → none → default → all.
   const cycle = isAll ? 'none' : view.length === 0 ? 'default' : 'all'
-  // The body column toggle `i`'s mark starts at: the tree's padding, `Todos
-  // N`, then each toggle before it with its ring's two cells.
+  // The body column toggle `i`'s mark starts at: the tree's padding, `N
+  // Todos`, then each toggle before it with its ring's two cells.
   const toggleAt = (all: readonly Tally[], i: number) =>
-    PAD_X + cells(`Todos ${list.length}`) + all.slice(0, i).reduce((x, m) => x + cells(markText(m.status, String(m.count))[0]) + 2, 0) + 1
+    PAD_X + cells(plural(list.length, 'Todo')) + all.slice(0, i).reduce((x, m) => x + cells(markText(m.status, String(m.count))[0]) + 2, 0) + 1
 
   // The list under the header, one line per row: each todo's rule and rows,
   // then the hidden footer. The first todo draws no rule: the header's ═
@@ -682,15 +683,15 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       width={e.props.bodyColumns}
       paddingX={PAD_X}
     >
-      {/* One line at any width: Todos and the toggles take the room left of
+      {/* One line at any width: the count and the toggles take the room left of
           🔥 Fire and are clipped, never wrapped, so Fire sits flush at the
-          right end. Centered, so Todos and the chips share one baseline. */}
+          right end. Centered, so `N Todos` and the chips share one baseline. */}
       <Box alignItems="center">
         <Box flexGrow={1} flexShrink={1} overflow="hidden" alignItems="center">
           <Box flexShrink={0}>
             <Text>
-              <Text weight="semibold">Todos </Text>
               <Text dimColor>{list.length}</Text>
+              <Text weight="semibold"> {noun(list.length, 'Todo')}</Text>
             </Text>
           </Box>
           {/* One toggle per view, each its mark and count; then the cycle,

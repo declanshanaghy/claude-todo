@@ -1470,6 +1470,35 @@ test('the header is one row at a narrow width, never wrapped, with 🔥 Fire flu
   await ui.unmount()
 })
 
+test('the header leads with the count, "3 Todos" or "1 Todo", and its toggles\' labels line up after it', async ($, on) => {
+  const where: Where = { db: seeded([aTodo(1, 'One'), aTodo(2, 'Two'), aTodo(3, 'Three')]) }
+  engine(on, [], undefined, true, where)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // The dim count first, then the semibold word.
+  const head = (await ui.find({ type: 'Text', text: /^\d+ Todos?$/ })) as Found | undefined
+  expect(textsIn(head)).toEqual(['3 Todos'])
+  const [count, word] = (head?.children ?? []) as Found[]
+  expect(count?.props?.['dimColor']).toBe(true)
+  expect(word?.props?.['weight']).toBe('semibold')
+  // The first toggle's label opens past `3 Todos` and its ring's cell.
+  const first = (boxesIn(await headerOf(ui)) as (Found & { hover?: unknown })[]).find(
+    x => isTip(x) && JSON.stringify(x.hover) === JSON.stringify({ display: 'flex', scope: `tip:view:${SUMMARY[0]}` }),
+  )
+  expect(labelOf(first)?.left).toBe('3 Todos'.length + 1)
+  await ui.unmount()
+
+  await todo($, 'delete 2')
+  await todo($, 'delete 3')
+  const one = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(textsIn(await one.find({ type: 'Text', text: /^\d+ Todos?$/ }))).toEqual(['1 Todo'])
+  const single = (boxesIn(await headerOf(one)) as (Found & { hover?: unknown })[]).find(
+    x => isTip(x) && JSON.stringify(x.hover) === JSON.stringify({ display: 'flex', scope: `tip:view:${SUMMARY[0]}` }),
+  )
+  expect(labelOf(single)?.left).toBe('1 Todo'.length + 1)
+  await one.unmount()
+})
+
 test('a /clear resets the session state, and the list loads again from the database', async ($, on) => {
   const db = emptyDb()
   db.todos['/proj'] = { 1: legacyTodo(1, 'Kept') }

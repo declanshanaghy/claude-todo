@@ -31,7 +31,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .chatlog{flex:1;padding:10px 14px;overflow:auto;max-height:620px}
 .pane{flex:0 0 42%;min-width:0;background:var(--panebg);display:flex;flex-direction:column;outline:none}
 .panehead{padding:6px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;color:var(--dim);white-space:nowrap}
-/* The header is one line at any width: Todos and the toggles grow and clip, never wrap; 🔥 Fire never shrinks, flush right. */
+/* The header is one line at any width: the count ("3 Todos") and the toggles grow and clip, never wrap; 🔥 Fire never shrinks, flush right. */
 #panetitle{flex:1 1 auto;min-width:0;overflow-x:clip;overflow-y:visible}
 .panehead{position:relative;z-index:4}
 #panecap{flex:none}
@@ -179,7 +179,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
       </div>
     </div>
     <div class="pane" id="pane" tabindex="-1">
-      <div class="panehead"><span id="panetitle">Todos</span><span id="panecap"></span></div>
+      <div class="panehead"><span id="panetitle"><span class="dim">0</span> Todos</span><span id="panecap"></span></div>
       <div class="panebody" id="panebody"></div>
     </div>
   </div>
@@ -334,7 +334,7 @@ const SCENES = [
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,10); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:stop'); }},
  {name:'6 · Delete task', hint:'Only todos that have never run can be deleted. The ring is on <b>✕ Delete</b> for #1. Pressing it shows a confirmation with the ring on <b>Cancel</b>. #2 has run, so its action row has no Delete.',
   setup(){ const t2=T(2,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t2,'countmd','agent'); advance(t2,20); S.show=new Set(VIEWS); S.todos=[T(1,'Fix kitty tab titles','pending',{expanded:true}), t2]; S.chat=[['sys','todo: 1 pending · 1 done']]; focusPane('act:t1:delete'); }},
- {name:'7 · Views', hint:'The header, after Todos and before 🔥 Fire, holds one toggle per status on its one line: <b>▶ running</b> (drafting and planning count here), <b>◔ prompting</b>, <b>● pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is running, prompting, pending and failed, so finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. The last toggle cycles: <b>all</b> lights every toggle; pressed again (now <b>none</b>) it turns them all off and the list is empty; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
+ {name:'7 · Views', hint:'The header, after its count (<b>3 Todos</b>) and before 🔥 Fire, holds one toggle per status on its one line: <b>▶ running</b> (drafting and planning count here), <b>◔ prompting</b>, <b>● pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is running, prompting, pending and failed, so finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. The last toggle cycles: <b>all</b> lights every toggle; pressed again (now <b>none</b>) it turns them all off and the list is empty; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending'); startTodo(t2,'statusline','workflow'); advance(t2,6);
     const t4=T(4,'Count md files in ~/.claude','pending'); startTodo(t4,'countmd','agent'); advance(t4,20);
     const t6=T(6,'Fix kitty tab titles','pending'); startTodo(t6,'kittySimple','agent'); advance(t6,20);
@@ -636,12 +636,12 @@ function renderPane(){
   const body=document.getElementById('panebody');
   const c = st => S.todos.filter(t=>t.status===st).length;
   const cv = v => S.todos.filter(t=>viewOf(t.status)===v).length;
-  // The view toggles ride the header after Todos: one per status, its mark and count; lit = shown, struck = hidden. The last cycles default → all → none → default, named for its next press.
+  // The view toggles ride the header after its count ("3 Todos"): one per status, its mark and count; lit = shown, struck = hidden. The last cycles default → all → none → default, named for its next press.
   // Fire is a header control: never hidden, only dimmed while it can't launch.
   const allOn = S.show.size===VIEWS.length;
   const cycle = allOn ? 'none' : S.show.size===0 ? 'default' : 'all';
   const toggles = S.browse ? '' : ` ${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span><span class="tip below">${v}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', cycle, 'flt dim')}`;
-  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>${toggles}`;
+  document.getElementById('panetitle').innerHTML = `<span class="dim">${S.todos.length}</span> ${S.todos.length===1?'Todo':'Todos'}${toggles}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
   const fire = S.browse ? '' : B('fire', `<span class="fill" aria-label="Fire">${SYM.Fire}</span><span class="tip below right">Fire</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
   document.getElementById('panecap').innerHTML = fire;

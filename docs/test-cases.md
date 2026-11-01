@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 217 of 221 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 218 of 222 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -26,6 +26,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C15 | The session title the drafter's prompt names follows each change: set at session start, updated on each prompt, a hook's `sessionTitle` winning over the event's, cleared by a start with none | the header draws no session title; the title still follows each change, for the drafter's prompt |
 | C16 | `/todo exec auto` takes the keyword before or after the target; with no target it runs the lowest-numbered pending todo, and says so when none is pending | /todo exec auto runs a named todo with the keyword before or after it, or the lowest-numbered pending one, and says when none is |
 | C17 | The header is one row at any width: Todos and the toggles grow and clip, never wrapping, and 🔥 Fire, which never shrinks, sits flush at its right end | the header is one row at a narrow width, never wrapped, with 🔥 Fire flush at its right end |
+| C17a | The header leads with the dim count and then the semibold word, `3 Todos` (`1 Todo` for one), and the view toggles' hover labels line up after it | the header leads with the count, "3 Todos" or "1 Todo", and its toggles' labels line up after it |
 | C18 | `/todo resume` runs ⏵ Resume's own path from a timer once the command answered: a paused todo's agent is woken, the todo left drafting | /todo resume resumes a paused todo as the chip does, and one paused before it ever ran as an exec |
 | C19 | `/todo resume` of a todo paused before it ever ran starts it as ▶ Exec would | /todo resume resumes a paused todo as the chip does, and one paused before it ever ran as an exec |
 | C20 | `/todo resume` of a stopped todo whose agent is gone starts a fresh agent on the kept worktree | /todo resume picks up a stopped todo whose agent is gone with a fresh agent on the kept worktree |
