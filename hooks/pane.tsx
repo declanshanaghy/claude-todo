@@ -365,7 +365,9 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       width={e.props.bodyColumns}
       paddingX={PAD_X}
     >
-      <Box>
+      {/* Centered: 🔥 Fire's ring box keeps a blank cell above and below it,
+          so top-aligned, the chip sat a row below Todos and its counts. */}
+      <Box alignItems="center">
         <Box flexGrow={1}>
           <Text>
             <Text weight="semibold">Todos </Text>

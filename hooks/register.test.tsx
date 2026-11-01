@@ -260,6 +260,8 @@ test('M1: /todo add stores a title-only todo and the pane lists it', async ($, o
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
   // The header carries 🔥 Fire where the cap used to be; the cap isn't drawn.
   expect(await ui.find({ type: 'Button', key: 'fire' })).toBeDefined()
+  // Fire's ring box is 3 rows tall; the header centers so it shares the counts' row.
+  expect((((await ui.drawn()) as Found).children?.[0] as Found | undefined)?.props?.['alignItems']).toBe('center')
   expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeUndefined()
   expect(submitted).toHaveLength(0)
   await ui.unmount()
