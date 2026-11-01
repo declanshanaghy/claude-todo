@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
+import { CHIP, CHIP_SYMBOL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 import { clampLines, headParts } from './pane'
 import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
@@ -1242,6 +1242,13 @@ const textsIn = (n: unknown): string[] => {
     typeof x === 'string' || typeof x === 'number' ? String(x) : ((x as Found | null)?.children ?? []).map(all).join('')
   return f.type === 'Text' ? [all(f)] : (f.children ?? []).flatMap(textsIn)
 }
+// A node with its hover labels (absolute Boxes, drawn only on hover) left out:
+// what takes room on screen.
+const isTip = (n: unknown) => typeof n === 'object' && n !== null && (n as Found).type === 'Box' && (n as Found).props?.['position'] === 'absolute'
+const inFlow = (n: Found): Found => ({
+  ...n,
+  children: (n.children ?? []).filter(c => !isTip(c)).map(c => (typeof c === 'object' && c !== null ? inFlow(c as Found) : c)),
+})
 const boxesIn = (n: unknown): Found[] => {
   if (typeof n !== 'object' || n === null) return []
   const f = n as Found
@@ -1293,13 +1300,15 @@ test('the header is one row at a narrow width, never wrapped, with 🔥 Fire flu
   expect(header.type).toBe('Box')
   expect(header.props?.['flexDirection']).not.toBe('column')
   expect(boxesIn(header).filter(b => b.props?.['flexWrap'] !== undefined && b.props['flexWrap'] !== 'nowrap')).toEqual([])
-  // Two parts: the toggles, which grow and clip, then Fire, which never shrinks.
-  const [toggles, fire] = header.children as Found[]
-  expect(header.children).toHaveLength(2)
+  // Two parts in the flow: the toggles, which grow and clip, then Fire, which
+  // never shrinks. The hover labels beside them take no room.
+  const flow = inFlow(header)
+  const [toggles, fire] = flow.children as Found[]
+  expect(flow.children).toHaveLength(2)
   expect(toggles?.props).toMatchObject({ flexGrow: 1, overflow: 'hidden' })
   expect(fire?.props?.['flexShrink']).toBe(0)
   expect(JSON.stringify(fire)).toContain('"fire"')
-  expect(textsIn(header).at(-1)?.trim()).toBe('🔥')
+  expect(textsIn(flow).at(-1)?.trim()).toBe('🔥')
   expect(textsIn(header).some(t => t.includes('A long session title'))).toBe(false)
   await ui.unmount()
 })
@@ -3334,6 +3343,121 @@ test('a disabled chip keeps its own muted look: dimmed, no fill, its tone in dim
   const ui = await mountAll($)
   const [fire] = (await chipsDrawn(ui)).filter(c => c.label === 'Fire')
   expect(fire).toEqual({ label: 'Fire', isDimmed: true, fill: undefined, isDimText: true })
+  await ui.unmount()
+})
+
+// A chip's hover label: the absolute Box beside it in its keyed `tip:` Box.
+type Tip = { left?: unknown; right?: unknown; top?: unknown; display?: unknown; hover?: unknown; word: string }
+const labelOf = (box: Found | undefined): Tip | undefined => {
+  if (box === undefined) return undefined
+  const p = box.props ?? {}
+  return { left: p['left'], right: p['right'], top: p['top'], display: p['display'], hover: (box as { hover?: unknown }).hover, word: textsIn(box).join('').trim() }
+}
+const tipOf = async (ui: { find: (q: { type: string; key: string }) => Promise<unknown> }, key: string) =>
+  labelOf(((await ui.find({ type: 'Box', key: `tip:${key}` })) as Found | undefined)?.children?.find(isTip) as Found | undefined)
+
+test('every chip has a hidden hover label with its word, absolute so it takes no room, kept inside the pane', async ($, on) => {
+  const db = seeded(
+    [
+      aTodo(1, 'Waiting'),
+      running(2, 'Runs'),
+      aTodo(4, 'Stopped one', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'p', taskId: 'ag4' }),
+      aTodo(5, 'Drafting', { status: 'drafting', owner: 's1' }),
+      running(6, 'Elsewhere', { owner: 'other' }),
+    ],
+    [agentNode('ag2', 2)],
+    [callRow('c1', 'ag2', { ms: 12 })],
+  )
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await mountAll($)
+  for (const n of [1, 2, 4, 5, 6]) await ui.press({ key: `todo:${n}` })
+  await ui.press({ key: 'subs:2' })
+  await ui.press({ key: 'ag:ag2' })
+  await ui.press({ key: 'act:6:takeover' })
+  const chips = (await ui.findAll({ type: 'Button' })).filter(b => /^(act:|fire$|full:)/.test(String(b.key)))
+  expect(chips.length).toBeGreaterThan(15)
+  for (const b of chips) {
+    const word = String(b.props['label'])
+    const tip = await tipOf(ui, String(b.key))
+    // Hidden until the pointer is on the chip, then its word.
+    expect(`${String(b.key)}: ${JSON.stringify(tip && { word: tip.word, display: tip.display, hover: tip.hover })}`).toBe(
+      `${String(b.key)}: ${JSON.stringify({ word, display: 'none', hover: { display: 'flex' } })}`,
+    )
+    // A row away from the chip, above, but for the header's, below.
+    expect(tip?.top).toBe(b.key === 'fire' ? 1 : -1)
+  }
+  // Fire is flush at the right edge, so its label is anchored there.
+  expect(await tipOf(ui, 'fire')).toMatchObject({ right: 0 })
+  // Each header toggle draws only its mark: its status's word joins its hover group.
+  const header = await headerOf(ui)
+  const drawnBoxes = boxesIn(header) as (Found & { hover?: unknown })[]
+  for (const v of SUMMARY) {
+    expect(drawnBoxes.find(x => x.props?.['key'] === `tip:view:${v}`)?.hover).toEqual({ scope: `tip:view:${v}` })
+    const label = drawnBoxes.find(x => isTip(x) && JSON.stringify(x.hover) === JSON.stringify({ display: 'flex', scope: `tip:view:${v}` }))
+    expect(`${v}: ${String(labelOf(label)?.word)} ${String(labelOf(label)?.display)} ${String(labelOf(label)?.top)}`).toBe(`${v}: ${v} none 1`)
+  }
+  // The hover labels add no line and no blank one.
+  expect(blankRows(await ui.findAll({ type: 'Box' }))).toEqual([])
+  await ui.unmount()
+
+  // Near the right edge a label shifts left, so the pane doesn't clip it.
+  const narrow = await mountAll($, { bodyColumns: 24 })
+  expect(await tipOf(narrow, 'act:1:exec')).toMatchObject({ left: 0 })
+  const details = await tipOf(narrow, 'act:1:details')
+  expect(typeof details?.left === 'number' && details.left < 0).toBe(true)
+  await narrow.unmount()
+})
+
+test('focusing a chip puts its word and what it does in the hint line, at the same line count; unfocusing restores the hint', async ($, on) => {
+  const long = 'Make both statuslines read colors from the theme lib via a new generator, keeping their output byte for byte identical.'
+  const db = seeded([aTodo(1, 'Fresh'), aTodo(2, 'Long', { prompt: long })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await mountAll($, { bodyColumns: 50 })
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'todo:2' })
+  const focus = (element: string) => $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element, origin: { kind: 'person' } })
+  // Level 1's lines: the indented column under todo #n's header.
+  const level1 = async (n: number) => {
+    const col = (await ui.findAll({ type: 'Box' })).find(b => b.props['paddingLeft'] === 2 && b.props['flexDirection'] === 'column' && JSON.stringify(b.children).includes(`"act:${n}:`))
+    return (col?.children ?? []).filter(c => typeof c === 'object' && c !== null).length
+  }
+  const before = [await level1(1), await level1(2)]
+  // The hint line: level 1's first Text that names a chip, `✎ Rename: …`.
+  const hint = async (n: number) => {
+    const col = (await ui.findAll({ type: 'Box' })).find(b => b.props['paddingLeft'] === 2 && b.props['flexDirection'] === 'column' && JSON.stringify(b.children).includes(`"act:${n}:`))
+    const first = (col?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null)
+    const text = first === undefined ? '' : textsIn({ children: [first] }).join('')
+    return Object.entries(CHIP).some(([w, c]) => text.startsWith(` ${c.symbol} ${w}: `)) ? text : undefined
+  }
+
+  await focus('act:1:rename')
+  expect(await hint(1)).toBe(' ✎ Rename: give the todo a new title')
+  expect(await ui.find({ type: 'Text', text: ' no prompt yet: ▶ Exec drafts one' })).toBeUndefined()
+  expect(await level1(1)).toBe(before[0])
+  // Another todo's level 1 is left as it was.
+  expect(await hint(2)).toBeUndefined()
+
+  // A two-line prompt gives up its first line, and keeps the rest cut with …
+  await focus('act:2:details')
+  expect(await hint(2)).toBe(' ☰ Details: browse its prompt, subtasks and calls')
+  expect(await hint(1)).toBeUndefined()
+  expect(await level1(2)).toBe(before[1])
+  const [first] = clampLines(`“${long}”`, 44, 1)
+  expect(await ui.find({ type: 'Text', text: ` ${first}` })).toBeDefined()
+
+  // A confirmation's chips are described in its own words.
+  await ui.press({ key: 'act:1:delete' })
+  await focus('act:1:deleteyes')
+  expect(await hint(1)).toBe(' ✕ Delete: remove the todo for good')
+
+  // Off the chips, the usual hint is back.
+  await ui.press({ key: 'act:1:cancel' })
+  await focus('todo:1')
+  expect(await hint(1)).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: ' no prompt yet: ▶ Exec drafts one' })).toBeDefined()
+  expect([await level1(1), await level1(2)]).toEqual(before)
   await ui.unmount()
 })
 

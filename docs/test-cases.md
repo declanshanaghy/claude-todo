@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 206 of 210 cases (98.1%)** are covered by `claude plugin test .`.
+**Coverage: 211 of 215 cases (98.1%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -263,6 +263,11 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U16b | Every enabled chip, walked in every state (each todo status, each confirmation, a just-stopped row with Leave, a subtask's Full transcript and the transcript's Back), fills with a tone's color and never a grey (`GREYS`) or dim text; every chip label is reached | an enabled chip is never grey or dim, in any state: only a disabled one is |
 | U16c | A disabled chip (🔥 Fire with nothing runnable) keeps its own muted look: dimmed, no fill, its tone in dim text | a disabled chip keeps its own muted look: dimmed, no fill, its tone in dim text |
 | U16a | No two actions share a chip symbol (Exec ▶ and Resume ⏵ differ) except the safe way back (Keep, Cancel, Back all ↩), and each symbol is one grapheme, wide or not | no two actions share a chip symbol, apart from the safe way back out of a choice |
+| U16d | Every chip (each todo state's, each confirmation's, a subtask's ↗ Full transcript, 🔥 Fire) sits in a keyed `tip:` Box beside an absolute label Box drawn `display: "none"` with `hover: { display: "flex" }` holding its word; the label opens on the row above, or below for the header's, and adds no line | every chip has a hidden hover label with its word, absolute so it takes no room, kept inside the pane |
+| U16e | Each header status toggle, drawn as its mark alone, joins a hover group (`tip:view:<status>`) whose hidden absolute label, on the row below, holds its status's word | every chip has a hidden hover label with its word, absolute so it takes no room, kept inside the pane |
+| U16f | A hover label near the pane's right edge shifts left so the pane doesn't clip it (a narrow pane's ☰ Details), one with room keeps its place, and 🔥 Fire's is anchored at its right edge | every chip has a hidden hover label with its word, absolute so it takes no room, kept inside the pane |
+| U16g | With the ring on one of a todo's chips, level 1's first line says `<symbol> <word>: <what it does>` in place of the usual hint or the prompt's first line (the prompt keeps its other lines, re-cut with …), so level 1 keeps its line count; other todos are untouched | focusing a chip puts its word and what it does in the hint line, at the same line count; unfocusing restores the hint |
+| U16h | A confirmation's chips are described in the table's words, and moving the ring off the chips restores the usual hint and line count | focusing a chip puts its word and what it does in the hint line, at the same line count; unfocusing restores the hint |
 | U17 | Each status has its own color (done never reads as running, stopped's true red never as failed's theme error), and the done/failed toasts name the status by its mark | the palette gives every status its own color, stopped and failed included, and the toasts name it by its mark |
 | U18 | Closing a level closes everything under it (the todo its subtasks line and subtasks, the subtasks line its subtasks), and what is open outlasts a redraw and a reload | closing a level closes everything under it, and what is open outlasts a redraw and a reload |
 

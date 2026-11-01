@@ -146,31 +146,82 @@ export const viewToggle = (
 )
 
 // Each action chip draws one symbol, not its word, so a row of them stays
-// compact; the word stays the Button's label, for screen readers and tests.
-// No two actions share a symbol. The safe "no" choices (Keep, Cancel, Back)
-// all step back with ↩, and a confirmation row spells out what its ■, ✕ or
-// ⇄ will do beside it. 🔥 ⚡ ✨ are two cells wide, which needs no sums here:
-// a chip is its own flex item, measured by the engine.
-export const CHIP_SYMBOL: Readonly<Record<string, string>> = {
-  Exec: '▶',
-  Auto: '⚡',
-  Fire: '🔥',
-  Rename: '✎',
-  Refine: '✨',
-  Restart: '↻',
-  Resume: '⏵',
-  Pause: '⏸',
-  Stop: '■',
-  Delete: '✕',
-  Takeover: '⇄',
-  Details: '☰',
-  Reset: '↺',
-  Keep: '↩',
-  Cancel: '↩',
-  Back: '↩',
-  Leave: '✓',
-  'Full transcript': '↗',
+// compact. Its word, the key here, is the one name every place uses: the
+// Button's label (for screen readers and tests), the label a hover reveals,
+// and, with what the chip does, the todo's hint line while the focus ring is
+// on it. The README's Buttons bullet lists the same table. No two actions
+// share a symbol. The safe "no" choices (Keep, Cancel, Back) all step back
+// with ↩. A confirmation asks in the words of its chip's `does`. 🔥 ⚡ ✨ are
+// two cells wide, which needs no sums here: a chip is its own flex item,
+// measured by the engine.
+export const CHIP: Readonly<Record<string, { symbol: string; does: string }>> = {
+  Exec: { symbol: '▶', does: 'run it, picking or writing its prompt first' },
+  Auto: { symbol: '⚡', does: 'run it on its first draft, asking nothing' },
+  Fire: { symbol: '🔥', does: 'auto-run the lowest-numbered pending todo' },
+  Rename: { symbol: '✎', does: 'give the todo a new title' },
+  Refine: { symbol: '✨', does: 'rework its prompt in the chat, then run it' },
+  Restart: { symbol: '↻', does: 'run it again from a fresh start' },
+  Resume: { symbol: '⏵', does: 'pick its run up where it left off' },
+  Pause: { symbol: '⏸', does: 'halt it, keeping its run to resume' },
+  Stop: { symbol: '■', does: 'execution halts; the todo is kept' },
+  Delete: { symbol: '✕', does: 'remove the todo for good' },
+  Takeover: { symbol: '⇄', does: "it's marked stopped here; its run in the other session isn't stopped" },
+  Details: { symbol: '☰', does: 'browse its prompt, subtasks and calls' },
+  Reset: { symbol: '↺', does: 'take it back from the chat' },
+  Keep: { symbol: '↩', does: 'leave it as it is' },
+  Cancel: { symbol: '↩', does: 'leave it as it is' },
+  Back: { symbol: '↩', does: 'back to the list' },
+  Leave: { symbol: '✓', does: 'fold it away as it is' },
+  'Full transcript': { symbol: '↗', does: "open every turn and call of the subtask" },
 }
+
+export const CHIP_SYMBOL: Readonly<Record<string, string>> = Object.fromEntries(Object.entries(CHIP).map(([w, c]) => [w, c.symbol]))
+
+// What a chip does as a sentence, which its confirmation asks with.
+export const chipSentence = (label: string) => {
+  const does = CHIP[label]?.does ?? ''
+  return `${does.charAt(0).toUpperCase()}${does.slice(1)}.`
+}
+
+// The todo's hint line while the ring is on one of its chips: `✎ Rename: give
+// the todo a new title`.
+export const chipHint = (label: string) => [`${CHIP[label]?.symbol ?? ''} ${label}`.trim(), CHIP[label]?.does ?? ''] as const
+
+// The hover label: a chip's word, revealed while the pointer is on the chip.
+// Absolute, so it takes no row and moves nothing. The pane clips it, so the
+// caller opens it on a row with room (`top` 1 below, -1 above) and shifts it
+// left (`left` below 0), or anchors it at the chip's right edge (`right` 0),
+// near the pane's right edge. A quiet label: the theme's plain text in
+// italics, with no fill, as grey reads as disabled (GREYS); its cell of space
+// either side parts it from the line it covers.
+export type TipAt = { top: 1 | -1; left?: number; right?: number }
+
+export const TIP: Color = 'text'
+
+export const tipLabel = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, word: string, at: TipAt, scope?: string) => (
+  <Box
+    position="absolute"
+    top={at.top}
+    {...(at.right === undefined ? { left: at.left ?? 0 } : { right: at.right })}
+    display="none"
+    hover={scope === undefined ? { display: 'flex' } : { display: 'flex', scope }}
+    flexShrink={0}
+  >
+    <Text color={TIP} italic>
+      {` ${word} `}
+    </Text>
+  </Box>
+)
+
+// A chip and its hover label in one keyed Box: the key makes the Box a hover
+// scope, so the pointer anywhere on the chip reveals the label, with no hook
+// run and no redraw.
+export const withTip = ({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, key: string, word: string, at: TipAt, node: JSX.Element) => (
+  <Box key={`tip:${key}`} flexShrink={0}>
+    {node}
+    {tipLabel({ Box, Text }, word, at)}
+  </Box>
+)
 
 // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
 // Text child carries the tone's fill around its symbol, padded a cell each

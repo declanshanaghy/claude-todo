@@ -2,7 +2,25 @@ import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-c
 
 import type { AgentNode, Call, PaneUi, Todo, Turn } from '../types'
 import { clean } from './detail'
-import { DIVIDER, SUMMARY, type Tone, markOf, markText, statusChip, statusGlyph, tally, viewOf, viewToggle } from './marks'
+import {
+  CHIP,
+  DIVIDER,
+  SUMMARY,
+  type Tally,
+  type TipAt,
+  type Tone,
+  chipHint,
+  chipSentence,
+  markOf,
+  markText,
+  statusChip,
+  statusGlyph,
+  tally,
+  tipLabel,
+  viewOf,
+  viewToggle,
+  withTip,
+} from './marks'
 import { type Chip, offers } from './moves'
 import {
   addTodo,
@@ -236,34 +254,64 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const lit = (key: string, node: JSX.Element) => ringBox(els, ring, key, node)
 
   // An action chip fills with the color of the status it moves the todo into
-  // (marks.tsx), so the buttons, rows and summaries share one palette.
-  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'stay', isDimmed = false) =>
-    lit(key, statusChip(els, key, label, onPress, tone, isDimmed))
+  // (marks.tsx), so the buttons, rows and summaries share one palette. Its
+  // word shows on hover, in a label placed by `at` (tipAt).
+  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'stay', isDimmed = false, at: TipAt = { top: -1 }) =>
+    lit(key, withTip(els, key, label, at, statusChip(els, key, label, onPress, tone, isDimmed)))
+
+  // Where a hover label opens for a chip whose box starts at column `x` of
+  // the body: on the row above (every chip but the header's has the tree's
+  // rows above it), shifted left where it would run past the pane's right
+  // edge, which clips it.
+  const tipAt = (x: number, word: string, top: 1 | -1 = -1): TipAt => ({ top, left: Math.min(0, e.props.bodyColumns - (x + cells(word) + 2)) })
+  // A chip's cells, its ring's two included.
+  const chipCells = (label: string) => cells(` ${CHIP[label]?.symbol ?? label} `) + 2
 
   const open = new Set(u.expanded)
   const agentView = e.props.view as { agentId?: string } | undefined
 
+  // A todo's action rows, and the word of each chip they draw by its key, for
+  // the hint line while the ring is on one.
   const actions = (t: Todo) => {
-    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'stay') => chip(`act:${t.n}:${k}`, label, onPress, tone)
-    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }), 'details')
+    const labels = new Map<string, string>()
+    // The column the next chip's ring box starts at: the tree's padding and
+    // level 1's indent, then what the row drew before it.
+    let col = PAD_X + 2
+    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'stay') => {
+      const key = `act:${t.n}:${k}`
+      labels.set(key, label)
+      const at = tipAt(col + 1, label)
+      col += chipCells(label) + 1
+      return chip(key, label, onPress, tone, false, at)
+    }
     const c = u.confirm?.n === t.n ? u.confirm.kind : null
     if (c === 'stop') {
-      return [
-        <Text color="error">Stop #{t.n}? Execution halts; the todo is kept.</Text>,
-        <Box gap={1}>
-          {btn('stopyes', 'Stop', () => haltTodo($, t, 'stopped'), 'stopped')}
-          {btn('keep', 'Keep', () => cancelConfirm($, t.n, 'stop'))}
-        </Box>,
-      ]
+      return {
+        labels,
+        rows: [
+          <Text color="error">
+            Stop #{t.n}? {chipSentence('Stop')}
+          </Text>,
+          <Box gap={1}>
+            {btn('stopyes', 'Stop', () => haltTodo($, t, 'stopped'), 'stopped')}
+            {btn('keep', 'Keep', () => cancelConfirm($, t.n, 'stop'))}
+          </Box>,
+        ],
+      }
     }
     if (c === 'takeover') {
-      return [
-        <Text color="error">Take over #{t.n}? It's marked stopped here; its run in the other session isn't stopped.</Text>,
-        <Box gap={1}>
-          {btn('takeyes', 'Takeover', () => takeOver($, t), 'stopped')}
-          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'))}
-        </Box>,
-      ]
+      return {
+        labels,
+        rows: [
+          <Text color="error">
+            Take over #{t.n}? {chipSentence('Takeover')}
+          </Text>,
+          <Box gap={1}>
+            {btn('takeyes', 'Takeover', () => takeOver($, t), 'stopped')}
+            {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'))}
+          </Box>,
+        ],
+      }
     }
     // What the row offers comes from offers() (moves.ts), which the /todo
     // verbs check too, so a chip and its command can't disagree. Each chip's
@@ -283,7 +331,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       leave: () => btn('leave', 'Leave', () => leaveTodo($, t.n)),
       // In flight in another session: its task ids aren't this one's to pause.
       takeover: () => btn('takeover', 'Takeover', () => askConfirm($, t.n, 'takeover'), 'stopped'),
-      details: () => details,
+      details: () => btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }), 'details'),
     }
     const on = offers(t, me, u.justStopped)
     // A hint leads the row where the todo is out of this pane's hands.
@@ -303,21 +351,42 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
                   : 'drafting the prompt…'
         : ''
     if (c === 'delete') {
-      return [
-        <Text color="error">Delete "#{t.n} {t.title}"?</Text>,
-        <Box gap={1}>
-          {btn('deleteyes', 'Delete', () => deleteTodo($, t), 'danger')}
-          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'delete'))}
-        </Box>,
-      ]
+      return {
+        labels,
+        rows: [
+          <Text color="error">Delete "#{t.n} {t.title}"?</Text>,
+          <Box gap={1}>
+            {btn('deleteyes', 'Delete', () => deleteTodo($, t), 'danger')}
+            {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'delete'))}
+          </Box>,
+        ],
+      }
     }
     // One row, whatever the state: carry on, start over, put away, Details last.
-    return [
-      <Box gap={1}>
-        {hint ? <Text dimColor>{hint}</Text> : ''}
-        {on.map(k => make[k]())}
-      </Box>,
-    ]
+    if (hint) col += cells(hint) + 1
+    const chips = on.map(k => make[k]())
+    return {
+      labels,
+      rows: [
+        <Box gap={1}>
+          {hint ? <Text dimColor>{hint}</Text> : ''}
+          {chips}
+        </Box>,
+      ],
+    }
+  }
+
+  // Level 1's first line while the ring is on one of the todo's chips: the
+  // chip's symbol and word, then what it does, cut to the line.
+  const hintLine = (n: number, label: string) => {
+    const [name, does] = chipHint(label)
+    return (
+      <Text key={`hint:${n}`} wrap="truncate-end">
+        {' '}
+        <Text weight="semibold">{name}</Text>
+        <Text dimColor>: {does}</Text>
+      </Text>
+    )
   }
 
   // The columns a lit item's content has: the body less its padding and the
@@ -362,8 +431,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     }
     rows.push(
       <Box>
-        {chip(`full:${a.agentId}`, 'Full transcript', () =>
-          openDetail($, { kind: 'agent', agentId: a.agentId }, `ag:${a.agentId}`),
+        {chip(
+          `full:${a.agentId}`,
+          'Full transcript',
+          () => openDetail($, { kind: 'agent', agentId: a.agentId }, `ag:${a.agentId}`),
+          'stay',
+          false,
+          // Level 3's indent: the tree's padding and three levels of 2.
+          tipAt(PAD_X + 6 + 1, 'Full transcript'),
         )}
       </Box>,
     )
@@ -457,16 +532,26 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     const subsOpen = open.has(`s${t.n}`)
     const calls = mine.reduce((n, a) => n + callsOf(a.agentId), 0)
     const done = mine.filter(a => a.status === 'done').length
+    const acts = actions(t)
+    // While the ring is on one of its chips, the first line says what that
+    // chip does, in place of the prompt's first line or the usual hint: the
+    // prompt keeps the lines it had less one, so level 1 keeps its size.
+    const focused = ring === null ? undefined : acts.labels.get(ring)
+    const promptLines = t.prompt ? clampLines(`“${clean(t.prompt)}”`, inner - 2) : []
+    const promptRows = (rows: string[]) =>
+      rows.map(l => (
+        <Text dimColor wrap="truncate-end">
+          {' '}
+          {l}
+        </Text>
+      ))
     return [
       head,
       <Box paddingLeft={2} flexDirection="column">
-        {t.prompt ? (
-          clampLines(`“${clean(t.prompt)}”`, inner - 2).map(l => (
-            <Text dimColor wrap="truncate-end">
-              {' '}
-              {l}
-            </Text>
-          ))
+        {focused !== undefined ? (
+          [hintLine(t.n, focused), ...(t.prompt && promptLines.length > 1 ? promptRows(clampLines(`“${clean(t.prompt)}”`, inner - 2, promptLines.length - 1)) : [])]
+        ) : t.prompt ? (
+          promptRows(promptLines)
         ) : t.status === 'prompting' ? (
           <Text color={markOf('prompting').color} italic>
             {' '}
@@ -498,7 +583,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         ) : (
           ''
         )}
-        {actions(t)}
+        {acts.rows}
         {mine.length > 0
           ? lit(
               `subs:${t.n}`,
@@ -551,6 +636,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const isAll = SUMMARY.every(v => view.includes(v))
   // The cycle's next view names the toggle: all → none → default → all.
   const cycle = isAll ? 'none' : view.length === 0 ? 'default' : 'all'
+  // The body column toggle `i`'s mark starts at: the tree's padding, `Todos
+  // N`, then each toggle before it with its ring's two cells.
+  const toggleAt = (all: readonly Tally[], i: number) =>
+    PAD_X + cells(`Todos ${list.length}`) + all.slice(0, i).reduce((x, m) => x + cells(markText(m.status, String(m.count))[0]) + 2, 0) + 1
 
   const tree = (
     <Box
@@ -574,7 +663,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
               named for the view a press makes: all, none while every view is
               lit, default while none is. The counts are the whole list's,
               whatever the view shows. */}
-          {tally(list).map(m => lit(`view:${m.status}`, viewToggle(els, m, view.includes(m.status), () => toggleView($, m.status))))}
+          {tally(list).map(m =>
+            lit(
+              `view:${m.status}`,
+              <Box key={`tip:view:${m.status}`} flexShrink={0} hover={{ scope: `tip:view:${m.status}` }}>
+                {viewToggle(els, m, view.includes(m.status), () => toggleView($, m.status))}
+              </Box>,
+            ),
+          )}
           {lit(
             'view:all',
             <Button key="view:all" label={cycle} plain dimColor onPress={() => void toggleView($, 'all')}>
@@ -587,7 +683,17 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
             color. A persistent header control, it is never hidden: while
             nothing is pending or the cap is full it is dimmed (disabled),
             still a focus stop, and a press only says why. */}
-        {fault ? '' : <Box flexShrink={0}>{chip('fire', 'Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
+        {/* Its hover label opens on the row below, the header having none
+            above, anchored at Fire's right edge, flush with the pane's. */}
+        {fault ? '' : <Box flexShrink={0}>{chip('fire', 'Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null, { top: 1, right: 0 })}</Box>}
+        {/* The toggles' hover labels, here rather than beside each toggle:
+            the box holding the toggles clips what leaves its one row. Each
+            joins its toggle's hover group (`scope`), so the pointer on the
+            toggle reveals it, on the row below. */}
+        {tally(list).map((m, i, all) => {
+          const x = toggleAt(all, i)
+          return tipLabel(els, m.status, { top: 1, left: Math.min(x, e.props.bodyColumns - (cells(m.status) + 2)) - PAD_X }, `tip:view:${m.status}`)
+        })}
       </Box>
       {fault ? <Text color="error">⚠ {fault}</Text> : ''}
       {Input && !fault ? (
@@ -601,7 +707,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       ) : (
         <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
       )}
-      {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
+      {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({}), 'stay', false, tipAt(PAD_X + 1, 'Back')) : ''}
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
       {list.length > 0 && shown.length === 0 ? <Text dimColor>Nothing in this view.</Text> : ''}
       {shown.flatMap((t, i) => [divider(t.n, i === 0), ...todoRows(t)])}

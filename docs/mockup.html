@@ -32,7 +32,8 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .pane{flex:0 0 42%;min-width:0;background:var(--panebg);display:flex;flex-direction:column;outline:none}
 .panehead{padding:6px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;color:var(--dim);white-space:nowrap}
 /* The header is one line at any width: Todos and the toggles grow and clip, never wrap; 🔥 Fire never shrinks, flush right. */
-#panetitle{flex:1 1 auto;min-width:0;overflow:hidden}
+#panetitle{flex:1 1 auto;min-width:0;overflow-x:clip;overflow-y:visible}
+.panehead{position:relative;z-index:4}
 #panecap{flex:none}
 .pane.has-focus .panehead{color:var(--fg);border-bottom-color:var(--orange)}
 .pane.has-focus{box-shadow:inset 2px 0 0 var(--orange)}
@@ -63,6 +64,16 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .chip.tone-prompting{--tone:var(--periwinkle)}.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
 .chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--error)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
+/* A chip's word on hover (withTip/tipLabel in hooks/marks.tsx): an absolute label that takes no row,
+   on the row above the chip (below for the header's), shifted left near the pane's right edge; quiet:
+   plain italic text, no fill. The header's status toggles reveal their status's word the same way. */
+.chip,.flt{position:relative}
+.tip{display:none;position:absolute;bottom:100%;left:0;z-index:5;white-space:pre;font-style:italic;font-weight:400;color:var(--fg);background:var(--term);padding:0 1ch;pointer-events:none}
+.tip.below{bottom:auto;top:100%}.tip.right{left:auto;right:0}
+.chip:hover>.tip,.flt:hover>.tip{display:block}
+/* The hint line while the ring is on one of the todo's chips: `✎ Rename: give the todo a new title`. */
+.chiphint{overflow:hidden;text-overflow:ellipsis}
+.clamp1{white-space:normal;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 /* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
 .chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
 /* current: Claude Code inverts the focused element, so the fill becomes text color */
@@ -137,7 +148,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 </head>
 <body>
 <h1>/todo pane: interactive mockup</h1>
-<div class="sub">The terminal below simulates Claude Code with the <code>todo</code> mod's right-hand pane. It supports only what the terminal mod API supports: a focus ring, Tab/arrows, Enter or click to press, Esc to leave. There are no hover effects and no single-letter hotkeys.</div>
+<div class="sub">The terminal below simulates Claude Code with the <code>todo</code> mod's right-hand pane. It supports only what the terminal mod API supports: a focus ring, Tab/arrows, Enter or click to press, Esc to leave. The one hover effect is the engine's own reveal: a chip or status toggle shows its word while the pointer is on it. With the ring on a todo's chip, the todo's first level-1 line names the chip and says what it does. There are no single-letter hotkeys.</div>
 <div class="focusbar" id="focusbar"><b style="color:var(--fg)">Focus style:</b></div>
 <div class="tabs" id="tabs"></div>
 <div class="hint" id="hint"></div>
@@ -537,13 +548,19 @@ function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area
 // Filled action chip, toned like hooks/marks.tsx: the status the action leads to
 // (running, paused, stopped, drafting…), 'danger' for Delete, 'details' for
 // Details (its own teal, as it moves no status), 'edit' for Rename, or 'stay'.
-// A chip draws only its symbol (CHIP_SYMBOL there); the word is its label.
-const SYM={Exec:'▶',Auto:'⚡',Fire:'🔥',Rename:'✎',Refine:'✨',Restart:'↻',Resume:'⏵',Pause:'⏸',Stop:'■',Delete:'✕',Takeover:'⇄',Details:'☰',Reset:'↺',Keep:'↩',Cancel:'↩',Back:'↩',Leave:'✓','Full transcript':'↗'};
-function chipB(fid, label, tone='stay'){ return B(fid, `<span class="fill" title="${esc(label)}" aria-label="${esc(label)}">${esc(SYM[label]??label)}</span>`, `chip tone-${tone}`); }
+// A chip draws only its symbol (CHIP there); the word is its label, its hover label, and with
+// `does` the todo's hint line while the ring is on it.
+const CHIP={Exec:['▶','run it, picking or writing its prompt first'],Auto:['⚡','run it on its first draft, asking nothing'],Fire:['🔥','auto-run the lowest-numbered pending todo'],Rename:['✎','give the todo a new title'],Refine:['✨','rework its prompt in the chat, then run it'],Restart:['↻','run it again from a fresh start'],Resume:['⏵','pick its run up where it left off'],Pause:['⏸','halt it, keeping its run to resume'],Stop:['■','execution halts; the todo is kept'],Delete:['✕','remove the todo for good'],Takeover:['⇄',"it's marked stopped here; its run in the other session isn't stopped"],Details:['☰','browse its prompt, subtasks and calls'],Reset:['↺','take it back from the chat'],Keep:['↩','leave it as it is'],Cancel:['↩','leave it as it is'],Back:['↩','back to the list'],Leave:['✓','fold it away as it is'],'Full transcript':['↗','open every turn and call of the subtask']};
+const SYM=Object.fromEntries(Object.entries(CHIP).map(([w,[sym]])=>[w,sym]));
+const sentence = l => { const d=CHIP[l][1]; return d[0].toUpperCase()+d.slice(1)+'.'; };
+// The word each drawn act: chip carries, by its fid, for the hint line.
+const LABELS={};
+function chipB(fid, label, tone='stay', tip=''){ LABELS[fid]=label; return B(fid, `<span class="fill" aria-label="${esc(label)}">${esc(SYM[label]??label)}</span><span class="tip ${tip}">${esc(label)}</span>`, `chip tone-${tone}`); }
 function actRow(t){
-  const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone);
+  // Details, last on its row, opens its label leftward so the pane's edge doesn't clip it.
+  const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone, k==='details'?'right':'');
   const det = a('details','Details','details');
-  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','Stop','stopped')} ${a('keep','Keep')}</div>`;
+  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? ${sentence('Stop')} </div><div class="row ind2 confirm">${a('stopyes','Stop','stopped')} ${a('keep','Keep')}</div>`;
   if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
     // Prompting: nothing may start it yet, so Exec and Auto are left out; Rename and Delete as ever.
@@ -609,10 +626,10 @@ function renderPane(){
   // Fire is a header control: never hidden, only dimmed while it can't launch.
   const allOn = S.show.size===VIEWS.length;
   const cycle = allOn ? 'none' : S.show.size===0 ? 'default' : 'all';
-  const toggles = S.browse ? '' : ` ${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', cycle, 'flt dim')}`;
+  const toggles = S.browse ? '' : ` ${VIEWS.map(v=>B('flt:'+v, `<span class="${MARK[v][1]}">${MARK[v][0]}${cv(v)}</span><span class="tip below">${v}</span>`, 'flt '+(S.show.has(v)?'':'off'))).join('')}&nbsp;${B('flt:all', cycle, 'flt dim')}`;
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length}</span>${toggles}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
-  const fire = S.browse ? '' : B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
+  const fire = S.browse ? '' : B('fire', `<span class="fill" aria-label="Fire">${SYM.Fire}</span><span class="tip below right">Fire</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
   document.getElementById('panecap').innerHTML = fire;
   if(S.browse){
     body.innerHTML = renderBrowser();
@@ -644,9 +661,14 @@ function renderPane(){
     }
     if(!t.expanded) return;
     // Level 1: what it was asked to do (2 lines), what you can do now, and how far it got.
-    h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts: ▶ Exec asks, ⚡/🔥 take the 1st</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
+    const acts = actRow(t);
+    // The ring on one of its chips: the first line names it and says what it does; the prompt keeps its
+    // other line, so level 1 keeps its size.
+    const on = S.area==='pane' && S.fid && S.fid.startsWith(`act:${t.id}:`) ? LABELS[S.fid] : undefined;
+    if(on) h += `<div class="row ind2 chiphint"><b>${CHIP[on][0]} ${esc(on)}</b><span class="dim">: ${esc(CHIP[on][1])}</span></div>${t.prompt?`<div class="row ind2 dim clamp1">“${esc(t.prompt)}”</div>`:''}`;
+    else h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="pw">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts: ▶ Exec asks, ⚡/🔥 take the 1st</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
     if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="ma">✓ ${esc(t.summary)}</span></div>`;
-    h += actRow(t);
+    h += acts;
     if(t.agents.length){
       const calls=t.agents.reduce((n,a)=>n+a.calls.filter(c=>!c.say).length,0);
       h += `<div class="row ind2">${B('subs:'+t.id, `<span class="dim">${t.subsOpen?'▾':'▸'} </span>${t.agents.length} subtask${t.agents.length>1?'s':''} <span class="dim">· ${done} done · ${calls} calls${t.mode==='workflow'?' · workflow':''}</span>`, 'grow')}</div>`;
