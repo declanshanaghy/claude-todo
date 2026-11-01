@@ -41,12 +41,14 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .btn{cursor:pointer;padding:0 1px;border-radius:2px}
 .btn.f:not(.chip){background:var(--fg);color:var(--term)}
 .btn.f:not(.chip) *{color:var(--term)!important}
-/* Action chips mirror hooks/pane.tsx chip(): a filled label whose fill is its tone
-   (primary = claude orange, danger = error red, default = subtle grey). The focus
+/* Action chips mirror statusChip() in hooks/marks.tsx: a filled label whose fill is
+   the mark color of the status the action moves the todo into (tone-<status>, the
+   same colors as MARK below), danger = error red, neutral = subtle grey. The focus
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
-.chip{--tone:var(--subtle)}.chip.tone-primary{--tone:var(--orange)}.chip.tone-danger{--tone:var(--red)}
-.chip.tone-resume{--tone:var(--green)}.chip.tone-restart{--tone:var(--orange)}.chip.tone-refine{--tone:var(--yellow)}.chip.tone-details{--tone:var(--teal)}
+.chip{--tone:var(--subtle)}.chip.tone-neutral{--tone:var(--subtle)}.chip.tone-danger{--tone:var(--red)}
+.chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
+.chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--red)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
 /* current: Claude Code inverts the focused element, so the fill becomes text color */
 .fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
@@ -62,7 +64,7 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .focusbar .note{color:var(--dim);font-size:12px}
 .focusbar code{font-family:var(--mono);font-size:12px;color:var(--fg)}
 .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
-.dim{color:var(--dim)}.faint{color:var(--faint)}.cy{color:var(--cyan)}.gr{color:var(--green)}.ye{color:var(--yellow)}.re{color:var(--red)}.ma{color:var(--magenta)}.bl{color:var(--blue)}.or{color:var(--orange)}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.cy{color:var(--cyan)}.gr{color:var(--green)}.ye{color:var(--yellow)}.re{color:var(--red)}.ma{color:var(--magenta)}.bl{color:var(--blue)}.or{color:var(--orange)}.te{color:var(--teal)}
 .code{white-space:pre-wrap;word-break:break-all;background:#0a0c11;border-left:2px solid var(--faint);margin:1px 0 3px 8ch;padding:2px 8px;color:#b8bfcc;font-size:12px}
 .code .lbl{color:var(--dim)}
 .inp{font:inherit;background:transparent;border:0;outline:0;color:var(--fg);flex:1;padding:0;caret-color:var(--orange)}
@@ -475,20 +477,24 @@ function press(fid){
 }
 
 /* ---------- pane render ---------- */
-function glyph(st){ return ({pending:['○','dim'],drafting:['✎','bl'],planning:['◇','ma'],running:[SPIN[spin],'cy'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','gr'],queued:['◌','faint'],run:[SPIN[spin],'cy'],ok:['✓','gr']})[st] || ['?','dim']; }
+// MARK in hooks/marks.tsx: one symbol and color per status, for rows, header, status line and chips.
+const MARK={pending:['○','dim'],drafting:['✎','bl'],planning:['◇','te'],running:['▶','gr'],paused:['⏸','ye'],stopped:['■','re'],done:['✓','ma'],failed:['✗','re']};
+function glyph(st){ if(st==='running'||st==='run') return [SPIN[spin],'gr']; return MARK[st] || ({queued:['◌','faint'],ok:['✓','gr']})[st] || ['?','dim']; }
+// tallySummary(): the header's colored counts, in SUMMARY's order.
+const tallyHtml = c => ['running','paused','stopped','done','pending'].map(st=>`<span class="${MARK[st][1]}">${MARK[st][0]}${c(st)}</span>`).join(' ');
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
-// Filled action chip, toned like hooks/pane.tsx: 'primary' | 'danger' | 'default',
-// and the actions' own colors: resume green, restart orange, refine yellow, details teal.
-function chipB(fid, label, tone='default'){ return B(fid, `<span class="fill">${esc(label)}</span>`, `chip tone-${tone}`); }
+// Filled action chip, toned like hooks/marks.tsx: the status the action leads to
+// (running, paused, stopped, drafting…), 'danger' for Delete, or 'neutral'.
+function chipB(fid, label, tone='neutral'){ return B(fid, `<span class="fill">${esc(label)}</span>`, `chip tone-${tone}`); }
 function actRow(t){
   const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone);
-  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','danger')} ${a('keep','Keep','primary')}</div>`;
-  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete','danger')} ${a('cancel','Cancel','primary')}</div>`;
+  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','stopped')} ${a('keep','Keep')}</div>`;
+  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
-    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','primary')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
-    case 'running': return `<div class="row ind2">${a('pause','⏸ Pause')} ${a('stop','■ Stop','danger')}</div>`;
-    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','resume')} ${a('stop','■ Stop','danger')}</div>`;
-    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine','refine')} ${a('restart','↻ Restart','restart')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume','resume')} ${a('leave','Leave')}</div>`;
+    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','running')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
+    case 'running': return `<div class="row ind2">${a('pause','⏸ Pause','paused')} ${a('stop','■ Stop','stopped')}</div>`;
+    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','running')} ${a('stop','■ Stop','stopped')}</div>`;
+    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine','drafting')} ${a('restart','↻ Restart','drafting')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume','running')} ${a('leave','Leave')}</div>`;
     case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';
@@ -540,7 +546,7 @@ function renderBrowser(){
 function renderPane(){
   const body=document.getElementById('panebody');
   const c = st => S.todos.filter(t=>t.status===st).length;
-  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span><span class="cy">▶${c('running')}</span> <span class="ye">⏸${c('paused')}</span> <span class="re">■${c('stopped')}</span> <span class="gr">✓${c('done')}</span>`;
+  document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span>${tallyHtml(c)}`;
   document.getElementById('panecap').textContent = `cap ${CAP} agents`;
   if(S.browse){
     body.innerHTML = renderBrowser();
@@ -556,7 +562,7 @@ function renderPane(){
   for(const t of S.todos){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
-    const right = t.status==='done' ? `<span class="gr">${esc(t.summary)}</span>` : t.agents.length && t.status!=='pending' ? `<span class="${gc}">${t.status} ${done}/${t.agents.length}</span>` : `<span class="dim">${t.status}</span>`;
+    const right = t.status==='done' ? `<span class="ma">${esc(t.summary)}</span>` : t.agents.length && t.status!=='pending' ? `<span class="${gc}">${t.status} ${done}/${t.agents.length}</span>` : `<span class="dim">${t.status}</span>`;
     h += dividerRow(t, gc);
     if(t.renaming){
       h += `<div class="row ind0"><span class="dim">${t.expanded?'▾':'▸'} </span><span class="${gc}">${g}</span>&nbsp;#${t.n}&nbsp;<span class="inpwrap ${S.area==='pane'&&S.fid==='ren:'+t.id?'f':''}" data-fid="ren:${t.id}"><input class="inp" id="ren_${t.id}" value="${esc(t.title)}"></span></div>`;

@@ -1,7 +1,7 @@
 import type { Color, ElementTable, EngineInterface, RenderInput } from 'claude-code'
 
 import type { AgentNode, Call, Dividers, PaneUi, Todo } from '../types'
-import { MARK, tally } from './marks'
+import { type Tone, markOf, statusChip, statusGlyph, tallySummary } from './marks'
 import {
   INFLIGHT,
   addTodo,
@@ -42,19 +42,9 @@ export type PaneData = {
 
 // Layout follows docs/mockup.html (scene M3); glyphs and colors follow Claude
 // Code's own transcript: its spinner, ⏺ tool rows and ⎿ results, theme keys only.
-export const SPIN = ['·', '✢', '✳', '✶', '✻', '✽']
+// Every status color and glyph, and the chips' fills, come from marks.tsx.
 
 type $ = EngineInterface
-
-// A status's mark (marks.ts); a running row spins Claude's spinner instead.
-export function todoGlyph(s: Todo['status'], f: number): [string, Color] {
-  const { symbol, color } = MARK[s]
-  return [s === 'running' ? (SPIN[f % SPIN.length] ?? symbol) : symbol, color]
-}
-
-function agentGlyph(s: AgentNode['status'], f: number): [string, Color] {
-  return todoGlyph(s, f)
-}
 
 export function callGlyph(s: Call['state'], f: number): [string, Color] {
   switch (s) {
@@ -63,19 +53,6 @@ export function callGlyph(s: Call['state'], f: number): [string, Color] {
     case 'err': return ['⏺', 'error']
     case 'interrupted': return ['⏺', 'warning']
   }
-}
-
-// A chip's fill. resume, restart, refine and details are their actions' own
-// colors (green, orange, yellow, teal), the same wherever they're drawn.
-type Tone = 'primary' | 'danger' | 'default' | 'resume' | 'restart' | 'refine' | 'details'
-const TONE: Record<Tone, Color> = {
-  primary: 'claude',
-  danger: 'error',
-  default: 'subtle',
-  resume: 'success',
-  restart: 'claude',
-  refine: 'warning',
-  details: 'planMode',
 }
 
 // The focusable elements' keys in the order the last drawing placed them, for
@@ -143,33 +120,25 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
 
   const lit = (key: string, node: JSX.Element) => ringBox(els, ring, key, node)
 
-  // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
-  // Text child carries the fill.
-  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'default') =>
-    lit(
-      key,
-      <Button key={key} label={label} plain onPress={() => void onPress()}>
-        <Text weight="semibold" backgroundColor={TONE[tone]} color="inverseText">
-          {` ${label} `}
-        </Text>
-      </Button>,
-    )
+  // An action chip fills with the color of the status it moves the todo into
+  // (marks.tsx), so the buttons, rows and summaries share one palette.
+  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => lit(key, statusChip(els, key, label, onPress, tone))
 
   const open = new Set(u.expanded)
   const view = e.props.view as { agentId?: string } | undefined
 
   const actions = (t: Todo) => {
-    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'default') => (
+    const btn = (k: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => (
       chip(`act:${t.n}:${k}`, label, onPress, tone)
     )
-    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }), 'details')
+    const details = btn('details', 'Details', () => openDetail($, { kind: 'todo', n: t.n }))
     const c = u.confirm?.n === t.n ? u.confirm.kind : null
     if (c === 'stop') {
       return [
         <Text color="error">Stop #{t.n}? Execution halts; the todo is kept.</Text>,
         <Box gap={1}>
-          {btn('stopyes', '■ Stop', () => haltTodo($, t, 'stopped'), 'danger')}
-          {btn('keep', 'Keep', () => cancelConfirm($, t.n, 'stop'), 'primary')}
+          {btn('stopyes', '■ Stop', () => haltTodo($, t, 'stopped'), 'stopped')}
+          {btn('keep', 'Keep', () => cancelConfirm($, t.n, 'stop'))}
         </Box>,
       ]
     }
@@ -177,8 +146,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Text color="error">Take over #{t.n}? It's marked stopped here; its run in the other session isn't stopped.</Text>,
         <Box gap={1}>
-          {btn('takeyes', '⇄ Takeover', () => takeOver($, t), 'danger')}
-          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'), 'primary')}
+          {btn('takeyes', '⇄ Takeover', () => takeOver($, t), 'stopped')}
+          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'))}
         </Box>,
       ]
     }
@@ -187,7 +156,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Box gap={1}>
           <Text dimColor>{t.status} in another session</Text>
-          {btn('takeover', '⇄ Takeover', () => askConfirm($, t.n, 'takeover'))}
+          {btn('takeover', '⇄ Takeover', () => askConfirm($, t.n, 'takeover'), 'stopped')}
           {details}
         </Box>,
       ]
@@ -197,7 +166,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         <Text color="error">Delete "#{t.n} {t.title}"?</Text>,
         <Box gap={1}>
           {btn('deleteyes', '✕ Delete', () => deleteTodo($, t), 'danger')}
-          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'delete'), 'primary')}
+          {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'delete'))}
         </Box>,
       ]
     }
@@ -205,7 +174,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'pending':
         return [
           <Box gap={1}>
-            {btn('exec', '▶ Exec', () => execTodo($, t, false), 'primary')}
+            {btn('exec', '▶ Exec', () => execTodo($, t, false), 'running')}
             {btn('rename', '✎ Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
             {!t.hasRun && btn('delete', '✕ Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
             {details}
@@ -222,16 +191,16 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'running':
         return [
           <Box gap={1}>
-            {btn('pause', '⏸ Pause', () => haltTodo($, t, 'paused'))}
-            {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'danger')}
+            {btn('pause', '⏸ Pause', () => haltTodo($, t, 'paused'), 'paused')}
+            {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
             {details}
           </Box>,
         ]
       case 'paused':
         return [
           <Box gap={1}>
-            {btn('resume', '▶ Resume', () => resumeTodo($, t), 'resume')}
-            {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'danger')}
+            {btn('resume', '▶ Resume', () => resumeTodo($, t), 'running')}
+            {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
             {details}
           </Box>,
         ]
@@ -241,12 +210,12 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           ...(fresh ? [<Text color="suggestion">Stopped. What next?</Text>] : []),
           <Box gap={1}>
-            {btn('refine', '✎ Refine', () => execTodo($, t, true), 'refine')}
-            {btn('restart', '↻ Restart', () => restartTodo($, t), 'restart')}
+            {btn('refine', '✎ Refine', () => execTodo($, t, true), 'drafting')}
+            {btn('restart', '↻ Restart', () => restartTodo($, t), 'drafting')}
             {details}
           </Box>,
           <Box gap={1}>
-            {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', '▶ Resume', () => resumeTodo($, t), 'resume')}
+            {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', '▶ Resume', () => resumeTodo($, t), 'running')}
             {fresh &&
               btn('leave', 'Leave', async () => {
                 await patchUi($, x => ({
@@ -276,7 +245,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
           </Box>,
         )
       }
-      const [g, gc] = agentGlyph(a.status, f)
       const n = all.filter(c => c.agentId === a.agentId).length
       // A subtask is one line; its tool calls are browsed in the dialog.
       out.push(
@@ -287,7 +255,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
               <Box flexGrow={1} flexShrink={1} overflow="hidden">
                 <Button key={`ag:${a.agentId}`} plain onPress={() => void openDetail($, { kind: 'agent', agentId: a.agentId })}>
                   <Text wrap="truncate-end">
-                    <Text color={gc}>{g}</Text> <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
+                    {statusGlyph(els, a.status, f)} <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
                     {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
                   </Text>
                 </Button>
@@ -331,7 +299,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
   }
 
   const todoRows = (t: Todo) => {
-    const [g, gc] = todoGlyph(t.status, f)
+    const gc = markOf(t.status).color
     const isOpen = open.has(`t${t.n}`)
     const mine = nodes.filter(a => a.todoN === t.n)
     const done = mine.filter(a => a.status === 'done').length
@@ -346,7 +314,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         lit(
           `ren:${t.n}`,
           <Box>
-            <Text color={gc}>{g}</Text>
+            {statusGlyph(els, t.status, f)}
             <Text> #{t.n} </Text>
             <Input key={`ren:${t.n}`} value={t.title} submitLabel="rename" autoFocus onSubmit={v => void renameTodo($, t.n, v)} />
           </Box>,
@@ -359,7 +327,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
               <Button key={`todo:${t.n}`} plain onPress={() => void toggle($, `t${t.n}`)}>
                 <Text wrap="truncate-end">
                   <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-                  <Text color={gc}>{g}</Text>
+                  {statusGlyph(els, t.status, f)}
                   {dividers === 'titled' ? (
                     ''
                   ) : (
@@ -397,13 +365,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
           <Text>
             <Text weight="semibold">Todos </Text>
             <Text dimColor>{list.length} · </Text>
-            {tally(list).map((m, i) => (
-              <Text color={m.color}>
-                {i > 0 ? ' ' : ''}
-                {m.symbol}
-                {m.count}
-              </Text>
-            ))}
+            {tallySummary(els, list)}
           </Text>
         </Box>
         <Box flexShrink={0}>

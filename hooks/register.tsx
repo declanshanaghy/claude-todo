@@ -5,7 +5,7 @@ import type { AgentNode, Call, Confirm, Detail, Dividers, ImageRef, Kept, PaneUi
 import { DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
-import { MARK, tallyText } from './marks'
+import { statusToast, tallyText } from './marks'
 import { drawPane, focusOrder } from './pane'
 import { execPrompt, restartPrompt, resumePrompt } from './protocol'
 
@@ -979,7 +979,7 @@ export const register: Register = (on, options) => {
       ...(a.landed ? { landed: a.landed } : {}),
       hasRun: x.hasRun || a.status === 'running',
     }))
-    if (a.status === 'done' || a.status === 'failed') $.ui.toast(`${MARK[a.status].symbol} #${t.n} ${a.status}`)
+    if (a.status === 'done' || a.status === 'failed') $.ui.toast(statusToast(t.n, a.status))
     const now = (await read($, todos)).find(x => x.n === t.n)
     return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
   })

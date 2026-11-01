@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { MARK, SUMMARY } from './marks'
+import { MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 
 const PANE = {
   plugin: 'todo',
@@ -974,7 +974,7 @@ test('the header, the status line and the rows draw the same marks in the same o
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const header = await headerMarks(ui)
   expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
-  expect(header.map(m => m.color)).toEqual(['claude', 'warning', 'error', 'success', 'inactive'])
+  expect(header.map(m => m.color)).toEqual(['success', 'warning', 'error', 'merged', 'inactive'])
   expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
   // Each row's glyph is its status's mark; a running row spins in its color.
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending']] as const) {
@@ -1742,8 +1742,8 @@ test('a titled divider sits above each todo, sized to the pane, its number and t
   expect(d?.parts.find(p => p.text === '── ')?.props).toMatchObject({ dimColor: true })
   expect(d?.parts.find(p => p.text.endsWith('───'))?.props).toMatchObject({ dimColor: true })
   const d2 = await dividerOf(ui, 2)
-  expect(d2?.parts.find(p => p.text === '#2')?.props).toMatchObject({ color: 'claude' })
-  expect(d2?.parts.find(p => p.text === ' Ship it')?.props).toMatchObject({ color: 'claude' })
+  expect(d2?.parts.find(p => p.text === '#2')?.props).toMatchObject({ color: MARK.running.color })
+  expect(d2?.parts.find(p => p.text === ' Ship it')?.props).toMatchObject({ color: MARK.running.color })
   // The rule names the todo, so its row doesn't again; it stays pressable.
   const row = await ui.find({ type: 'Button', key: 'todo:1' })
   expect(row?.text).toBe(`▸ ${MARK.pending.symbol}`)
@@ -1830,26 +1830,59 @@ test('CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to 
   expect((await dividerOf(again, 1))?.line).toMatch(/^── #1 Fix kitty tab titles ─+$/)
   await again.unmount()
 })
-test('action chips are one word under 10 letters, and Resume, Restart, Refine and Details carry their own colors', async ($, on) => {
-  const db = seeded([aTodo(1, 'Stopped one', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'p', taskId: 'ag1' })])
+test('every action chip is one word under 10 letters, filled with the color of the status it moves the todo into', async ($, on) => {
+  const db = seeded([
+    aTodo(1, 'Waiting'),
+    running(2, 'Runs'),
+    running(3, 'Waits', { status: 'paused' }),
+    aTodo(4, 'Stopped one', { status: 'stopped', hasRun: true, mode: 'agent', prompt: 'p', taskId: 'ag4' }),
+    aTodo(5, 'Drafting', { status: 'drafting', owner: 's1' }),
+    running(6, 'Elsewhere', { owner: 'other' }),
+  ])
   engine(on, [], undefined, true, { db })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'todo:1' })
   const fill = async (key: string) => {
-    const chip = await ui.find({ type: 'Button', key: `act:1:${key}` })
+    const chip = await ui.find({ type: 'Button', key })
     const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
     const label = chip?.props['label']
     return { label: typeof label === 'string' ? label : '', color: text?.props['backgroundColor'] }
   }
-  const expected = { resume: 'success', restart: 'claude', refine: 'warning', details: 'planMode' } as const
-  for (const [key, color] of Object.entries(expected)) {
-    const { label, color: got } = await fill(key)
-    expect(got).toBe(color)
-    const word = label.replace(/^\W+\s*/u, '')
-    expect(word).toMatch(/^\p{L}{1,9}$/u)
+  const check = async (n: number, expected: Record<string, Tone>) => {
+    for (const [k, tone] of Object.entries(expected)) {
+      const { label, color } = await fill(`act:${n}:${k}`)
+      expect(`${k}: ${String(color)}`).toBe(`${k}: ${toneColor(tone)}`)
+      expect(label.replace(/^\W+\s*/u, '')).toMatch(/^\p{L}{1,9}$/u)
+    }
   }
+  for (const n of [1, 2, 3, 4, 5, 6]) await ui.press({ key: `todo:${n}` })
+  // Exec and Resume start a run; Pause, Stop and Takeover halt it; Refine and
+  // Restart draft it again; Delete destroys it; the rest change no status.
+  await check(1, { exec: 'running', rename: 'neutral', delete: 'danger', details: 'neutral' })
+  await check(2, { pause: 'paused', stop: 'stopped', details: 'neutral' })
+  await check(3, { resume: 'running', stop: 'stopped' })
+  await check(4, { refine: 'drafting', restart: 'drafting', resume: 'running' })
+  await check(5, { reset: 'neutral' })
+  await check(6, { takeover: 'stopped' })
+  // The chips share the rows' palette: Resume and a running row are one color.
+  expect(toneColor('running')).toBe(MARK.running.color)
+  expect(MARK.running.color).toBe('success')
+  // A confirmation's go-ahead is the status it leads to; its way out is neutral.
+  await ui.press({ key: 'act:2:stop' })
+  await check(2, { stopyes: 'stopped', keep: 'neutral' })
+  await ui.press({ key: 'act:6:takeover' })
+  await check(6, { takeyes: 'stopped', cancel: 'neutral' })
+  await ui.press({ key: 'act:1:delete' })
+  await check(1, { deleteyes: 'danger', cancel: 'neutral' })
   await ui.unmount()
+})
+
+test('the palette gives every status its own color, apart from the two ends that halt a run, and the toasts name it by its mark', () => {
+  const colors = Object.entries(MARK).filter(([s]) => s !== 'failed').map(([, m]) => m.color)
+  expect(new Set(colors).size).toBe(colors.length)
+  expect(MARK.done.color).not.toBe(MARK.running.color)
+  expect(statusToast(3, 'done')).toBe(`${MARK.done.symbol} #3 done`)
+  expect(statusToast(4, 'failed')).toBe(`${MARK.failed.symbol} #4 failed`)
 })
 
 // ---------- the call browser: turns, markdown, folds, images ----------

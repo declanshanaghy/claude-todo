@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 132 of 135 cases (97.8%)** are covered by `claude plugin test .`.
+**Coverage: 134 of 137 cases (97.8%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -182,6 +182,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U13 | `todoDividers` `line` draws a plain dim rule | todoDividers "line" draws a plain dim rule |
 | U14 | `todoDividers` `none` draws no divider | todoDividers "none" draws no divider |
 | U15 | `CLAUDE_TODO_DIVIDERS` overrides the option, and an unknown value falls back to `titled` | CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to titled |
+| U16 | Every action chip is one word and fills with the mark color of the status it moves the todo into: Exec and Resume running, Pause paused, Stop and Takeover stopped, Refine and Restart drafting; Delete is the danger color; Rename, Reset, Details, Keep and Cancel are neutral | every action chip is one word under 10 letters, filled with the color of the status it moves the todo into |
+| U17 | Each status but failed has its own color (done never reads as running), and the done/failed toasts name the status by its mark | the palette gives every status its own color, apart from the two ends that halt a run, and the toasts name it by its mark |
 
 ## The call browser
 

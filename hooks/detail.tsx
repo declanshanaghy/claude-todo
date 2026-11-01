@@ -2,7 +2,8 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 
 import type { AgentNode, Call, Detail, ImageRef, Todo, Turn } from '../types'
 import { altOf, sourceOf } from './images'
-import { callGlyph, dur, ringBox, todoGlyph } from './pane'
+import { statusGlyph } from './marks'
+import { callGlyph, dur, ringBox } from './pane'
 import { showEarlier, unfold } from './register'
 
 // The detail dialog, drawn in place of the tree. It reads like Claude Code's
@@ -293,12 +294,11 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
       drawn.unshift(el)
     }
     const hidden = entries.length - drawn.length
-    const [g, gc] = todoGlyph(a.status, 0)
     const said = turns.filter(x => x.agentId === a.agentId).length
     return (
       <Box flexDirection="column" width={width} paddingX={1} borderStyle="round" borderColor="claude">
         <Text wrap="truncate-end">
-          <Text color={gc}>{g}</Text> <Text weight="semibold">{a.name}</Text>
+          {statusGlyph(els, a.status)} <Text weight="semibold">{a.name}</Text>
           {a.isWorktree ? <Text color="warning"> ⎇ worktree</Text> : ''}
         </Text>
         <Text dimColor wrap="truncate-end">
@@ -323,7 +323,6 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
   if (detail?.kind === 'todo') {
     const t = list.find(x => x.n === detail.n)
     if (!t) return <Text dimColor>That todo is gone.</Text>
-    const [g, gc] = todoGlyph(t.status, 0)
     const mine = nodes.filter(a => a.todoN === t.n).sort((x, y) => x.startedAt - y.startedAt)
     const kv = (k: string, v?: string) =>
       v ? (
@@ -338,7 +337,7 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
     return (
       <Box flexDirection="column" width={width} paddingX={1} borderStyle="round" borderColor="claude">
         <Text>
-          <Text color={gc}>{g}</Text> <Text weight="semibold">#{t.n} {t.title}</Text>
+          {statusGlyph(els, t.status)} <Text weight="semibold">#{t.n} {t.title}</Text>
         </Text>
         <Text dimColor>
           {t.status} · {t.mode === 'workflow' ? 'Workflow' : t.mode === 'agent' ? 'single Agent' : 'not launched yet'}
@@ -359,11 +358,10 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
 
         {mine.length > 0 ? heading(`Agents (${mine.length})`) : ''}
         {mine.map(a => {
-          const [ag, agc] = todoGlyph(a.status, 0)
           const n = all.filter(c => c.agentId === a.agentId).length
           return (
             <Text wrap="truncate-end">
-              <Text color={agc}>{ag}</Text> {a.wave !== undefined ? `w${a.wave} ` : ''}
+              {statusGlyph(els, a.status)} {a.wave !== undefined ? `w${a.wave} ` : ''}
               <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
               {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
               <Text dimColor> · {n} calls</Text>
