@@ -49,7 +49,7 @@ flowchart LR
 | Drafters in flight and their keys | `$.state` atoms | A drafter belongs to the session that spawned it; the todo's `prompting` status (with its owner and start time) is what other sessions see |
 | Settings | `/config` (`pluginConfigs`) or environment variables | Claude Code's standard plugin options |
 
-A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list. A `/clear` or `/new` carries on under a new session id with the session's state reset and no `session.start`, so the mod sets itself up again at that `SessionStart` (and at any sync tick that finds no database handle), and the repo's list comes back from the database.
+A list belongs to the git repo the session is in (each worktree is its own repo), or to the home directory outside one. If a session moves to another repo (`/cd`, a worktree move), the next sync loads that repo's list. A `/clear` or `/new` carries on under a new session id with the session's state reset and no `session.start`, so the mod sets itself up again at that `SessionStart` (and at any sync tick that finds no database handle), and the repo's list comes back from the database. Its todos stay its own: `session.end` notes the ending session id, and that boot takes over the todos it owned. A todo paused before it ever ran has no run to take, so it belongs to no session.
 
 ## Writing without losing edits
 

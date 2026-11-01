@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 178 of 182 cases (97.8%)** are covered by `claude plugin test .`.
+**Coverage: 180 of 184 cases (97.8%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -162,6 +162,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | S14 | A `/clear` (or `/new`) resets the session's state without a `session.start`; the list loads again from the database at its `SessionStart` | a /clear resets the session state, and the list loads again from the database |
 | S15 | A sync tick that finds no database handle sets the session up again | the sync tick sets the session up again when its state was reset under it |
 | S16 | A failure in one of the mod's own tools (`update`, `drafts`, `list`) answers with what failed, rather than the host's "no hook answered" | a failure in one of the mod's own tools answers with what failed, not as a tool nobody answered |
+| S17 | A todo paused before it ever ran belongs to no session: ▶ Exec, `/todo exec` and `/todo resume` start it from any | a todo paused before it ever ran belongs to no session: exec or resume starts it from any |
+| S18 | A `/clear` hands the todos the ended session owned to the session that goes on; other sessions' stay theirs | a /clear hands the todos the ended session owned to the session that goes on |
 | S13 | The SQL scripts do what the stand-in models (the rev guard, the run-once import, paging) against real sqlite3 | not covered: the test sandbox runs no processes, so the scripts never reach a real sqlite3 |
 
 ## Failures

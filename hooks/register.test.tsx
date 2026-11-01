@@ -958,6 +958,43 @@ test('/todo resume picks up a stopped todo whose agent is gone with a fresh agen
   expect(todoAt(db, 1).status).toBe('drafting')
 })
 
+test('a todo paused before it ever ran belongs to no session: exec or resume starts it from any', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([
+    aTodo(1, 'Later', { status: 'paused', owner: 's-old' }),
+    aTodo(2, 'Later too', { status: 'paused', owner: 's-old' }),
+  ])
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  expect(await ui.find({ type: 'Text', text: /in another session/ })).toBeUndefined()
+  await ui.unmount()
+  expect((await todo($, 'exec 1')).text).not.toMatch(/another session|is paused/)
+  expect((await todo($, 'resume 2')).text).not.toMatch(/another session/)
+  await clock.settle()
+  expect(submitted.filter(x => x.includes('Execute todo #1'))).toHaveLength(1)
+  expect(submitted.filter(x => x.includes('Execute todo #2'))).toHaveLength(1)
+})
+
+test('a /clear hands the todos the ended session owned to the session that goes on', async ($, on) => {
+  const db = seeded([running(1, 'Busy'), aTodo(2, 'Theirs', { status: 'running', hasRun: true, mode: 'agent', taskId: 'ag2', owner: 's9' })])
+  // `where` is read on every call: the id changes as the /clear goes on.
+  const where = { db, id: 's1' }
+  engine(on, [], undefined, true, where)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
+  await start($)
+  expect(todoAt(db, 1).owner).toBe('s1')
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+  where.id = 's2'
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(todoAt(db, 1).owner).toBe('s2')
+  // Another live session's todo stays its own.
+  expect(todoAt(db, 2).owner).toBe('s9')
+})
+
 test('/todo resume refuses a todo the chip is not offered on, naming its status and the command that applies', async ($, on) => {
   const submitted: string[] = []
   const db = seeded([

@@ -4,10 +4,10 @@ import type { AgentNode, Call, PaneUi, Todo, Turn } from '../types'
 import { clean } from './detail'
 import { SUMMARY, type Tone, markOf, markText, statusChip, statusGlyph, tally, viewOf, viewToggle } from './marks'
 import {
-  INFLIGHT,
   addTodo,
   askConfirm,
   canResume,
+  isOwnedElsewhere,
   cancelConfirm,
   collapse,
   deleteTodo,
@@ -254,7 +254,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       ]
     }
     // In flight in another session: its task ids aren't this one's to pause.
-    if (INFLIGHT.has(t.status) && t.owner !== undefined && t.owner !== me) {
+    if (isOwnedElsewhere(t, me)) {
       return [
         <Box gap={1}>
           <Text dimColor>{t.status} in another session</Text>

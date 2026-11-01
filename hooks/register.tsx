@@ -433,8 +433,26 @@ async function patchTodo($: $, n: number, fn: (t: Todo) => Todo) {
 }
 
 // In flight in another live session: its task ids aren't this session's.
+// In flight in session `owner` other than `me`: its task ids aren't this
+// session's. A todo paused before it ever ran (paused for a new session) has
+// no run to take, so any session may start it.
+export const isOwnedElsewhere = (t: Todo, me: string) =>
+  INFLIGHT.has(t.status) && t.owner !== undefined && t.owner !== me && !(t.status === 'paused' && !t.hasRun)
+
 async function isForeign($: $, t: Todo) {
-  return INFLIGHT.has(t.status) && t.owner !== undefined && t.owner !== (await $.session.id())
+  return isOwnedElsewhere(t, await $.session.id())
+}
+
+// A /clear (or /new) goes on under a new session id: session.end leaves the
+// old one here, and the next boot takes over the todos it owned, which were
+// this conversation's own.
+const CLEARED_FROM = 'clearedFrom'
+
+async function adoptCleared($: $, self: string) {
+  const old = (await $.store.get(CLEARED_FROM)) as string | undefined
+  if (typeof old !== 'string' || old === self) return
+  const ok = await editTodos($, l => l.map(t => (t.owner === old ? { ...t, owner: self } : t)))
+  if (ok) await $.store.delete(CLEARED_FROM)
 }
 
 async function syncStatus($: $) {
@@ -1203,6 +1221,7 @@ async function setUp($: $, options: Options) {
       await persistTraces($)
       await pruneBackups($, bootAt)
       await reload($, true)
+      await adoptCleared($, self)
       // Done before 0.3 kept the time: their time in the tree starts now.
       if ((await read($, todos)).some(t => t.status === 'done' && t.doneAt === undefined)) {
         await editTodos($, l => l.map(t => (t.status === 'done' && t.doneAt === undefined ? { ...t } : t)))
@@ -1601,6 +1620,12 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     await setPlaced($, false)
     return r
+  }).catch((_, e, next) => next(e))
+
+  // A /clear: note the ending id, so the next boot adopts its todos.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') await $.store.set(CLEARED_FROM, e.sessionId)
+    return next(e)
   }).catch((_, e, next) => next(e))
 
   // The person's own prompt lifts a standing Stop: send what it held, from a
