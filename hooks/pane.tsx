@@ -61,6 +61,8 @@ export type PaneData = {
   u: PaneUi
   cap: number
   f: number
+  // The list's scroll offset: its first row the window shows (see listWindow).
+  offset: number
 }
 
 // Layout follows docs/mockup.html (scene 3, Drill down); glyphs and colors follow Claude
@@ -83,6 +85,18 @@ export function callGlyph(s: Call['state'], f: number): [string, Color] {
 // the finished tree, as an element is often built before its place is known.
 let drawnOrder: string[] = []
 export const focusOrder = () => drawnOrder
+
+// The list's window as the last drawing placed it: how many rows the list
+// has, how many the window under the header shows, the offset it drew at
+// (clamped), and the row each focusable key sits on. The ui.scroll and
+// ui.focus hooks move the offset from it, as a render never writes state.
+export type ListWindow = { rows: number; height: number; offset: number; rowOf: Record<string, number> }
+let drawnList: ListWindow = { rows: 0, height: 0, offset: 0, rowOf: {} }
+export const listWindow = () => drawnList
+
+// The offset that keeps `row` in a window of `height` rows now at `offset`.
+export const showRow = (row: number, offset: number, height: number) =>
+  row < offset ? row : row >= offset + height ? row - height + 1 : offset
 
 function ringKeys(node: unknown, out: string[] = []): string[] {
   if (Array.isArray(node)) {
@@ -246,7 +260,13 @@ export function ringBox({ Box, Text }: Pick<ElementTable, 'Box' | 'Text'>, ring:
 
 export const dur = (ms?: number) => (ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`)
 
-export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f }: PaneData) {
+// A list row, one line, and its indent: 0 for a todo's header and the rules,
+// 2 for level 1, 4 for level 2 and 6 for level 3. Flat rather than nested
+// boxes, so the window can count and scroll them a row at a time.
+type Line = { indent: number; node: JSX.Element }
+const lineAt = (indent: number) => (node: JSX.Element): Line => ({ indent, node })
+
+export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring, list, nodes, all, turns, u, cap, f, offset }: PaneData) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const Input = 'Input' in els ? els.Input : undefined
@@ -442,25 +462,22 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         )}
       </Box>,
     )
-    return (
-      <Box paddingLeft={2} flexDirection="column">
-        {rows}
-      </Box>
-    )
+    return rows
   }
 
   // Level 2: one focusable row per subtask, grouped by wave for a Workflow.
   const agentRows = (t: Todo, mine: AgentNode[]) => {
     let wave: number | undefined
     return mine.flatMap(a => {
-      const out: JSX.Element[] = []
+      const out: Line[] = []
+      const push = (x: JSX.Element) => out.push(lineAt(4)(x))
       if (t.mode === 'workflow' && a.wave !== undefined && a.wave !== wave) {
         wave = a.wave
-        out.push(<Text dimColor> wave {a.wave}</Text>)
+        push(<Text dimColor> wave {a.wave}</Text>)
       }
       const id = `a${t.n}:${a.agentId}`
       const isOpen = open.has(id)
-      out.push(
+      push(
         lit(
           `ag:${a.agentId}`,
           <Box>
@@ -479,7 +496,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
           </Box>,
         ),
       )
-      if (isOpen) out.push(recent(a))
+      if (isOpen) out.push(...recent(a).map(lineAt(6)))
       return out
     })
   }
@@ -522,10 +539,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     )
   }
 
-  const todoRows = (t: Todo) => {
+  const todoRows = (t: Todo): Line[] => {
     const isOpen = open.has(`t${t.n}`)
     const mine = nodes.filter(a => a.todoN === t.n).sort((x, y) => x.startedAt - y.startedAt)
-    const head = header(t, isOpen, mine)
+    const head = lineAt(0)(header(t, isOpen, mine))
     if (!isOpen) return [head]
     // Level 1: what it was asked to do, in 2 lines; how it ended; what can be
     // done now; and, once it has agents, the line that opens them.
@@ -545,70 +562,63 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
           {l}
         </Text>
       ))
-    return [
-      head,
-      <Box paddingLeft={2} flexDirection="column">
-        {focused !== undefined ? (
-          [hintLine(t.n, focused), ...(t.prompt && promptLines.length > 1 ? promptRows(clampLines(`“${clean(t.prompt)}”`, inner - 2, promptLines.length - 1)) : [])]
-        ) : t.prompt ? (
-          promptRows(promptLines)
-        ) : t.status === 'prompting' ? (
-          <Text color={markOf('prompting').color} italic>
-            {' '}
-            no prompt yet: drafting prompts…
-          </Text>
-        ) : t.status === 'pending' && t.drafts?.length ? (
-          // Its drafts are in: Exec offers them rather than drafting one.
-          // ▶ Exec asks which to run; ⚡ Auto and 🔥 Fire take drafts[0].
-          <Text dimColor italic wrap="truncate-end">
-            {' '}
-            {plural(t.drafts.length, 'draft')}: ▶ Exec asks, ⚡/🔥 take the 1st
-          </Text>
-        ) : t.status === 'pending' ? (
-          <Text dimColor italic>
-            {' '}
-            no prompt yet: ▶ Exec drafts one
-          </Text>
-        ) : (
-          // Fired: its prompt is Claude's to settle, and Exec isn't the way on.
-          <Text dimColor italic>
-            {' '}
-            {t.status === 'drafting' || t.status === 'planning' ? 'prompt being settled in the chat…' : 'prompt not recorded'}
-          </Text>
-        )}
-        {t.status === 'done' && t.summary ? (
-          <Text color={markOf('done').color} wrap="truncate-end">
-            {' '}✓ {gist(t.summary)}
-          </Text>
-        ) : (
-          ''
-        )}
-        {acts.rows}
-        {mine.length > 0
-          ? lit(
-              `subs:${t.n}`,
-              <Button key={`subs:${t.n}`} plain onPress={() => void toggle($, `s${t.n}`)}>
-                <Text wrap="truncate-end">
-                  <Text dimColor>{subsOpen ? '▾ ' : '▸ '}</Text>
-                  {plural(mine.length, 'subtask')}
-                  <Text dimColor>
-                    {' '}
-                    · {done} done · {plural(calls, 'call')}
-                    {t.mode === 'workflow' ? ' · workflow' : ''}
-                  </Text>
+    const level1: (JSX.Element | '')[] = [
+      ...(focused !== undefined
+        ? [hintLine(t.n, focused), ...(t.prompt && promptLines.length > 1 ? promptRows(clampLines(`“${clean(t.prompt)}”`, inner - 2, promptLines.length - 1)) : [])]
+        : t.prompt
+          ? promptRows(promptLines)
+          : [
+              t.status === 'prompting' ? (
+                <Text color={markOf('prompting').color} italic>
+                  {' '}
+                  no prompt yet: drafting prompts…
                 </Text>
-              </Button>,
-            )
-          : ''}
-        {subsOpen ? (
-          <Box paddingLeft={2} flexDirection="column">
-            {agentRows(t, mine)}
-          </Box>
-        ) : (
-          ''
-        )}
-      </Box>,
+              ) : t.status === 'pending' && t.drafts?.length ? (
+                // Its drafts are in: Exec offers them rather than drafting one.
+                // ▶ Exec asks which to run; ⚡ Auto and 🔥 Fire take drafts[0].
+                <Text dimColor italic wrap="truncate-end">
+                  {' '}
+                  {plural(t.drafts.length, 'draft')}: ▶ Exec asks, ⚡/🔥 take the 1st
+                </Text>
+              ) : t.status === 'pending' ? (
+                <Text dimColor italic>
+                  {' '}
+                  no prompt yet: ▶ Exec drafts one
+                </Text>
+              ) : (
+                // Fired: its prompt is Claude's to settle, and Exec isn't the way on.
+                <Text dimColor italic>
+                  {' '}
+                  {t.status === 'drafting' || t.status === 'planning' ? 'prompt being settled in the chat…' : 'prompt not recorded'}
+                </Text>
+              ),
+            ]),
+      t.status === 'done' && t.summary ? (
+        <Text color={markOf('done').color} wrap="truncate-end">
+          {' '}✓ {gist(t.summary)}
+        </Text>
+      ) : (
+        ''
+      ),
+      ...acts.rows,
+      mine.length > 0
+        ? lit(
+            `subs:${t.n}`,
+            <Button key={`subs:${t.n}`} plain onPress={() => void toggle($, `s${t.n}`)}>
+              <Text wrap="truncate-end">
+                <Text dimColor>{subsOpen ? '▾ ' : '▸ '}</Text>
+                {plural(mine.length, 'subtask')}
+                <Text dimColor>
+                  {' '}
+                  · {done} done · {plural(calls, 'call')}
+                  {t.mode === 'workflow' ? ' · workflow' : ''}
+                </Text>
+              </Text>
+            </Button>,
+          )
+        : '',
     ]
+    return [head, ...level1.filter((x): x is JSX.Element => x !== '').map(lineAt(2)), ...(subsOpen ? agentRows(t, mine) : [])]
   }
 
   // The one line above every todo header shown, parting each todo from the
@@ -641,6 +651,28 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const toggleAt = (all: readonly Tally[], i: number) =>
     PAD_X + cells(`Todos ${list.length}`) + all.slice(0, i).reduce((x, m) => x + cells(markText(m.status, String(m.count))[0]) + 2, 0) + 1
 
+  // The list under the header, one line per row: each todo's rule and rows,
+  // then the hidden footer. The first todo's ═ rule stays in the header,
+  // parting it from the list, so scrolling never moves it.
+  const lines: Line[] = [
+    ...shown.flatMap((t, i) => [...(i === 0 ? [] : [lineAt(0)(divider(t.n, false))]), ...todoRows(t)]),
+    ...(hidden > 0 ? [lineAt(0)(rule('div2:hidden', '═')), lineAt(0)(<Text dimColor>{hidden} hidden by the view</Text>)] : []),
+  ]
+  // The header's rows, each one line: the counts and toggles, the add input
+  // (or its note), the fault and Back while shown, then either the first
+  // todo's rule or, with no todo shown, the empty note.
+  const headRows = 3 + (fault ? 1 : 0) + (agentView?.agentId ? 1 : 0)
+  // The window shows what fits under the header, so the whole drawing stays
+  // within the body and the engine never scrolls the header away; the list
+  // scrolls inside it by `offset` (the ui.scroll and ui.focus hooks move it).
+  const height = Math.min(lines.length, Math.max(1, e.props.scroll.bodyRows - headRows))
+  const top = Math.min(Math.max(0, offset), Math.max(0, lines.length - height))
+  const rowOf: Record<string, number> = {}
+  lines.forEach((l, i) => {
+    for (const k of ringKeys(l.node)) rowOf[k] = i
+  })
+  drawnList = { rows: lines.length, height, offset: top, rowOf }
+
   const tree = (
     <Box
       flexDirection="column"
@@ -649,8 +681,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     >
       {/* One line at any width: Todos and the toggles take the room left of
           🔥 Fire and are clipped, never wrapped, so Fire sits flush at the
-          right end. Centered: the ring boxes keep a blank cell above and below
-          them, so top-aligned, Todos sat a row above them. */}
+          right end. Centered, so Todos and the chips share one baseline. */}
       <Box alignItems="center">
         <Box flexGrow={1} flexShrink={1} overflow="hidden" alignItems="center">
           <Box flexShrink={0}>
@@ -695,7 +726,13 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
           return tipLabel(els, m.status, { top: 1, left: Math.min(x, e.props.bodyColumns - (cells(m.status) + 2)) - PAD_X }, `tip:view:${m.status}`)
         })}
       </Box>
-      {fault ? <Text color="error">⚠ {fault}</Text> : ''}
+      {fault ? (
+        <Text color="error" wrap="truncate-end">
+          ⚠ {fault}
+        </Text>
+      ) : (
+        ''
+      )}
       {Input && !fault ? (
         lit(
           'add',
@@ -705,14 +742,38 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
           </Box>,
         )
       ) : (
-        <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
+        <Text dimColor wrap="truncate-end">
+          /todo add &lt;title&gt; adds a todo
+        </Text>
       )}
       {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({}), 'stay', false, tipAt(PAD_X + 1, 'Back')) : ''}
-      {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
-      {list.length > 0 && shown.length === 0 ? <Text dimColor>Nothing in this view.</Text> : ''}
-      {shown.flatMap((t, i) => [divider(t.n, i === 0), ...todoRows(t)])}
-      {hidden > 0 ? rule('div2:hidden', '═') : ''}
-      {hidden > 0 ? <Text dimColor>{hidden} hidden by the view</Text> : ''}
+      {list.length === 0 ? (
+        <Text dimColor wrap="truncate-end">
+          No todos yet. Type a title above.
+        </Text>
+      ) : (
+        ''
+      )}
+      {list.length > 0 && shown.length === 0 ? (
+        <Text dimColor wrap="truncate-end">
+          Nothing in this view.
+        </Text>
+      ) : (
+        ''
+      )}
+      {shown[0] ? divider(shown[0].n, true) : ''}
+      {/* The list's window: as tall as fits under the header, clipping the
+          rows outside it. Every row is drawn, so each stays a focus stop the
+          ring can reach; the negative margin is the scroll offset. */}
+      {lines.length > 0 ? (
+        <Box key="list" flexDirection="column" overflow="hidden" flexShrink={0} height={height}>
+          <Box flexDirection="column" flexShrink={0} {...(top > 0 ? { marginTop: -top } : {})}>
+            {lines.map(l => (l.indent === 0 ? l.node : <Box flexShrink={0} paddingLeft={l.indent}>{l.node}</Box>))}
+          </Box>
+        </Box>
+      ) : (
+        ''
+      )}
     </Box>
   )
   drawnOrder = ringKeys(tree)

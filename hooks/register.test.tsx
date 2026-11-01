@@ -286,7 +286,7 @@ test('M1: /todo add stores a title-only todo and the pane lists it', async ($, o
   expect(await ui.find({ type: 'Button', key: 'todo:1' })).toBeDefined()
   // The header carries 🔥 Fire where the cap used to be; the cap isn't drawn.
   expect(await ui.find({ type: 'Button', key: 'fire' })).toBeDefined()
-  // Fire's ring box is 3 rows tall; the header centers so it shares the counts' row.
+  // Every chip's ring box is one row; the header centers so Todos and its chips share one baseline.
   expect((((await ui.drawn()) as Found).children?.[0] as Found | undefined)?.props?.['alignItems']).toBe('center')
   expect(await ui.find({ type: 'Text', text: /cap \d+ agents/ })).toBeUndefined()
   expect(submitted).toHaveLength(0)
@@ -848,6 +848,86 @@ const isLit = async (ui: Drawing, key: string) => {
   return box !== undefined && box.props['paddingX'] !== 1
 }
 
+// The window over the list under the fixed header: its height, and the
+// offset its inner column's negative margin scrolls it by.
+const listWindowOf = async (ui: { find: (q: { type: string; key: string }) => Promise<unknown> }) => {
+  const win = (await ui.find({ type: 'Box', key: 'list' })) as Found | undefined
+  const col = (win?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null)
+  const margin = col?.props?.['marginTop']
+  return { height: win?.props?.['height'], offset: typeof margin === 'number' ? -margin : 0 }
+}
+
+test('the header stays put while the list scrolls under it, at a narrow width, in one pane', async ($, on) => {
+  const opens: string[] = []
+  const db = seeded(Array.from({ length: 8 }, (_, i) => aTodo(i + 1, `Todo number ${i + 1}`)))
+  engine(on, [], { opens, closes: [] }, true, { db })
+  await start($)
+  // Eight rows of body: the header's three (counts, add, the ═ rule) and a
+  // window of five over the list's fifteen (eight todos, seven ─ rules).
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 30, scroll: { offset: 0, bodyRows: 8 } } })
+  const wheel = (by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 0, by, bodyRows: 8, contentRows: 8, origin: { kind: 'person' }, pointer: { column: 3, row: 5 } })
+  const top = async () => (((await ui.drawn()) as Found).children ?? []).filter((c): c is Found => typeof c === 'object' && c !== null)
+  // The header's rows as drawn, less each press's handle, which a redraw renews.
+  const head = async () => JSON.stringify((await top()).slice(0, 3), (k, v: unknown) => (k === 'handle' ? undefined : v))
+  const kids = await top()
+  // The header, then the one rule between it and the list, then the list's window.
+  expect(kids.map(k => keyOf(k))).toEqual(['', 'ring:add', 'div2:1', 'list'])
+  expect(JSON.stringify(kids[0])).toContain('"fire"')
+  const before = await head()
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 0 })
+  expect(kids[3]?.props).toMatchObject({ overflow: 'hidden', flexShrink: 0, flexDirection: 'column' })
+
+  // The wheel, a page key: the list moves, the header doesn't, and the engine
+  // isn't asked to scroll the pane.
+  expect((await wheel(1)).deny).toBeUndefined()
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 1 })
+  await wheel(3)
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 4 })
+  expect(await head()).toBe(before)
+  // Clamped at either end: the last row at the window's bottom, the first at its top.
+  await wheel(100)
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 10 })
+  expect(await head()).toBe(before)
+  await wheel(-100)
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 0 })
+  // Every row is drawn, so the ring reaches those outside the window.
+  expect(await rowsDrawn(ui)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+  expect(opens).toEqual(['todo'])
+  await ui.unmount()
+})
+
+test('moving the ring scrolls the list to keep its row in the window under the header', async ($, on) => {
+  const db = seeded(Array.from({ length: 8 }, (_, i) => aTodo(i + 1, `Todo number ${i + 1}`)))
+  engine(on, [], undefined, true, { db })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 30, scroll: { offset: 0, bodyRows: 8 } } })
+  const focus = (element: string) => $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element, origin: { kind: 'person' } })
+  const arrow = (by: 1 | -1) => $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 0, by, bodyRows: 8, contentRows: 8, origin: { kind: 'person' } })
+  // #8's header is the list's last row (14): the window ends on it.
+  await focus('todo:8')
+  expect(await isLit(ui, 'todo:8')).toBe(true)
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 10 })
+  // The add input is in the header, always in view: the list stays.
+  await focus('add')
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 10 })
+  // #1's header, row 0: back to the top.
+  await focus('todo:1')
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 0 })
+  // The arrows walk the ring down; the window follows once it passes the bottom.
+  for (let i = 0; i < 3; i++) await arrow(1)
+  expect(await isLit(ui, 'todo:4')).toBe(true)
+  expect(await listWindowOf(ui)).toEqual({ height: 5, offset: 2 })
+  // Opening a todo adds its rows to the list, and the ring keeps its own in view.
+  await ui.press({ key: 'todo:4' })
+  await focus('act:4:details')
+  const w = await listWindowOf(ui)
+  expect(w.height).toBe(5)
+  expect(w.offset).toBeGreaterThan(2)
+  expect(await isLit(ui, 'act:4:details')).toBe(true)
+  await ui.unmount()
+})
+
 const agentNode = (agentId: string, todoN: number, over: Partial<AgentNode> = {}): AgentNode => ({
   agentId, todoN, name: agentId, kind: 'agent', isWorktree: false, status: 'running', startedAt: 1, ...over,
 })
@@ -1249,6 +1329,26 @@ const inFlow = (n: Found): Found => ({
   ...n,
   children: (n.children ?? []).filter(c => !isTip(c)).map(c => (typeof c === 'object' && c !== null ? inFlow(c as Found) : c)),
 })
+// The list's rows under the fixed header, one line each, in drawing order:
+// the children of the column inside the list's window.
+const listRows = async (ui: { find: (q: { type: string; key: string }) => Promise<unknown> }) => {
+  const win = (await ui.find({ type: 'Box', key: 'list' })) as Found | undefined
+  const col = (win?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null)
+  return (col?.children ?? []).filter((c): c is Found => typeof c === 'object' && c !== null)
+}
+// Todo #n's rows at one indent (2 for level 1, 4 level 2, 6 level 3), the
+// contents of each, from its header down to the next todo's rule.
+const levelRows = async (ui: { find: (q: { type: string; key: string }) => Promise<unknown> }, n: number, indent: number) => {
+  const rows = await listRows(ui)
+  const from = rows.findIndex(r => JSON.stringify(r).includes(`"ring:todo:${n}"`) && r.props?.['paddingLeft'] === undefined)
+  if (from === -1) return []
+  const end = rows.findIndex((r, i) => i > from && r.props?.['paddingLeft'] === undefined)
+  return rows
+    .slice(from + 1, end === -1 ? undefined : end)
+    .filter(r => r.props?.['paddingLeft'] === indent)
+    .map(r => (r.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null))
+    .filter((r): r is Found => r !== undefined)
+}
 const boxesIn = (n: unknown): Found[] => {
   if (typeof n !== 'object' || n === null) return []
   const f = n as Found
@@ -2985,8 +3085,7 @@ test('the double rule is above the hidden footer only while the view hides somet
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // Done hidden: the double is the line right above the footer.
   expect(await dividers(ui)).toEqual(['div2:1', 'div2:hidden'])
-  const tree = (await ui.findAll({ type: 'Box' })).find(b => b.props['paddingX'] !== undefined && b.props['flexDirection'] === 'column')
-  const kids = ((tree as { children?: unknown[] } | undefined)?.children ?? []).filter(c => typeof c === 'object' && c !== null) as { key?: unknown; props?: Record<string, unknown> }[]
+  const kids = await listRows(ui)
   const at = kids.findIndex(k => keyOf(k) === 'div2:hidden')
   expect(at).toBeGreaterThan(-1)
   expect(JSON.stringify(kids[at + 1])).toContain('hidden by the view')
@@ -3421,16 +3520,12 @@ test('focusing a chip puts its word and what it does in the hint line, at the sa
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'todo:2' })
   const focus = (element: string) => $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element, origin: { kind: 'person' } })
-  // Level 1's lines: the indented column under todo #n's header.
-  const level1 = async (n: number) => {
-    const col = (await ui.findAll({ type: 'Box' })).find(b => b.props['paddingLeft'] === 2 && b.props['flexDirection'] === 'column' && JSON.stringify(b.children).includes(`"act:${n}:`))
-    return (col?.children ?? []).filter(c => typeof c === 'object' && c !== null).length
-  }
+  // Level 1's lines: the rows indented 2 under todo #n's header.
+  const level1 = async (n: number) => (await levelRows(ui, n, 2)).length
   const before = [await level1(1), await level1(2)]
   // The hint line: level 1's first Text that names a chip, `✎ Rename: …`.
   const hint = async (n: number) => {
-    const col = (await ui.findAll({ type: 'Box' })).find(b => b.props['paddingLeft'] === 2 && b.props['flexDirection'] === 'column' && JSON.stringify(b.children).includes(`"act:${n}:`))
-    const first = (col?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null)
+    const first = (await levelRows(ui, n, 2))[0]
     const text = first === undefined ? '' : textsIn({ children: [first] }).join('')
     return Object.entries(CHIP).some(([w, c]) => text.startsWith(` ${c.symbol} ${w}: `)) ? text : undefined
   }

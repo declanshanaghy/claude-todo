@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 213 of 217 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 215 of 219 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -244,6 +244,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | U6 | The ring's item gets the round border, every other item a blank cell; nothing lights without the keys | every focusable item lights the same border while the ring is on it, and keeps its room otherwise |
 | U7 | The mod's own focus moves light the right item: a confirmation's safe choice, Pause→Resume, Resume→Pause, Stop→Refine, Keep/Cancel→the chip that asked, Take over→Refine, Delete→add input, Rename→the row | every focusable item lights the same border while the ring is on it, and keeps its room otherwise; Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring; Take over stops the other session's agents here and cancelling it puts the ring back; Delete removes the row and puts the ring on the add input; Rename stores the new title and puts the ring back on the row |
 | U8 | In the tree an arrow key walks the ring like Tab, stops at the ends (the first being the header's first view toggle, then the rest, 🔥 Fire, the add input, the list), and the wheel and page keys still scroll | in the tree an arrow key walks the ring like Tab, even when the tree is taller than the pane |
+| U8b | The header (counts and toggles with 🔥 Fire, the add input, then the one ═ rule above the first todo) stays fixed above the list at any width: the wheel and page keys scroll only the list's window under it, clamped at both ends, and the drawing never outgrows the body, so the engine never scrolls the header away; every row is still drawn, and only the one pane ever opens | the header stays put while the list scrolls under it, at a narrow width, in one pane |
+| U8c | Moving the ring (Tab, an arrow, a click, the mod's own focus) scrolls the list's window to keep the ring's row in view; a header element leaves the list where it is | moving the ring scrolls the list to keep its row in the window under the header |
 | U8a | A chip that leaves a todo's row while the ring is on it (▶ Exec once the todo turns drafting) hands the ring to that todo's header | a chip that leaves the row under the ring hands the ring to its todo header |
 | U9 | The spinner turns while a todo runs | the spinner turns only while a todo runs |
 | U10 | Each todo is one focusable line, its own splitter: ▸/▾, #N and title in the status color, a dim rule filling the gap, the status's mark (and d/n subtasks while it has run; a running one spins) at the right in its color, with the status word as the line's label, as wide as the pane's body less its padding and the ring's room; pressing it opens and closes the todo | each todo is one line, its own splitter: toggle, #N and title in the status color, a dim rule, the status mark at the right |

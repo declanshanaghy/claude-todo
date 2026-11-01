@@ -7,7 +7,7 @@ import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
 import { DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
 import { type Chip, INFLIGHT, canMove, canResume, isOwnedElsewhere, moveRefusal, offers } from './moves'
-import { drawPane, focusOrder, rehome } from './pane'
+import { drawPane, focusOrder, listWindow, rehome, showRow } from './pane'
 import { draftsPrompt, execPrompt, restartPrompt, resumePrompt } from './protocol'
 
 export const PANE = 'todo'
@@ -71,6 +71,9 @@ const placed = atom({ plugin: 'todo', key: 'placed' } as const, false)
 // The key of the element the pane's focus ring is on, so the pane can draw
 // that chip's border; a person's moves arrive at ui.focus, the mod's own here.
 const ring = atom({ plugin: 'todo', key: 'ring' } as const, null as string | null)
+// The first row of the list the window under the pane's header shows: the
+// list scrolls by itself (the ui.scroll hook), so the header never moves.
+const offset = atom({ plugin: 'todo', key: 'offset' } as const, 0)
 // How long a done todo stays in the tree, in ms (0 keeps it), and the todos
 // whose time is up: the tree leaves them out; the database keeps them.
 const ttl = atom({ plugin: 'todo', key: 'ttl' } as const, 0)
@@ -650,12 +653,23 @@ async function focus($: $, key: string) {
   // ring is noted here, and put back if the move is refused.
   const was = await read($, ring)
   await update($, ring, () => key)
+  await follow($, key)
   try {
     if ((await $.ui.focus({ requestId: PANE, key })).deny !== undefined) await update($, ring, () => was)
   } catch {
     // A refusal comes back as `deny`; a throw is the host's own, and the note
     // stands so the chip the mod asked for still lights.
   }
+}
+
+// Scrolls the list so the row holding `key` shows, where the last drawing
+// placed it; a header element, always in view, leaves the list where it is.
+async function follow($: $, key: string | null) {
+  const w = listWindow()
+  const row = key === null ? undefined : w.rowOf[key]
+  if (row === undefined) return
+  const to = showRow(row, w.offset, w.height)
+  if (to !== (await read($, offset))) await update($, offset, () => to)
 }
 
 // Every /todo verb, how it's typed and what it does, one line each. The
@@ -1880,18 +1894,26 @@ export const register: Register = (on, options) => {
   on('ui.focus', async ($, e, next) => {
     const r = await next(e)
     if (r.deny === undefined && e.component === 'Pane' && e.requestId === PANE) {
-      await update($, ring, () => (e.plugin === 'todo' ? (e.element ?? null) : null))
+      const key = e.plugin === 'todo' ? (e.element ?? null) : null
+      await update($, ring, () => key)
+      await follow($, key)
     }
     return r
   }).catch((_, e, next) => next(e))
 
-  // In the tree an arrow moves the ring, as Tab does: once the tree is taller
-  // than the pane the engine would scroll instead, and the ring could never
-  // reach what's below. A trackpad swipe or the wheel still scrolls, and the
-  // engine keeps the ring's element in view. The detail dialog scrolls as ever.
+  // In the tree an arrow moves the ring, as Tab does, so it reaches every
+  // row. A trackpad swipe, the wheel or a page key scrolls the list under the
+  // header instead of the pane, so the header stays put, and moving the ring
+  // keeps its row in view (follow). The detail dialog scrolls as ever.
   on('ui.scroll', async ($, e, next) => {
+    if (e.component !== 'Pane' || e.requestId !== PANE || (await read($, detail))) return next(e)
     const isArrow = e.origin.kind === 'person' && e.pointer === undefined && Math.abs(e.by) === 1
-    if (!isArrow || e.component !== 'Pane' || e.requestId !== PANE || (await read($, detail))) return next(e)
+    if (!isArrow) {
+      const w = listWindow()
+      const to = Math.min(Math.max(0, w.offset + e.by), Math.max(0, w.rows - w.height))
+      if (to !== (await read($, offset))) await update($, offset, () => to)
+      return {}
+    }
     const keys = focusOrder()
     const at = keys.indexOf((await read($, ring)) ?? '')
     const to = at === -1 ? keys[e.by > 0 ? 0 : keys.length - 1] : keys[Math.min(keys.length - 1, Math.max(0, at + e.by))]
@@ -1940,6 +1962,7 @@ export const register: Register = (on, options) => {
       cap: await read($, cpuCap),
       f: await read($, spin),
       turns: await read($, turns),
+      offset: await read($, offset),
     })
     // The chip the ring was on is gone (it can't act now): move the ring to
     // its todo's header, or to the view toggle when the none view hid its

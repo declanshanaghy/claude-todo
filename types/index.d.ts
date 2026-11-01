@@ -175,6 +175,8 @@ declare module 'claude-code' {
       placed: boolean
       // The key of the element the pane's focus ring is on.
       ring: string | null
+      // The first row of the list the window under the pane's header shows.
+      offset: number
       // A done todo's time in the tree in ms (0 keeps it), and the todos past it.
       ttl: number
       expired: number[]
