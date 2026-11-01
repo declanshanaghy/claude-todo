@@ -3214,6 +3214,22 @@ test('the dialog turns on closeOnEscape while it shows, and leaving it turns it 
   expect(openedWith.slice(before)).toEqual([{ id: 'todo', focus: true }])
 })
 
+test("a failure in one of the mod's own tools answers with what failed, not as a tool nobody answered", async ($, on) => {
+  const db = seeded([aTodo(1, 'Count')])
+  engine(on, [], undefined, true, { db })
+  let isBroken = false
+  on('state.get', (_, e, next) => {
+    // A value the code can't index: reading the todo's key throws.
+    if (isBroken && e.key === 'draftKeys') return { value: { value: null, version: 1 } }
+    return next(e)
+  })
+  await start($)
+  isBroken = true
+  const r = await $.tool.call({ tool: 'mcp__todo__drafts', n: 1, key: '1.1', drafts: DRAFTS } as never)
+  expect(r).toMatchObject({ isError: true })
+  expect(String((r as { result?: unknown }).result)).toMatch(/mcp__todo__drafts failed \(throw\)/)
+})
+
 test('a dialog left open across a reload starts closed', async ($, on) => {
   const db = seeded([aTodo(1, 'Count', { status: 'done', hasRun: true })])
   engine(on, [], undefined, true, { db })

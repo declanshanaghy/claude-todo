@@ -1186,6 +1186,12 @@ async function setUp($: $, options: Options) {
   await expire($)
 }
 
+// The answer of one of the mod's own tools whose hook failed.
+const toolFailed = (_: unknown, e: { tool: string }, next: { error: { kind: string; message?: string } }) => ({
+  result: `${e.tool} failed (${next.error.kind}): ${next.error.message ?? 'no message'}`,
+  isError: true as const,
+})
+
 export const register: Register = (on, options) => {
   // A drafter's prompt names the session, so its title follows each change:
   // set at start (a resume brings its old one), and on every prompt, where a
@@ -1371,9 +1377,11 @@ export const register: Register = (on, options) => {
     if (a.status === 'done' || a.status === 'failed') $.ui.toast(statusToast(t.n, a.status))
     const now = (await read($, todos)).find(x => x.n === t.n)
     return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
-  })
+  }).catch(toolFailed)
 
-  on('tool.call', { tool: 'mcp__todo__drafts' as never }, async ($, e) => storeDrafts($, argsOf(e)))
+  // A hook that throws is skipped, and the caller only hears that nothing
+  // answered: the mod's own tools say what failed instead.
+  on('tool.call', { tool: 'mcp__todo__drafts' as never }, async ($, e) => storeDrafts($, argsOf(e))).catch(toolFailed)
 
   // The drafter is the plugin's to spawn, never the model's to pick.
   on('agent.offer', async ($, e, next) => (e.agent === (await read($, drafterType)) && e.agent !== 'Explore' ? { isOffered: false } : next(e))).catch(
@@ -1384,7 +1392,7 @@ export const register: Register = (on, options) => {
     const list = await read($, todos)
     // An MCP-style tool answers text (or content blocks), never a bare object.
     return { result: JSON.stringify(list.map(({ n, title, status, prompt, summary, mode }) => ({ n, title, status, prompt, summary, mode }))) }
-  })
+  }).catch(toolFailed)
 
   on('tool.call', async ($, e, next) => {
     const tool = e.tool
