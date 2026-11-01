@@ -61,6 +61,18 @@ if (runs.length) {
     else if (job.conclusion === 'success') badge(file, label, `passing · ${duration(seconds(job.started_at, job.completed_at))}`, 'brightgreen')
     else badge(file, label, job.conclusion || job.status, 'red')
   }
+
+  // The kit's own tally from the Tests job's log: "N pass" and "N fail".
+  const tests = jobs.find((j) => j.name === 'Tests')
+  if (tests) {
+    const log = execFileSync('gh', ['api', `repos/${repo}/actions/jobs/${tests.id}/logs`], { encoding: 'utf8', maxBuffer: 64 << 20 })
+    const pass = /\s(\d+) pass\s*$/m.exec(log)?.[1]
+    const fail = /\s(\d+) fail\s*$/m.exec(log)?.[1]
+    if (pass !== undefined) {
+      const failing = Number(fail ?? 0)
+      badge('tests', 'plugin tests', failing ? `${pass} passed · ${failing} failed` : `${pass} passed`, failing ? 'red' : 'brightgreen')
+    }
+  }
 }
 
 // Every CI run, any branch or event, started in the last 7 days.
