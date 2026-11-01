@@ -13,9 +13,9 @@ env:
   # read; bump it with the version you develop against.
   CLAUDE_CODE_VERSION: 2.1.316
 
-# One job per check, so each passes or fails on its own and has its own badge
-# (the Badges workflow reads their conclusions); `check` gathers them into the
-# one result a branch needs.
+# One job per check, so each passes or fails on its own (the Badges workflow
+# reads the coverage gate's conclusion and the Tests job's tally); `check`
+# gathers them into the one result a branch needs.
 jobs:
   lint:
     name: Lint (ESLint)

@@ -1,8 +1,8 @@
 name: Badges
 
 # Recomputes the README's computed badges after every CI run and once a day
-# (so "this week" ages out), and commits them as shields.io endpoint JSON to
-# the orphan `badges` branch, which the README reads through
+# (so new npm advisories show), and commits them as shields.io endpoint JSON
+# to the orphan `badges` branch, which the README reads through
 # raw.githubusercontent.com.
 on:
   workflow_run:
@@ -54,8 +54,16 @@ jobs:
           else
             git worktree add --orphan -b badges "$RUNNER_TEMP/branch"
           fi
-          cp "$RUNNER_TEMP"/badges/*.json "$RUNNER_TEMP/branch/"
           cd "$RUNNER_TEMP/branch"
+          # Drop files no badge reads any more; a badge not recomputed this
+          # run (no CI run yet, an unreadable log) keeps its last value.
+          for f in *.json; do
+            case "$f" in
+              tests.json|check-coverage.json|ci-pass-rate.json|coverage.json|npm-audit.json) ;;
+              *) rm -f -- "$f" ;;
+            esac
+          done
+          cp "$RUNNER_TEMP"/badges/*.json .
           git add -A
           if git diff --cached --quiet; then echo "No badge changed"; exit 0; fi
           git commit -q -m "Badges for ${GITHUB_SHA::7}"
