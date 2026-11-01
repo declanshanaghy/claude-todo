@@ -65,7 +65,11 @@ if (runs.length) {
   // The kit's own tally from the Tests job's log: "N pass" and "N fail".
   const tests = jobs.find((j) => j.name === 'Tests')
   if (tests) {
-    const log = execFileSync('gh', ['api', `repos/${repo}/actions/jobs/${tests.id}/logs`], { encoding: 'utf8', maxBuffer: 64 << 20 })
+    // Fetched directly: newer gh refuses to print a log's colour codes, and
+    // older gh has no flag to allow them.
+    const token = process.env.GH_TOKEN || execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim()
+    const res = await fetch(`https://api.github.com/repos/${repo}/actions/jobs/${tests.id}/logs`, { headers: { Authorization: `Bearer ${token}` } })
+    const log = res.ok ? await res.text() : ''
     const pass = /\s(\d+) pass\s*$/m.exec(log)?.[1]
     const fail = /\s(\d+) fail\s*$/m.exec(log)?.[1]
     if (pass !== undefined) {
