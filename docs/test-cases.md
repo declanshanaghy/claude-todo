@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 96 of 99 cases (97.0%)** are covered by `claude plugin test .`.
+**Coverage: 97 of 100 cases (97.0%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -29,10 +29,10 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | E1 | ▶ Exec submits the exec protocol and marks the todo drafting | M2: Exec submits the exec protocol and marks the todo drafting |
 | E1a | Exec, restart and resume all carry the git rules: own worktree branch, commit as it goes, the project's checks before landing, rebase onto `origin/<base>` resolving parallel todos' conflicts by keeping both sides, retry a rejected push, never force-push, abort and keep the branch on an unresolvable conflict; a lone Agent runs with `isolation: "worktree"` and a Workflow's merge agent is the only one that pushes | every protocol puts the work on its own worktree branch and lands it only after the checks pass |
 | E1b | `mcp__todo__update` stores the todo's branch and landed commit, and Details shows them | mcp__todo__update reports a change and mcp__todo__list reads the backlog; a todo's Details shows its prompt, summary, run ids and agents, with nothing to press |
-| T1 | A done todo leaves the tree its lifetime after it finished; a failed one stays; `mcp__todo__list` keeps both | a done todo leaves the tree 5 minutes after it finished; a failed one stays, and the list keeps both |
-| T2 | `CLAUDE_TODO_DONE_TTL_MINUTES` overrides the option, and 0 keeps done todos | CLAUDE_TODO_DONE_TTL_MINUTES overrides the option; 0 keeps done todos |
-| T3 | The `doneTtlMinutes` option sets the lifetime | the doneTtlMinutes option sets the time in the tree |
-| T4 | A done todo with no finish time (from before it was kept) is stamped at the next start | a done todo from before its time was kept starts its time in the tree at the next start |
+| D1 | A done todo leaves the tree its lifetime after it finished; a failed one stays; `mcp__todo__list` keeps both | a done todo leaves the tree 5 minutes after it finished; a failed one stays, and the list keeps both |
+| D2 | `CLAUDE_TODO_DONE_TTL_MINUTES` overrides the option, and 0 keeps done todos | CLAUDE_TODO_DONE_TTL_MINUTES overrides the option; 0 keeps done todos |
+| D3 | The `doneTtlMinutes` option sets the lifetime | the doneTtlMinutes option sets the time in the tree |
+| D4 | A done todo with no finish time (from before it was kept) is stamped at the next start | a done todo from before its time was kept starts its time in the tree at the next start |
 | E2 | A dropped exec prompt puts the todo back and toasts why | a dropped exec prompt puts the todo back and says why |
 | E3 | A dropped restart puts the todo back, run ids included, with no "restarting" toast | a dropped restart puts the stopped todo back, run ids and all |
 | E4 | A dropped resume puts the todo back to paused, with no "resuming" toast | a dropped resume puts the paused todo back |
@@ -77,10 +77,11 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| T1 | An agent's completed turn writes it done; a lone Agent's todo ends done with the answer's first line as summary | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort leaves it |
-| T2 | A refused turn writes the agent and its lone-Agent todo failed | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort leaves it |
-| T3 | An aborted turn leaves the agent and todo running | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort leaves it |
-| T4 | A Workflow agent's end doesn't end the Workflow's todo | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort leaves it |
+| T1 | An agent's completed turn writes it done; a lone Agent's todo ends done with the answer's first line as summary | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
+| T2 | A refused turn writes the agent and its lone-Agent todo failed | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
+| T3 | An aborted turn (stopped outside the pane) stops the agent and its lone-Agent todo, keeping the task id for ▶ Resume, and interrupts its open calls | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
+| T3a | An agent stopped outside the pane stops its lone-Agent todo and keeps its id to resume | an agent stopped outside the pane stops its lone-Agent todo, keeping its id to resume |
+| T4 | A Workflow agent's end doesn't end the Workflow's todo | an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it |
 
 ## The mod's MCP tools
 
@@ -114,11 +115,11 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | ID | Behaviour | Covered by |
 |---|---|---|
 | F1 | Without sqlite3 the pane says why, stays read-only and shows the 0.2 todos where they are | without sqlite3 the pane says why and stays read-only, keeping 0.2 todos in place |
-| F2 | A refused add is not toasted or answered as added | without sqlite3 the pane says why and stays read-only, keeping 0.2 todos in place; a database error that is no conflict makes the pane read-only, said once |
-| F3 | A sqlite error that isn't a conflict sets the fault, toasts it once, shows ⚠ in the pane and makes later edits read-only | a database error that is no conflict makes the pane read-only, said once |
+| F2 | A refused add is not toasted or answered as added | without sqlite3 the pane says why and stays read-only, keeping 0.2 todos in place; a failed database run is said once and the next write goes through: the pane never turns read-only |
+| F3 | A failed database run (an aborted write, a disk error) is toasted once until a write lands, the add isn't claimed, and the pane never turns read-only: only a missing sqlite3 or data folder does that | a failed database run is said once and the next write goes through: the pane never turns read-only |
 | F4 | A failing `mkdir` of the data folder makes the pane read-only, saying why | a folder mkdir can't create makes the pane read-only, saying why |
 | F5 | A `mkdir` that throws does the same, and no script runs | a mkdir that throws makes the pane read-only too |
-| F6 | Once faulted, the sync loop stops reading | once read-only, the sync loop stops reading |
+| F6 | A failed write leaves the sync loop reading | a failed write leaves the sync loop reading |
 
 ## The sync loop
 

@@ -1067,7 +1067,7 @@ test('Delete removes the row and puts the ring on the add input', async ($, on) 
 
 // ---------- a turn's end ----------
 
-test("an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort leaves it", async ($, on) => {
+test("an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails it, an abort stops it", async ($, on) => {
   const db = seeded(
     [running(1, 'Done one'), running(2, 'Refused one'), running(3, 'Aborted one'), running(4, 'Workflow', { mode: 'workflow', taskId: 'task9' })],
     [agentNode('ag1', 1), agentNode('ag2', 2), agentNode('ag3', 3), agentNode('ag4', 4, { kind: 'workflow' })],
@@ -1082,8 +1082,8 @@ test("an agent's turn ends it: a lone Agent's todo ends with it, a refusal fails
   expect(todoAt(db, 1)).toMatchObject({ status: 'done', summary: 'Counted 12 md files.' })
   expect(agentAt(db, 'ag2').status).toBe('failed')
   expect(todoAt(db, 2).status).toBe('failed')
-  expect(agentAt(db, 'ag3').status).toBe('running')
-  expect(todoAt(db, 3).status).toBe('running')
+  expect(agentAt(db, 'ag3').status).toBe('stopped')
+  expect(todoAt(db, 3).status).toBe('stopped')
   // A Workflow's agent ending doesn't end the Workflow.
   expect(agentAt(db, 'ag4').status).toBe('done')
   expect(todoAt(db, 4).status).toBe('running')
@@ -1188,23 +1188,35 @@ test('a fresh read keeps only the newest 1500 calls of the directory', async ($,
 
 // ---------- the database's failures ----------
 
-test('a database error that is no conflict makes the pane read-only, said once', async ($, on) => {
+test('a failed database run is said once and the next write goes through: the pane never turns read-only', async ($, on) => {
   const toasts: string[] = []
-  let isBroken = false
-  engine(on, [], undefined, true, { toasts, sql: op => (isBroken && op.kind === 'todos' ? err('Error: stepping, disk I/O error (10)') : undefined) })
+  let failing = ''
+  const { db } = engine(on, [], undefined, true, { toasts, sql: op => (failing && op.kind === 'todos' ? err(failing) : undefined) })
   await start($)
   await todo($, 'add Saved')
-  isBroken = true
+  // The host aborts a write as the turn it ran for ends.
+  failing = '$.process.run(/usr/bin/sqlite3) aborted'
   expect((await todo($, 'add Lost')).text).toBe('Not added: the todo list could not be saved.')
-  expect(toasts).toContain('todo: Error: stepping, disk I/O error (10)')
-  expect(toasts).not.toContain('＋ added #2')
-  await todo($, 'add Refused')
-  expect(toasts.filter(t => t.startsWith('todo: '))).toHaveLength(1)
-  expect(toasts.at(-1)).toBe('todo is read-only: Error: stepping, disk I/O error (10)')
+  await todo($, 'add Lost again')
+  expect(toasts.filter(t => t === 'todo: $.process.run(/usr/bin/sqlite3) aborted')).toHaveLength(1)
+  expect(toasts.some(t => t.startsWith('todo is read-only'))).toBe(false)
+  failing = ''
+  expect((await todo($, 'add Lands')).text).toMatch(/^Added #2 Lands/)
+  expect(titles(db, '/proj')).toEqual(['1 Saved', '2 Lands'])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /⚠ Error: stepping, disk I\/O error/ })).toBeDefined()
-  expect(await ui.find({ type: 'Button', key: 'todo:2' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /⚠/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Input', key: 'add' })).toBeDefined()
   await ui.unmount()
+})
+
+test('an agent stopped outside the pane stops its lone-Agent todo, keeping its id to resume', async ($, on) => {
+  const db = seeded([aTodo(1, 'Count', { status: 'running', hasRun: true, mode: 'agent', taskId: 'ag1', owner: 's1' })], [agentNode('ag1', 1, { status: 'running' })], [callRow('c1', 'ag1', { state: 'run' })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  await $.turn.complete({ agentId: 'ag1', isAborted: true, answer: '' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'stopped', taskId: 'ag1' })
+  expect(db.agents['ag1']?.body).toMatchObject({ status: 'stopped' })
+  expect(db.calls['c1']?.body).toMatchObject({ state: 'interrupted' })
 })
 
 test('a write other sessions keep beating gives up after 5 tries and says so', async ($, on) => {
@@ -1395,16 +1407,16 @@ test('the pane opens at start, stays closed across a reload once hidden, and off
   await ui.unmount()
 })
 
-test('once read-only, the sync loop stops reading', async ($, on) => {
+test('a failed write leaves the sync loop reading', async ($, on) => {
   let mtime = 1
-  const { ops } = engine(on, [], undefined, false, { mtime: () => mtime, sql: op => (op.kind === 'todos' ? err('Error: database disk image is malformed') : undefined) })
+  const { ops } = engine(on, [], undefined, false, { mtime: () => mtime, sql: op => (op.kind === 'todos' ? err('$.process.run(/usr/bin/sqlite3) aborted') : undefined) })
   const clock = mock.clock(on, { now: 1000 })
   await start($)
-  await todo($, 'add Breaks it')
+  await todo($, 'add Aborted')
   const before = ops.length
   mtime = 2
   await clock.advance(4000)
-  expect(ops).toHaveLength(before)
+  expect(ops.slice(before).some(o => o.kind === 'read')).toBe(true)
 })
 
 test("a migration's renumbering moves the pane's open rows with it", async ($, on) => {

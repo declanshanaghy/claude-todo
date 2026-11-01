@@ -90,6 +90,7 @@ declare module 'claude-code' {
       stamp: string
       me: string
       fault: string
+      warned: string
       persisted: boolean
       db: { bin: string; file: string } | null
       agents: Shaped<AgentNode[]>

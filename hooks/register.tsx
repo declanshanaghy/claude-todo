@@ -29,6 +29,8 @@ const stamp = atom({ plugin: 'todo', key: 'stamp' } as const, '')
 const me = atom({ plugin: 'todo', key: 'me' } as const, '')
 // Why the database can't be used; the pane is read-only while it's set.
 const fault = atom({ plugin: 'todo', key: 'fault' } as const, '')
+// The last failed run of the database, said once until a write lands again.
+const warned = atom({ plugin: 'todo', key: 'warned' } as const, '')
 // Whether this session's agents and calls from before 0.3 were written out.
 const persisted = atom({ plugin: 'todo', key: 'persisted' } as const, false)
 const db = atom({ plugin: 'todo', key: 'db' } as const, null as { bin: string; file: string } | null)
@@ -111,10 +113,21 @@ async function where($: $) {
 }
 
 // A failure the person should see once, not a hook error on every tick.
+// The database can't be used at all (no sqlite3, no folder for the file):
+// the pane says why and stays read-only.
 async function fail($: $, err: unknown) {
   const why = err instanceof Error ? err.message : String(err)
   if ((await read($, fault)) !== why) $.ui.toast(`todo: ${why}`)
   await update($, fault, () => why)
+}
+
+// One failed run of the database: said once until a write lands again, and no
+// bar to the next one. Most are one-offs, like a write the host aborts as the
+// turn or agent it ran for ends.
+async function warn($: $, err: unknown) {
+  const why = err instanceof Error ? err.message : String(err)
+  if ((await read($, warned)) !== why) $.ui.toast(`todo: ${why}`)
+  await update($, warned, () => why)
 }
 
 // Reads the directory's todos and agents; the calls since the copy's last seq
@@ -175,6 +188,7 @@ async function editTodos($: $, fn: (list: Todo[]) => Todo[]) {
       const del = before.filter(t => !after.some(x => x.n === t.n)).map(t => t.n)
       if (put.length === 0 && del.length === 0) return true
       if (await writeTodos($, at, d, r, put, del)) {
+        await update($, warned, () => '')
         await update($, todos, () => after)
         await update($, rev, () => r + 1)
         return true
@@ -183,7 +197,7 @@ async function editTodos($: $, fn: (list: Todo[]) => Todo[]) {
     }
     $.ui.toast('todo: not saved, other sessions kept changing the list; try again')
   } catch (err) {
-    await fail($, err)
+    await warn($, err)
   }
   return false
 }
@@ -202,7 +216,7 @@ async function editAgents($: $, fn: (list: AgentNode[]) => AgentNode[]) {
     const { at, d, me: self } = await where($)
     await writeAgents($, at, d, self, put, del)
   } catch (err) {
-    await fail($, err)
+    await warn($, err)
   }
 }
 
@@ -216,7 +230,7 @@ async function editCalls($: $, fn: (list: Call[]) => Call[]) {
     const { at, d, me: self } = await where($)
     for (const c of put) await writeCall($, at, d, self, c)
   } catch (err) {
-    await fail($, err)
+    await warn($, err)
   }
 }
 
@@ -347,7 +361,7 @@ async function sync($: $) {
     await update($, stamp, () => now)
     await reload($)
   } catch (err) {
-    await fail($, err)
+    await warn($, err)
   }
 }
 
@@ -673,7 +687,7 @@ export const register: Register = (on, options) => {
           await editTodos($, l => l.map(t => (t.status === 'done' && t.doneAt === undefined ? { ...t } : t)))
         }
       } catch (err) {
-        await fail($, err)
+        await warn($, err)
       }
     }
     const keep = await ttlMs($, options['doneTtlMinutes'])
@@ -877,7 +891,16 @@ export const register: Register = (on, options) => {
     const id = e.agentId
     if (id !== undefined) {
       const node = (await read($, agents)).find(a => a.agentId === id)
-      if (node?.status === 'running' && !e.isAborted) {
+      if (node?.status === 'running' && e.isAborted) {
+        // Stopped outside the pane (the tasks list, an interrupt): the agent
+        // and a lone Agent's todo are stopped, keeping its id for ▶ Resume.
+        await editAgents($, l => l.map((a): AgentNode => (a.agentId === id ? { ...a, status: 'stopped' } : a)))
+        await editCalls($, l => l.map((c): Call => (c.agentId === id && c.state === 'run' ? { ...c, state: 'interrupted' } : c)))
+        const t = (await read($, todos)).find(x => x.n === node.todoN)
+        if (t?.mode === 'agent' && t.taskId === id && t.status === 'running') {
+          await patchTodo($, t.n, x => ({ ...x, status: 'stopped' }))
+        }
+      } else if (node?.status === 'running') {
         const failed = 'reason' in e && e.reason === 'refusal'
         await editAgents($, l => l.map((a): AgentNode => (a.agentId === id ? { ...a, status: failed ? 'failed' : 'done' } : a)))
         // A lone background Agent's end is the todo's end; the model's later
