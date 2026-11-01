@@ -3928,10 +3928,16 @@ test('every status and tone has its own color and focused twin, spread evenly ro
   const all = tones.flatMap(t => [toneColor(t), toneFocus(t)]).map(String)
   for (const c of all) expect(c).toMatch(/^#[0-9a-f]{6}$/)
   expect(new Set(all).size).toBe(all.length)
-  // Pending is the one grey; every other entry sits on its own hue, 30° apart.
+  // Pending is the one grey; every other entry sits on its own hue, 30° apart
+  // from 0° to 300°, but Delete's red, which sits at 350°: red, not rose, and
+  // 10° off stopped's pure red.
   const hued = tones.filter(t => t !== 'pending')
-  const hues = hued.map(t => hsl(String(toneColor(t))).hue).sort((a, b) => a - b)
-  expect(hues).toEqual(Array.from({ length: 12 }, (_, i) => i * 30))
+  const hues = hued.filter(t => t !== 'danger').map(t => hsl(String(toneColor(t))).hue).sort((a, b) => a - b)
+  expect(hues).toEqual(Array.from({ length: 11 }, (_, i) => i * 30))
+  const danger = hsl(String(toneColor('danger')))
+  expect(danger.hue).toBe(350)
+  expect(Math.round(danger.light * 100)).toBe(64)
+  expect(toneColor('danger')).not.toBe(STOP_RED)
   expect(GREYS).toContain(MARK.pending.color)
   expect(hsl(String(MARK.pending.color)).sat).toBeLessThan(0.1)
   // Each focused twin is its own hue, lighter.

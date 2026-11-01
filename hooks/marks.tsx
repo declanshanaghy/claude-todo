@@ -12,8 +12,10 @@ import type { Todo, TodoStatus, View } from '../types'
 // The colors are raw hex, not theme keys: the theme's keys cluster (three
 // greens, two reds) and have no lighter twin of each, so the hues couldn't be
 // spread evenly. So the statuses and the chip tones below sit 30° apart round
-// the color wheel, every one at 85% saturation and 64% lightness but stopped,
-// a pure red. A raw hex color is a Color the engine paints as is. `focus` is
+// the color wheel, from stopped's 0° to the magenta's 300°, every one at 85%
+// saturation and 64% lightness but stopped, a pure red. Delete's red is the
+// one off the 30° grid: 350°, so it reads as red rather than the rose 330°
+// would give, yet stays apart from stopped's pure red. A raw hex color is a Color the engine paints as is. `focus` is
 // the same hue with its lightness raised halfway to white: what a chip under
 // the focus ring or the pointer brightens to (statusChip).
 export type Mark = { symbol: string; color: Color; focus: Color }
@@ -121,10 +123,11 @@ export const DISABLED_FILL: Color = 'subtle'
 
 // The chips that move no status still each wear a hue of their own, on the
 // same wheel as the statuses, so none reads as disabled: Rename a lime (90°),
-// Details a cyan (180°), the rest a magenta (300°), and Delete a rose (330°),
-// apart from failed's orange and stopped's red.
+// Details a cyan (180°), the rest a magenta (300°), and Delete a red (350°),
+// 10° toward pink from stopped's pure red and lighter and softer than it, so
+// a destroyed todo never reads as a stopped one, nor Delete as a rose.
 const TONE: Record<'danger' | 'details' | 'edit' | 'stay', Pick<Mark, 'color' | 'focus'>> = {
-  danger: { color: '#f155a3', focus: '#f8aad1' },
+  danger: { color: '#f1556f', focus: '#f8aab7' },
   details: { color: '#55f1f1', focus: '#aaf8f8' },
   edit: { color: '#a3f155', focus: '#d1f8aa' },
   stay: { color: '#f155f1', focus: '#f8aaf8' },

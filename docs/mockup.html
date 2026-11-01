@@ -56,17 +56,17 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .btn.f:not(.chip) *{color:var(--term)!important}
 /* Action chips mirror statusChip() in hooks/marks.tsx: a filled label whose fill is
    the mark color of the status the action moves the todo into (tone-<status>, the
-   same colors as MARK below), danger = Delete's rose, details = its own cyan (Details
+   same colors as MARK below), danger = Delete's red (350°), details = its own cyan (Details
    moves no status), edit = Rename's lime, stay = a magenta (Reset, Leave,
    Keep/Cancel/Back); a subtask's ☰ Details wears details like a todo's. Every color is raw hex, its own hue 30° apart
-   round the wheel (stopped a pure red), with pending's grey the one exception, which
+   round the wheel (stopped a pure red, Delete's softer red the one off the grid at 350°), with pending's grey the one exception, which
    no chip fills with. --tf is each tone's focused twin, the same hue halfway to white:
    a chip under the ring or the pointer brightens to it rather than going black.
    An enabled chip is never grey: only a dimmed (disabled) one is muted. The focus
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
 :root{--s-stopped:#ff0000;--f-stopped:#ff8080;--s-failed:#f1a355;--f-failed:#f8d1aa;--s-paused:#f1f155;--f-paused:#f8f8aa;--s-edit:#a3f155;--f-edit:#d1f8aa;
   --s-running:#55f155;--f-running:#aaf8aa;--s-planning:#55f1a3;--f-planning:#aaf8d1;--s-details:#55f1f1;--f-details:#aaf8f8;--s-drafting:#55a3f1;--f-drafting:#aad1f8;
-  --s-prompting:#5555f1;--f-prompting:#aaaaf8;--s-done:#a355f1;--f-done:#d1aaf8;--s-stay:#f155f1;--f-stay:#f8aaf8;--s-danger:#f155a3;--f-danger:#f8aad1;--s-pending:#8b919c;--f-pending:#c5c8ce}
+  --s-prompting:#5555f1;--f-prompting:#aaaaf8;--s-done:#a355f1;--f-done:#d1aaf8;--s-stay:#f155f1;--f-stay:#f8aaf8;--s-danger:#f1556f;--f-danger:#f8aab7;--s-pending:#8b919c;--f-pending:#c5c8ce}
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
 .chip{--tone:var(--s-stay);--tf:var(--f-stay)}.chip.tone-stay{--tone:var(--s-stay);--tf:var(--f-stay)}.chip.tone-edit{--tone:var(--s-edit);--tf:var(--f-edit)}.chip.tone-danger{--tone:var(--s-danger);--tf:var(--f-danger)}.chip.tone-details{--tone:var(--s-details);--tf:var(--f-details)}
 .chip.tone-prompting{--tone:var(--s-prompting);--tf:var(--f-prompting)}.chip.tone-pending{--tone:var(--s-pending);--tf:var(--f-pending)}.chip.tone-drafting{--tone:var(--s-drafting);--tf:var(--f-drafting)}.chip.tone-planning{--tone:var(--s-planning);--tf:var(--f-planning)}.chip.tone-running{--tone:var(--s-running);--tf:var(--f-running)}
