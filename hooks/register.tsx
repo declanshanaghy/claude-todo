@@ -716,7 +716,7 @@ export async function resumeTodo($: $, t: Todo) {
     await editAgents($, l => l.map((a): AgentNode => (a.todoN === t.n && a.status === 'paused' ? { ...a, status: 'stopped' } : a)))
   }
   await patchUi($, u => ({ ...u, justStopped: u.justStopped.filter(x => x !== t.n) }))
-  // In the chat's hands until it reports: no second ▶ Resume meanwhile.
+  // In the chat's hands until it reports: no second ⏵ Resume meanwhile.
   await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))
   const ctx = { kept: await keptWork($, t), digest: await digestOf($, t), canWake: t.isAgentGone !== true && t.taskId !== undefined }
   if ((await submit($, t, resumePrompt(t, ctx))) !== undefined) return
@@ -728,7 +728,7 @@ export async function resumeTodo($: $, t: Todo) {
 // (its ids are that session's): the todo is marked stopped here, to restart.
 export async function takeOver($: $, t: Todo) {
   await settleAgents($, t.n, 'stopped')
-  // Its agent and run were the other session's: ▶ Resume here starts a fresh
+  // Its agent and run were the other session's: ⏵ Resume here starts a fresh
   // agent on the worktree it kept.
   await patchTodo($, t.n, x => assign(x, { status: 'stopped', taskId: undefined, runId: undefined, owner: undefined, isAgentGone: true }))
   await patchUi($, u => ({ ...u, confirm: null, justStopped: [...u.justStopped, t.n] }))
@@ -1169,11 +1169,11 @@ export const register: Register = (on, options) => {
       const node = (await read($, agents)).find(a => a.agentId === id)
       if (node?.status === 'running' && e.isAborted) {
         // Stopped outside the pane (the tasks list, an interrupt): the agent
-        // and a lone Agent's todo are stopped, keeping its id for ▶ Resume.
+        // and a lone Agent's todo are stopped, keeping its id for ⏵ Resume.
         await editAgents($, l => l.map((a): AgentNode => (a.agentId === id ? { ...a, status: 'stopped' } : a)))
         await editCalls($, l => l.map((c): Call => (c.agentId === id && c.state === 'run' ? { ...c, state: 'interrupted' } : c)))
         const t = (await read($, todos)).find(x => x.n === node.todoN)
-        // An agent stopped this way won't take a message, so ▶ Resume starts a
+        // An agent stopped this way won't take a message, so ⏵ Resume starts a
         // fresh one on the worktree it kept.
         if (t?.mode === 'agent' && t.taskId === id && t.status === 'running') {
           await patchTodo($, t.n, x => ({ ...x, status: 'stopped', isAgentGone: true }))

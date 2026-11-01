@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
-import { MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
+import { CHIP_SYMBOL, MARK, SUMMARY, type Tone, statusToast, toneColor } from './marks'
 
 const PANE = {
   plugin: 'todo',
@@ -304,7 +304,7 @@ test('Auto drafts the one best prompt and runs it with no questions, planning mu
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
   const chip = await ui.find({ type: 'Button', key: 'act:1:auto' })
-  expect(chip?.props['label']).toBe('⚡ Auto')
+  expect(chip?.props['label']).toBe('Auto')
   const fill = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
   expect(fill?.props['backgroundColor']).toBe(MARK.running.color)
   await ui.press({ key: 'act:1:auto' })
@@ -875,7 +875,7 @@ test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and di
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const fill = async () => {
     const chip = await ui.find({ type: 'Button', key: 'fire' })
-    expect(chip?.props['label']).toBe('🔥 Fire')
+    expect(chip?.props['label']).toBe('Fire')
     return (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)?.props
   }
   // Live: filled with running's color, like Exec and Auto.
@@ -1961,7 +1961,7 @@ test('CLAUDE_TODO_DIVIDERS overrides the option; an unknown value falls back to 
   expect((await dividerOf(again, 1))?.line).toMatch(/^── #1 Fix kitty tab titles ─+$/)
   await again.unmount()
 })
-test('every action chip is one word under 10 letters, filled with the color of the status it moves the todo into', async ($, on) => {
+test('every action chip is one word under 10 letters, drawn as its symbol only, filled with the color of the status it moves the todo into', async ($, on) => {
   const db = seeded([
     aTodo(1, 'Waiting'),
     running(2, 'Runs'),
@@ -1977,13 +1977,17 @@ test('every action chip is one word under 10 letters, filled with the color of t
     const chip = await ui.find({ type: 'Button', key })
     const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)
     const label = chip?.props['label']
-    return { label: typeof label === 'string' ? label : '', color: text?.props['backgroundColor'] }
+    const drawn = (text as { children?: unknown[] } | undefined)?.children?.join('')
+    return { label: typeof label === 'string' ? label : '', drawn, color: text?.props['backgroundColor'] }
   }
   const check = async (n: number, expected: Record<string, Tone>) => {
     for (const [k, tone] of Object.entries(expected)) {
-      const { label, color } = await fill(`act:${n}:${k}`)
+      const { label, drawn, color } = await fill(`act:${n}:${k}`)
       expect(`${k}: ${String(color)}`).toBe(`${k}: ${toneColor(tone)}`)
-      expect(label.replace(/^\W+\s*/u, '')).toMatch(/^\p{L}{1,9}$/u)
+      // The label names it in a word; the chip draws only its symbol, a cell
+      // of fill either side.
+      expect(label).toMatch(/^\p{L}{1,9}$/u)
+      expect(`${k}: ${String(drawn)}`).toBe(`${k}: ${CHIP_SYMBOL[label] ? ` ${CHIP_SYMBOL[label]} ` : '(no symbol)'}`)
     }
   }
   for (const n of [1, 2, 3, 4, 5, 6]) await ui.press({ key: `todo:${n}` })
@@ -2006,6 +2010,19 @@ test('every action chip is one word under 10 letters, filled with the color of t
   await ui.press({ key: 'act:1:delete' })
   await check(1, { deleteyes: 'danger', cancel: 'neutral' })
   await ui.unmount()
+})
+
+test('no two actions share a chip symbol, apart from the safe way back out of a choice', () => {
+  const back = new Set(['Keep', 'Cancel', 'Back'])
+  const owners = new Map<string, string>()
+  for (const [word, sym] of Object.entries(CHIP_SYMBOL)) {
+    // One grapheme, so a chip is one symbol however many cells it takes.
+    expect([...new Intl.Segmenter().segment(sym)].length).toBe(1)
+    const key = back.has(word) ? 'back' : word
+    expect(`${sym}: ${owners.get(sym) ?? key}`).toBe(`${sym}: ${key}`)
+    owners.set(sym, key)
+  }
+  expect(CHIP_SYMBOL['Exec']).not.toBe(CHIP_SYMBOL['Resume'])
 })
 
 test('the palette gives every status its own color, apart from the two ends that halt a run, and the toasts name it by its mark', () => {

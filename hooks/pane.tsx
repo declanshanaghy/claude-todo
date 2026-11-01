@@ -140,7 +140,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Text color="error">Stop #{t.n}? Execution halts; the todo is kept.</Text>,
         <Box gap={1}>
-          {btn('stopyes', '■ Stop', () => haltTodo($, t, 'stopped'), 'stopped')}
+          {btn('stopyes', 'Stop', () => haltTodo($, t, 'stopped'), 'stopped')}
           {btn('keep', 'Keep', () => cancelConfirm($, t.n, 'stop'))}
         </Box>,
       ]
@@ -149,7 +149,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Text color="error">Take over #{t.n}? It's marked stopped here; its run in the other session isn't stopped.</Text>,
         <Box gap={1}>
-          {btn('takeyes', '⇄ Takeover', () => takeOver($, t), 'stopped')}
+          {btn('takeyes', 'Takeover', () => takeOver($, t), 'stopped')}
           {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'takeover'))}
         </Box>,
       ]
@@ -159,7 +159,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Box gap={1}>
           <Text dimColor>{t.status} in another session</Text>
-          {btn('takeover', '⇄ Takeover', () => askConfirm($, t.n, 'takeover'), 'stopped')}
+          {btn('takeover', 'Takeover', () => askConfirm($, t.n, 'takeover'), 'stopped')}
           {details}
         </Box>,
       ]
@@ -168,7 +168,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       return [
         <Text color="error">Delete "#{t.n} {t.title}"?</Text>,
         <Box gap={1}>
-          {btn('deleteyes', '✕ Delete', () => deleteTodo($, t), 'danger')}
+          {btn('deleteyes', 'Delete', () => deleteTodo($, t), 'danger')}
           {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'delete'))}
         </Box>,
       ]
@@ -177,11 +177,11 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'pending':
         return [
           <Box gap={1}>
-            {btn('exec', '▶ Exec', () => execTodo($, t, false), 'running')}
+            {btn('exec', 'Exec', () => execTodo($, t, false), 'running')}
             {/* Auto goes straight to running, so it wears running's fill too. */}
-            {btn('auto', '⚡ Auto', () => execTodo($, t, false, true), 'running')}
-            {btn('rename', '✎ Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
-            {!t.hasRun && btn('delete', '✕ Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
+            {btn('auto', 'Auto', () => execTodo($, t, false, true), 'running')}
+            {btn('rename', 'Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
+            {!t.hasRun && btn('delete', 'Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
             {details}
           </Box>,
         ]
@@ -196,16 +196,16 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       case 'running':
         return [
           <Box gap={1}>
-            {btn('pause', '⏸ Pause', () => haltTodo($, t, 'paused'), 'paused')}
-            {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
+            {btn('pause', 'Pause', () => haltTodo($, t, 'paused'), 'paused')}
+            {btn('stop', 'Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
             {details}
           </Box>,
         ]
       case 'paused':
         return [
           <Box gap={1}>
-            {btn('resume', '▶ Resume', () => resumeTodo($, t), 'running')}
-            {btn('stop', '■ Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
+            {btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
+            {btn('stop', 'Stop', () => askConfirm($, t.n, 'stop'), 'stopped')}
             {details}
           </Box>,
         ]
@@ -215,12 +215,12 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           ...(fresh ? [<Text color="suggestion">Stopped. What next?</Text>] : []),
           <Box gap={1}>
-            {btn('refine', '✎ Refine', () => execTodo($, t, true), 'drafting')}
-            {btn('restart', '↻ Restart', () => restartTodo($, t), 'drafting')}
+            {btn('refine', 'Refine', () => execTodo($, t, true), 'drafting')}
+            {btn('restart', 'Restart', () => restartTodo($, t), 'drafting')}
             {details}
           </Box>,
           <Box gap={1}>
-            {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', '▶ Resume', () => resumeTodo($, t), 'running')}
+            {(t.taskId !== undefined || t.isAgentGone === true) && btn('resume', 'Resume', () => resumeTodo($, t), 'running')}
             {fresh &&
               btn('leave', 'Leave', async () => {
                 await patchUi($, x => ({
@@ -379,7 +379,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
             in auto mode. It launches into running, so it wears running's
             color, dimmed while nothing is pending or the cap is full; the cap
             itself is only told when a press is refused, not drawn. */}
-        {fault ? '' : <Box flexShrink={0}>{chip('fire', '🔥 Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
+        {fault ? '' : <Box flexShrink={0}>{chip('fire', 'Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
         {/* The engine's frame takes only a plain tab label, drawn while more
             than one pane is open, so the title rides the header's right end in
             the prompt bar's border color, cut short before it wraps. */}
@@ -405,7 +405,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
       ) : (
         <Text dimColor>/todo add &lt;title&gt; adds a todo</Text>
       )}
-      {view?.agentId ? chip('back', '↩ Back', () => $.ui.view({})) : ''}
+      {view?.agentId ? chip('back', 'Back', () => $.ui.view({})) : ''}
       <Text> </Text>
       {list.length === 0 ? <Text dimColor>No todos yet. Type a title above.</Text> : ''}
       {list.flatMap(todoRows)}

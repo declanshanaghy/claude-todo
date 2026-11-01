@@ -78,8 +78,36 @@ export const tallySummary = ({ Text }: Els, list: readonly Todo[]) =>
     </Text>
   ))
 
+// Each action chip draws one symbol, not its word, so a row of them stays
+// compact; the word stays the Button's label, for screen readers and tests.
+// No two actions share a symbol. The safe "no" choices (Keep, Cancel, Back)
+// all step back with ↩, and a confirmation row spells out what its ■, ✕ or
+// ⇄ will do beside it. 🔥 ⚡ ✨ are two cells wide, which needs no sums here:
+// a chip is its own flex item, measured by the engine.
+export const CHIP_SYMBOL: Readonly<Record<string, string>> = {
+  Exec: '▶',
+  Auto: '⚡',
+  Fire: '🔥',
+  Rename: '✎',
+  Refine: '✨',
+  Restart: '↻',
+  Resume: '⏵',
+  Pause: '⏸',
+  Stop: '■',
+  Delete: '✕',
+  Takeover: '⇄',
+  Details: '☰',
+  Reset: '↺',
+  Keep: '↩',
+  Cancel: '↩',
+  Back: '↩',
+  Leave: '✓',
+  'Full transcript': '↗',
+}
+
 // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
-// Text child carries the tone's fill. A dimmed chip (one that can't act now)
+// Text child carries the tone's fill around its symbol, padded a cell each
+// side. A dimmed chip (one that can't act now)
 // drops the fill for dim text in the tone's color, so it still says what it
 // would do; it stays pressable, so the focus ring still reaches it.
 export const statusChip = (
@@ -93,13 +121,13 @@ export const statusChip = (
   isDimmed ? (
     <Button key={key} label={label} plain dimColor onPress={() => void onPress()}>
       <Text weight="semibold" color={toneColor(tone)} dimColor>
-        {` ${label} `}
+        {` ${CHIP_SYMBOL[label] ?? label} `}
       </Text>
     </Button>
   ) : (
     <Button key={key} label={label} plain onPress={() => void onPress()}>
       <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText">
-        {` ${label} `}
+        {` ${CHIP_SYMBOL[label] ?? label} `}
       </Text>
     </Button>
   )

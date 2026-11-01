@@ -301,7 +301,7 @@ const SCENES = [
     S.todos=[T(1,'Fix kitty tab titles','pending'), t2, t3];
     S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running in background · run '+t2.runId+' · 5 agents / cap '+CAP+'</span>'],['user','/todo exec 3'],['tool','Agent([todo:3] Count md files)\n<span class="out">  ⎿ running in background</span>']];
     focusPane('ag:'+t2.agents[0].id); }},
- {name:'4 · Pause task', hint:'#2 is running and the ring is on <b>⏸ Pause</b>. Press it: <code>TaskStop</code> halts the run and the run id is kept. Finished agents stay ✓, and the ones in flight show ⏸. Then press <b>▶ Resume</b>: the Workflow re-runs with <code>resumeFromRunId</code>, so finished agents come back from cache.',
+ {name:'4 · Pause task', hint:'#2 is running and the ring is on <b>⏸ Pause</b>. Press it: <code>TaskStop</code> halts the run and the run id is kept. Finished agents stay ✓, and the ones in flight show ⏸. Then press <b>⏵ Resume</b>: the Workflow re-runs with <code>resumeFromRunId</code>, so finished agents come back from cache.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); advance(t2,8); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:pause'); }},
  {name:'5 · Stop task', hint:'The ring is on <b>■ Stop</b>. Pressing it shows an inline confirmation, with the ring on the safe choice (<b>Keep</b>). Confirm with <b>■ Stop</b>: execution halts but <b>the todo stays</b>, marked stopped, and a follow-up row asks what to do: <b>Refine prompt &amp; restart</b> (reopens the prompt drafts, current prompt first), <b>Restart as-is</b>, <b>Resume</b>, or <b>Leave stopped</b>.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,10); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:stop'); }},
@@ -513,16 +513,18 @@ const tallyHtml = c => ['running','paused','stopped','done','pending'].map(st=>`
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
 // Filled action chip, toned like hooks/marks.tsx: the status the action leads to
 // (running, paused, stopped, drafting…), 'danger' for Delete, or 'neutral'.
-function chipB(fid, label, tone='neutral'){ return B(fid, `<span class="fill">${esc(label)}</span>`, `chip tone-${tone}`); }
+// A chip draws only its symbol (CHIP_SYMBOL there); the word is its label.
+const SYM={Exec:'▶',Auto:'⚡',Fire:'🔥',Rename:'✎',Refine:'✨',Restart:'↻',Resume:'⏵',Pause:'⏸',Stop:'■',Delete:'✕',Takeover:'⇄',Details:'☰',Reset:'↺',Keep:'↩',Cancel:'↩',Back:'↩',Leave:'✓','Full transcript':'↗'};
+function chipB(fid, label, tone='neutral'){ return B(fid, `<span class="fill" title="${esc(label)}" aria-label="${esc(label)}">${esc(SYM[label]??label)}</span>`, `chip tone-${tone}`); }
 function actRow(t){
   const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone);
-  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','stopped')} ${a('keep','Keep')}</div>`;
-  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete','danger')} ${a('cancel','Cancel')}</div>`;
+  if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','Stop','stopped')} ${a('keep','Keep')}</div>`;
+  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
-    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','running')} ${a('auto','⚡ Auto','running')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
-    case 'running': return `<div class="row ind2">${a('pause','⏸ Pause','paused')} ${a('stop','■ Stop','stopped')}</div>`;
-    case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','running')} ${a('stop','■ Stop','stopped')}</div>`;
-    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine','drafting')} ${a('restart','↻ Restart','drafting')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume','running')} ${a('leave','Leave')}</div>`;
+    case 'pending': return `<div class="row ind2">${a('exec','Exec','running')} ${a('auto','Auto','running')} ${a('rename','Rename')} ${t.agents.length?'':a('delete','Delete','danger')}</div>`;
+    case 'running': return `<div class="row ind2">${a('pause','Pause','paused')} ${a('stop','Stop','stopped')}</div>`;
+    case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')}</div>`;
+    case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('leave','Leave')}</div>`;
     case 'drafting': return `<div class="row ind2 dim">answer the prompt dialog in the chat…</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
     default: return '';
@@ -576,7 +578,7 @@ function renderPane(){
   const c = st => S.todos.filter(t=>t.status===st).length;
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span>${tallyHtml(c)}`;
   // The call browser replaces the tree, header and all, so Fire leaves with it.
-  const fire = S.browse ? '' : B('fire', `<span class="fill">🔥 Fire</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
+  const fire = S.browse ? '' : B('fire', `<span class="fill" title="Fire" aria-label="Fire">${SYM.Fire}</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
   document.getElementById('panecap').innerHTML = fire;
   if(S.browse){
     body.innerHTML = renderBrowser();
@@ -588,7 +590,7 @@ function renderPane(){
     return;
   }
   let h = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div><div class="row"> </div>`;
-  if(S.view) h += `<div class="row">${chipB('back','↩ Back')}</div><div class="row"> </div>`;
+  if(S.view) h += `<div class="row">${chipB('back','Back')}</div><div class="row"> </div>`;
   for(const t of S.todos){
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
