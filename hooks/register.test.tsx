@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import type { AgentNode, Call, Todo } from '../types'
 import type { Op } from './db'
 import { CHIP, CHIP_SYMBOL, DISABLED_FILL, DIVIDER, GREYS, MARK, STOP_RED, SUMMARY, type Tone, statusToast, toneColor, toneFocus } from './marks'
-import { clampLines, headParts } from './pane'
+import { TAIL, clampLines, headParts } from './pane'
 import { type Chip, movesFrom } from './moves'
 import { execPrompt } from './protocol'
 import { HELP, NONE_PENDING, TODO_VERBS, VERBS, fireBlock, fireTarget, stillPrompting } from './register'
@@ -855,6 +855,19 @@ const listWindowOf = async (ui: { find: (q: { type: string; key: string }) => Pr
   const col = (win?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null)
   const margin = col?.props?.['marginTop']
   return { height: win?.props?.['height'], offset: typeof margin === 'number' ? -margin : 0 }
+}
+
+// Each row of the list's window, as the focus stops drawn on it.
+const listRowsOf = async (ui: { find: (q: { type: string; key: string }) => Promise<unknown> }) => {
+  const win = (await ui.find({ type: 'Box', key: 'list' })) as Found | undefined
+  const col = (win?.children ?? []).find((c): c is Found => typeof c === 'object' && c !== null)
+  const rings = (n: unknown): string[] => {
+    if (typeof n !== 'object' || n === null) return []
+    const f = n as Found
+    const key = f.key ?? f.props?.['key']
+    return [...(typeof key === 'string' && key.startsWith('ring:') ? [key.slice(5)] : []), ...(f.children ?? []).flatMap(rings)]
+  }
+  return (col?.children ?? []).filter(c => typeof c === 'object' && c !== null).map(rings)
 }
 
 test('the header stays put while the list scrolls under it, at a narrow width, in one pane', async ($, on) => {
@@ -3014,7 +3027,7 @@ test("a migration's renumbering moves the pane's open rows with it", async ($, o
   expect(await ui.find({ type: 'Button', key: 'act:2:exec' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'act:1:exec' })).toBeUndefined()
   // Its subtasks line and open subtask move with it.
-  expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' No tool calls yet.' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -3337,7 +3350,7 @@ test('level 1 shows the prompt in 2 lines, a done todo its summary, the actions,
   await ui.unmount()
 })
 
-test('level 2 is one row per subtask, grouped under its wave; level 3 its last 6 turns and calls, one line each', async ($, on) => {
+test("level 2 is one row per subtask, its ☰ Details on it, grouped under its wave; level 3 its last 6 turns and calls, one line each", async ($, on) => {
   const db = seeded(
     [running(1, 'Theme', { mode: 'workflow' })],
     [agentNode('ag1', 1, { name: 'explore', kind: 'workflow', wave: 1 }), agentNode('ag2', 1, { name: 'fix', kind: 'workflow', wave: 2, isWorktree: true, startedAt: 2 })],
@@ -3358,7 +3371,23 @@ test('level 2 is one row per subtask, grouped under its wave; level 3 its last 6
   expect(all.indexOf(' wave 2')).toBeGreaterThan(all.findIndex(x => x.includes('explore')))
   expect((await ui.find({ type: 'Button', key: 'ag:ag2' }))?.text).toMatch(/^▸ . fix ⎇$/)
   expect(await ui.find({ type: 'Text', text: ' 6 calls' })).toBeDefined()
-  expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeUndefined()
+  // Each subtask's ☰ Details sits on its own row, after its splitter, closed
+  // or open: a closed subtask takes one row, not two.
+  const rows = async () => (await listRowsOf(ui)).filter(r => r.some(k => k.startsWith('ag:'))).map(r => r.join(' '))
+  const rowAt = async (key: string) => (await listRowsOf(ui)).findIndex(r => r.includes(key))
+  expect(await rows()).toEqual(['ag:ag1 full:ag1', 'ag:ag2 full:ag2'])
+  // explore, then wave 2's line, then fix.
+  expect(await rowAt('ag:ag2')).toBe((await rowAt('ag:ag1')) + 2)
+  // A long title is cut with … to the room left of the chip, which keeps its
+  // cells: the splitter's Box shrinks and clips, the chip's never shrinks.
+  const win = (await ui.find({ type: 'Box', key: 'list' })) as Found | undefined
+  const listLines = ((win?.children?.[0] as Found | undefined)?.children ?? []) as Found[]
+  const line = listLines[await rowAt('ag:ag1')]
+  const [title, details] = ((line?.children?.[0] as Found | undefined)?.children ?? []) as Found[]
+  expect(title?.props).toMatchObject({ flexGrow: 1, flexShrink: 1, overflow: 'hidden' })
+  expect(details?.props).toMatchObject({ flexShrink: 0 })
+  expect(boxesIn(details).some(x => x.props?.['key'] === 'ring:full:ag1')).toBe(true)
+  expect((await ui.find({ type: 'Text', text: /explore/ }))?.props['wrap']).toBe('truncate-end')
 
   await ui.press({ key: 'ag:ag1' })
   expect((await ui.find({ type: 'Button', key: 'ag:ag1' }))?.text).toMatch(/^▾ /)
@@ -3372,7 +3401,11 @@ test('level 2 is one row per subtask, grouped under its wave; level 3 its last 6
   expect(textParts({ children: [read] }).find(p => p.text.includes('⏺'))?.props).toMatchObject({ color: 'success' })
   expect((await ui.findAll({ type: 'Text', text: ' 1.5s' })).length).toBe(4)
   expect(await ui.find({ type: 'Text', text: ' …' })).toBeDefined()
+  // Level 3 draws its 6 lines and the cut, and no Details row of its own.
   expect((await ui.find({ type: 'Button', key: 'full:ag1' }))?.props['label']).toBe('Details')
+  expect(await rows()).toEqual(['ag:ag1 full:ag1', 'ag:ag2 full:ag2'])
+  // The cut, the 6 lines, then wave 2's line: no Details row in between.
+  expect(await rowAt('ag:ag2')).toBe((await rowAt('ag:ag1')) + 1 + 1 + TAIL + 1)
   await ui.unmount()
 })
 
@@ -3397,6 +3430,7 @@ test('the arrow keys walk the drill-down in the order it draws, header by header
   await ui.press({ key: 'subs:1' })
   await ui.press({ key: 'ag:ag1' })
   await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'fire', origin: { kind: 'person' } })
+  // The subtask's ☰ Details is on its row, so it comes straight after it, before level 3.
   for (const key of ['add', 'todo:1', 'act:1:pause', 'act:1:stop', 'act:1:details', 'subs:1', 'ag:ag1', 'full:ag1', 'todo:2']) {
     await arrow(1)
     expect(`${key}: ${String(await isLit(ui, key))}`).toBe(`${key}: true`)
@@ -3411,11 +3445,13 @@ test('closing a level closes everything under it, and what is open outlasts a re
   engine(on, [], undefined, true, { db })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Level 3's one call line, which only an open subtask draws.
+  const level3 = (x: typeof ui) => x.find({ type: 'Text', text: /^ ⏺ Bash ls/ })
   const open = async () => {
     await ui.press({ key: 'todo:1' })
     await ui.press({ key: 'subs:1' })
     await ui.press({ key: 'ag:ag1' })
-    expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
+    expect(await level3(ui)).toBeDefined()
   }
   await open()
   // Closing the subtasks line folds the subtask too: reopened, it starts closed.
@@ -3423,7 +3459,7 @@ test('closing a level closes everything under it, and what is open outlasts a re
   expect(await ui.find({ type: 'Button', key: 'ag:ag1' })).toBeUndefined()
   await ui.press({ key: 'subs:1' })
   expect((await ui.find({ type: 'Button', key: 'ag:ag1' }))?.text).toMatch(/^▸ /)
-  expect(await ui.find({ type: 'Button', key: 'full:ag1' })).toBeUndefined()
+  expect(await level3(ui)).toBeUndefined()
   // Closing the todo folds both levels under it.
   await ui.press({ key: 'ag:ag1' })
   await ui.press({ key: 'todo:1' })
@@ -3435,11 +3471,11 @@ test('closing a level closes everything under it, and what is open outlasts a re
   await ui.unmount()
   // Drawn again, and after a reload, every level is as it was left.
   const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await again.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
+  expect(await level3(again)).toBeDefined()
   await again.unmount()
   await start($)
   const reloaded = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await reloaded.find({ type: 'Button', key: 'full:ag1' })).toBeDefined()
+  expect(await level3(reloaded)).toBeDefined()
   await reloaded.unmount()
 })
 
@@ -3519,8 +3555,8 @@ test("a subtask's Details chip is the todo's ☰ Details: the same symbol, word 
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo:1' })
+  // Drawn on the subtask's row, so it shows with level 3 still closed.
   await ui.press({ key: 'subs:1' })
-  await ui.press({ key: 'ag:ag1' })
   const look = async (key: string) => {
     const chip = await ui.find({ type: 'Button', key })
     const text = (chip?.children ?? []).find((c): c is { props: Record<string, unknown>; children?: unknown[] } => typeof c === 'object' && c !== null && 'props' in c)
@@ -3667,6 +3703,8 @@ test('every chip has a hidden hover label with its word, absolute so it takes no
   }
   // Fire is flush at the right edge, so its label is anchored there.
   expect(await tipOf(ui, 'fire')).toMatchObject({ right: 0 })
+  // So is a subtask's ☰ Details, flush right on its row.
+  expect(await tipOf(ui, 'full:ag2')).toMatchObject({ right: 0 })
   // Each header toggle draws only its mark: its status's word joins its hover group.
   const header = await headerOf(ui)
   const drawnBoxes = boxesIn(header) as (Found & { hover?: unknown })[]

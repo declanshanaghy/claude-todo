@@ -322,7 +322,7 @@ const SCENES = [
   setup(){ S.todos=[T(1,'Fix kitty tab titles','pending'), T(2,'Migrate statusline to theme lib','prompting',{expanded:true})]; later(2500, ()=>{ const t=S.todos.find(x=>x.n===2); if(t?.status==='prompting'){ t.status='pending'; t.drafts=3; render(); } }); S.chat=[['user','/todo add Fix kitty tab titles'],['sys','todo: added #1 Fix kitty tab titles'],['user','/todo add Migrate statusline to theme lib'],['sys','todo: added #2 Migrate statusline to theme lib']]; focusPane('add'); }},
  {name:'2 · Launch task', hint:'#1 is expanded and the ring is on <b>▶ Exec</b>. Press <kbd>enter</kbd>. Claude drafts 3 prompts in an AskUserQuestion dialog. Draft <b>1 or 2</b> is classified <b>multi-step</b> (questions → execution tree → approval → Workflow). Draft <b>3</b> is <b>simple</b> and starts a single background Agent. <b>4</b> lets you type your own.',
   setup(){ const t1=T(1,'Fix kitty tab titles','pending',{expanded:true,drafts:3}); S.todos=[t1, T(2,'Migrate statusline to theme lib','pending')]; S.chat=[['sys','todo: 2 pending']]; focusPane('act:t1:exec'); }},
- {name:'3 · Drill down', hint:'Every todo is <b>one line</b>: its header is the splitter, <code>▸ ◐ #N title ──── status</code>, and pressing it is the only way to open it. <b>Level 1</b> (#2, #3 open): the prompt in 2 lines, the action chips, and a <b>▸ N subtasks</b> line. <b>Level 2</b> (#2): press that line for one row per subtask, grouped by wave. <b>Level 3</b> (explore-statusline, where the ring starts): press a subtask for its last 6 turns and calls, one line each, plus <b>☰ Details</b> for the call browser. Closing a level closes everything under it. #1 shows a collapsed todo.',
+ {name:'3 · Drill down', hint:'Every todo is <b>one line</b>: its header is the splitter, <code>▸ ◐ #N title ──── status</code>, and pressing it is the only way to open it. <b>Level 1</b> (#2, #3 open): the prompt in 2 lines, the action chips, and a <b>▸ N subtasks</b> line. <b>Level 2</b> (#2): press that line for one row per subtask, grouped by wave. <b>Level 3</b> (explore-statusline, where the ring starts): each row ends in its <b>☰ Details</b> for the call browser, and pressing a subtask opens its last 6 turns and calls, one line each. Closing a level closes everything under it. #1 shows a collapsed todo.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,12);
     const t3=T(3,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t3,'countmd','agent'); t3.prompt='Count markdown files under ~/.claude and total size.'; advance(t3,3);
     t2.subsOpen=true; t2.agents[0].expanded=true; S.todos=[T(1,'Fix kitty tab titles','pending'), t2, t3];
@@ -693,15 +693,17 @@ function renderPane(){
       h += `<div class="row ind2">${B('subs:'+t.id, `<span class="dim">${t.subsOpen?'▾':'▸'} </span>${t.agents.length} subtask${t.agents.length>1?'s':''} <span class="dim">· ${done} done · ${calls} calls${t.mode==='workflow'?' · workflow':''}</span>`, 'grow')}</div>`;
     }
     if(!t.subsOpen) return;
-    // Level 2: one line per subtask, grouped by wave for a workflow.
+    // Level 2: one line per subtask, grouped by wave for a workflow: its
+    // splitter, cut with … to the room left, then its ☰ Details flush right,
+    // open or closed, its label opening leftward.
     let wave=0;
     for(const a of t.agents){
       if(t.mode==='workflow' && a.wave!==wave){ wave=a.wave; h+=`<div class="row ind4 faint">wave ${wave}</div>`; }
       const [ag,agc]=glyph(a.status);
       const tag = a.worktree ? `<span class="ye"> ⎇</span>` : '';
-      h += `<div class="row ind4">${B('agx:'+a.id, `<span class="dim">${a.expanded?'▾':'▸'} </span><span class="${agc}">${ag}</span> ${esc(a.name)}${tag}`, 'grow')}&nbsp;<span class="dim">${a.calls.filter(c=>!c.say).length} calls</span></div>`;
+      h += `<div class="row ind4">${B('agx:'+a.id, `<span class="dim">${a.expanded?'▾':'▸'} </span><span class="${agc}">${ag}</span> ${esc(a.name)}${tag}`, 'grow')}&nbsp;<span class="dim">${a.calls.filter(c=>!c.say).length} calls</span>&nbsp;<span style="flex-shrink:0">${chipB('browse:'+a.id,'Details','details','right')}</span></div>`;
       if(!a.expanded) continue;
-      // Level 3: its turns, newest last, one line each; the full view is a press away.
+      // Level 3: its turns, newest last, one line each; its Details is on the row above.
       const TAIL=6, shown=a.calls.slice(-TAIL);
       if(a.calls.length>TAIL) h += `<div class="row ind6 faint">… ${a.calls.length-TAIL} earlier</div>`;
       if(!a.calls.length) h += `<div class="row ind6 dim">waiting for its wave…</div>`;
@@ -710,7 +712,6 @@ function renderPane(){
         const cc = c.state==='run'?'dim':c.state==='ok'?'gr':'ye';
         h += `<div class="row ind6 turnrow"><span class="${cc}">⏺&nbsp;</span><span class="grow"><b>${esc(c.tool)}</b> <span class="dim">${esc(c.arg)}</span></span>&nbsp;<span class="dim">${c.state==='run'?'…':esc(c.dur||'')}</span></div>`;
       }
-      h += `<div class="row ind6">${chipB('browse:'+a.id,'Details','details')}</div>`;
     }
   });
   if(!S.todos.length) top += `<div class="row dim">No todos yet. Type a title above.</div>`;

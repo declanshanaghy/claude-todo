@@ -70,8 +70,8 @@ The pane opens on the right at session start and keeps the tree short, then lets
 |---|---|---|
 | 0 | — | Each todo is one line, `▸ #N title ──── ▶ 2/5`: its number and title in its status color, a dim rule, and its status's mark (with subtasks done out of all) at the right, in the same symbol and color as the counts, so a glance down the right edge reads the backlog's state. The word stays the line's label for screen readers. It never wraps: the title is cut with … first, sized in terminal cells so a wide emoji can't overflow it |
 | 1 | the todo's line | Its prompt in two lines, a ✓ summary once done, the action chips, and `▸ N subtasks · d done · c calls` |
-| 2 | the subtasks line | One row per subtask (an agent), grouped by wave for a Workflow, worktree writers marked ⎇, with its call count |
-| 3 | a subtask | Its last 6 turns and tool calls, one line each, and **☰ Details** |
+| 2 | the subtasks line | One row per subtask (an agent), grouped by wave for a Workflow, worktree writers marked ⎇, with its call count and, at the right end, its **☰ Details** |
+| 3 | a subtask | Its last 6 turns and tool calls, one line each |
 
 The header line is its own splitter, so a closed todo costs one row plus the one dim rule above it, which parts it from the header or the todo above; that divider is never focusable, so the ring walks straight from header to header. Each level stays a glance (two lines of prompt, six lines of activity) so opening one never pushes the rest of the backlog off the pane, and closing a level closes everything under it, so reopening starts folded. What's open is kept with the pane's other UI state, across redraws and reloads. The detail lives in a dialog: a subtask's **☰ Details** turns the pane into a browser of that agent's work, read like Claude Code's own transcript: what the agent wrote between its tool calls, then each call with its formatted input and its ⎿ result; **☰ Details** on a todo shows its full prompt, run ids and agents. `esc` closes the dialog and puts the ring back on the subtask's row.
 

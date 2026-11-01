@@ -415,8 +415,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
   const inner = Math.max(0, e.props.bodyColumns - 2 * PAD_X - 2)
   const callsOf = (agentId: string) => all.filter(c => c.agentId === agentId).length
 
-  // Level 3: a subtask's newest turns and calls, one line each, and the way
-  // into the full call browser, its ☰ Details. Escape there puts the ring back on its row.
+  // Level 3: a subtask's newest turns and calls, one line each. The way into
+  // the full call browser, its ☰ Details, sits on the subtask's own row.
   const recent = (a: AgentNode) => {
     const entries = timeline(a.agentId, all, turns)
     const shown = entries.slice(-TAIL)
@@ -450,20 +450,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         </Box>,
       )
     }
-    rows.push(
-      <Box>
-        {/* The subtask's ☰ Details, in the same symbol, word and tone as a todo's. */}
-        {chip(
-          `full:${a.agentId}`,
-          'Details',
-          () => openDetail($, { kind: 'agent', agentId: a.agentId }, `ag:${a.agentId}`),
-          'details',
-          false,
-          // Level 3's indent: the tree's padding and three levels of 2.
-          tipAt(PAD_X + 6 + 1, 'Details'),
-        )}
-      </Box>,
-    )
     return rows
   }
 
@@ -479,24 +465,43 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       }
       const id = `a${t.n}:${a.agentId}`
       const isOpen = open.has(id)
+      // One row: the subtask's splitter, cut with … to the room left of its
+      // ☰ Details, which sits whole at the right end, open or closed, as a
+      // second focus stop. Escape from the browser puts the ring back on the row.
       push(
-        lit(
-          `ag:${a.agentId}`,
-          <Box>
-            <Box flexGrow={1} flexShrink={1} overflow="hidden">
-              <Button key={`ag:${a.agentId}`} plain onPress={() => void toggle($, id)}>
-                <Text wrap="truncate-end">
-                  <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
-                  {statusGlyph(els, a.status, f)} <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
-                  {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
-                </Text>
-              </Button>
-            </Box>
-            <Box flexShrink={0}>
-              <Text dimColor> {plural(callsOf(a.agentId), 'call')}</Text>
-            </Box>
-          </Box>,
-        ),
+        <Box>
+          <Box flexGrow={1} flexShrink={1} overflow="hidden">
+            {lit(
+              `ag:${a.agentId}`,
+              <Box>
+                <Box flexGrow={1} flexShrink={1} overflow="hidden">
+                  <Button key={`ag:${a.agentId}`} plain onPress={() => void toggle($, id)}>
+                    <Text wrap="truncate-end">
+                      <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                      {statusGlyph(els, a.status, f)} <Text color={a.kind === 'workflow' ? 'planMode' : 'permission'}>{a.name}</Text>
+                      {a.isWorktree ? <Text color="warning"> ⎇</Text> : ''}
+                    </Text>
+                  </Button>
+                </Box>
+                <Box flexShrink={0}>
+                  <Text dimColor> {plural(callsOf(a.agentId), 'call')}</Text>
+                </Box>
+              </Box>,
+            )}
+          </Box>
+          <Box flexShrink={0}>
+            {/* The subtask's ☰ Details, in the same symbol, word and tone as a
+                todo's; flush right, so its label is anchored at its right edge. */}
+            {chip(
+              `full:${a.agentId}`,
+              'Details',
+              () => openDetail($, { kind: 'agent', agentId: a.agentId }, `ag:${a.agentId}`),
+              'details',
+              false,
+              { top: -1, right: 0 },
+            )}
+          </Box>
+        </Box>,
       )
       if (isOpen) out.push(...recent(a).map(lineAt(6)))
       return out
