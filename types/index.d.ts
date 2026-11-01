@@ -127,6 +127,9 @@ export type PaneUi = {
   isHidden: boolean
   // The statuses the list shows, toggled in the header; absent (stored by an
   // earlier version), the default view.
+  shown?: View[]
+  // What `shown` was before paused and stopped joined the default view (the
+  // old default exactly reads as the new one): read until a toggle drops it.
   views?: View[]
   // What `views` was before prompting had a toggle: read once, then dropped.
   view?: View[]

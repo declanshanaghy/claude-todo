@@ -5,7 +5,7 @@ import type { AgentNode, Call, Confirm, Detail, Draft, Drafting, ImageRef, Kept,
 import { CWD, DbError, backups, callsAfter, dropBackups, importTodos, locate, snapshot, writeAgents, writeCall, writeTodos, writeTurn } from './db'
 import { drawDetail } from './detail'
 import { imageRefs, splitImages, thumbnail } from './images'
-import { DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
+import { DEFAULT_VIEW, OLD_DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
 import { type Chip, INFLIGHT, canMove, canResume, isOwnedElsewhere, moveRefusal, offers } from './moves'
 import { drawPane, focusOrder, listWindow, rehome, showRow } from './pane'
 import { draftsPrompt, execPrompt, restartPrompt, resumePrompt } from './protocol'
@@ -50,10 +50,10 @@ const thumbs = atom({ plugin: 'todo', key: 'thumbs' } as const, {} as Record<str
 // The pane's layout, kept across reloads and sessions: what's open, a pending
 // confirmation, the view the header toggles. The views are optional, so the
 // tag stays: what an earlier version stored (without them) reads as the
-// default, or as its `view` from before prompting had a toggle.
+// default, or as its `views` or `view` from before (see viewIn).
 const ui = atom(
   { plugin: 'todo', key: 'ui' } as const,
-  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, views: [...DEFAULT_VIEW] },
+  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, shown: [...DEFAULT_VIEW] },
   { shape: 'ui-2' },
 )
 const cpuCap = atom({ plugin: 'todo', key: 'cpuCap' } as const, 1)
@@ -626,10 +626,18 @@ export async function toggle($: $, id: string) {
 // turns every view off; pressed then (it reads `default`), it puts the
 // default view back. From any other view it reads `all`. Kept in SUMMARY's
 // order, so the stored view reads the same way.
-// A view stored before prompting had its own toggle shows prompting todos
-// wherever it showed pending ones, as they were pending then.
-export const viewIn = (u: PaneUi): readonly View[] =>
-  u.views ?? (u.view ? SUMMARY.filter(v => u.view?.includes(v === 'prompting' ? 'pending' : v)) : DEFAULT_VIEW)
+// The view is stored as `shown`. One stored as `views`, before paused and
+// stopped joined the default, reads as today's default when it is exactly the
+// old one (nobody picked it by hand) and as itself otherwise. A view stored
+// as `view`, before prompting had its own toggle, shows prompting todos
+// wherever it showed pending ones, as they were pending then. A toggle writes
+// `shown` and drops both older fields.
+const isOldDefault = (vs: readonly View[]) => vs.length === OLD_DEFAULT_VIEW.length && OLD_DEFAULT_VIEW.every(v => vs.includes(v))
+export const viewIn = (u: PaneUi): readonly View[] => {
+  if (u.shown) return u.shown
+  if (u.views) return isOldDefault(u.views) ? DEFAULT_VIEW : u.views
+  return u.view ? SUMMARY.filter(v => u.view?.includes(v === 'prompting' ? 'pending' : v)) : DEFAULT_VIEW
+}
 
 export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
   if (v === 'all') return view.length === SUMMARY.length ? [] : [...(view.length === 0 ? DEFAULT_VIEW : SUMMARY)]
@@ -640,7 +648,7 @@ export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
 }
 
 export async function toggleView($: $, v: View | 'all') {
-  await patchUi($, u => assign(u, { views: nextView(viewIn(u), v), view: undefined }))
+  await patchUi($, u => assign(u, { shown: nextView(viewIn(u), v), views: undefined, view: undefined }))
 }
 
 // How an action was asked for. A chip's press moves the pane's ring and

@@ -1676,7 +1676,7 @@ const viewed = () =>
     aTodo(8, 'Planning', { status: 'planning', owner: 's1' }),
   ])
 
-test('the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole', async ($, on) => {
+test('the default view shows running (drafting and planning too), pending, failed, paused and stopped, and hides done; the counts and the status line stay whole', async ($, on) => {
   const { statuses } = engine(on, [], undefined, false, { db: viewed(), unplaced: 'the terminal is too narrow' })
   const clock = mock.clock(on, { now: 1000 })
   await start($)
@@ -1684,15 +1684,16 @@ test('the default view shows running (drafting and planning too), pending and fa
   // The status line counts every todo, whatever the pane shows.
   expect(statuses.at(-1)).toBe('todo ▶3 ◔0 ●1 ✗1 ⏸1 ■1 ✓1')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
+  // Paused #6 and stopped #7 are unfinished work, so they're drawn; done #1 isn't.
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8])
   const marks = await headerMarks(ui)
-  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '●1', '✗1', '⏸1 hidden', '■1 hidden', '✓1 hidden'])
+  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '●1', '✗1', '⏸1', '■1', '✓1 hidden'])
   // A hidden view's toggle is dim and struck through, in its own color.
   const struck = (await ui.find({ type: 'Button', key: 'view:done' })) as Drawn | undefined
   expect(JSON.stringify(struck?.children)).toContain('"strikethrough":true')
   expect(marks.find(m => m.view === 'done')?.color).toBe(MARK.done.color)
   expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
-  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('3 hidden by the view')
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('1 hidden by the view')
   await ui.unmount()
 })
 
@@ -1702,11 +1703,15 @@ test('each status toggle shows or hides its todos, done sorts last, and the last
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // Done shown: it sorts after every other todo.
   await ui.press({ key: 'view:done' })
-  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8, 1])
-  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('2 hidden by the view')
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8, 1])
+  expect(await ui.find({ type: 'Text', text: /hidden by the view/ })).toBeUndefined()
+  // Every view lit reads none: its next press.
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('none')
   // Running off hides drafting and planning with it.
   await ui.press({ key: 'view:running' })
-  expect(await rowsDrawn(ui)).toEqual([2, 5, 1])
+  expect(await rowsDrawn(ui)).toEqual([2, 5, 6, 7, 1])
+  expect((await ui.find({ type: 'Text', text: /hidden by the view/ }))?.text).toBe('3 hidden by the view')
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
   // All lights every view, and reads none (its next press) while they all are.
   await ui.press({ key: 'view:all' })
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8, 1])
@@ -1718,12 +1723,21 @@ test('each status toggle shows or hides its todos, done sorts last, and the last
   expect(await rowsDrawn(ui)).toEqual([])
   expect((await headerMarks(ui)).some(m => m.isLit)).toBe(false)
   expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('default')
-  // Pressed from none, it puts the default view back.
+  // Pressed from none, it puts the default view back, paused and stopped in it.
   await ui.press({ key: 'view:all' })
-  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 8])
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8])
+  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, true, true, true, true, true, false])
   expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
+  // And round again: all, none, default.
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8, 1])
+  expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('none')
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([])
+  await ui.press({ key: 'view:all' })
+  expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8])
   // A view with nothing in it says so.
-  for (const v of ['running', 'pending', 'failed']) await ui.press({ key: `view:${v}` })
+  for (const v of ['running', 'pending', 'failed', 'paused', 'stopped']) await ui.press({ key: `view:${v}` })
   expect(await rowsDrawn(ui)).toEqual([])
   expect(await ui.find({ type: 'Text', text: 'Nothing in this view.' })).toBeDefined()
   // The header's double rule sits between the add element and the note.
@@ -1737,7 +1751,7 @@ test('the view outlasts a redraw and a reload, and a list with no todos only say
   engine(on, [], undefined, true, { db })
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'view:stopped' })
+  await ui.press({ key: 'view:paused' })
   await ui.press({ key: 'view:pending' })
   await ui.unmount()
   await start($)
@@ -1756,12 +1770,15 @@ test('the view outlasts a redraw and a reload, and a list with no todos only say
   await empty.unmount()
 })
 
-test('a todo in hand stays in the default view: paused under the ring, or just stopped and asking what next', async ($, on) => {
+test('a todo in hand stays in a view that hides its status: paused under the ring, or just stopped and asking what next', async ($, on) => {
   const db = seeded([running(1, 'Pause me'), running(2, 'Stop me')])
   engine(on, [], undefined, true, { db })
   on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // The default view shows paused and stopped todos, so hide them to see the hold.
+  await ui.press({ key: 'view:paused' })
+  await ui.press({ key: 'view:stopped' })
   await ui.press({ key: 'todo:1' })
   await ui.press({ key: 'act:1:pause' })
   // Pause put the ring on ⏵ Resume, so #1 stays while the ring is on it.
@@ -2640,10 +2657,39 @@ test('a view stored before prompting had a toggle shows prompting todos wherever
   expect(await rowsDrawn(ui)).toEqual([])
   // A toggle stores the new view in its place, prompting still hidden.
   await ui.press({ key: 'view:pending' })
-  expect(held('ui')).toMatchObject({ value: { views: ['running', 'pending', 'failed'] } })
+  expect(held('ui')).toMatchObject({ value: { shown: ['running', 'pending', 'failed'] } })
+  expect((held('ui') as { value: object }).value).not.toHaveProperty('view')
   await ui.unmount()
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await rowsDrawn(ui)).toEqual([2])
+  await ui.unmount()
+})
+
+const parked = () =>
+  seeded([aTodo(1, 'Waits'), running(2, 'Held', { status: 'paused' }), aTodo(3, 'Halted', { status: 'stopped', hasRun: true }), aTodo(4, 'Finished', { status: 'done', hasRun: true, doneAt: 1 })])
+const storedUi = (views: string[]) => ({ ui: { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, views } })
+
+test('a view stored as the old default (before paused and stopped joined it) reads as the new default, paused and stopped shown', async ($, on) => {
+  const held = legacyState(on, storedUi(['running', 'prompting', 'pending', 'failed']))
+  engine(on, [], undefined, true, { db: parked() })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(ui)).toEqual([1, 2, 3])
+  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, true, true, true, true, true, false])
+  // The next toggle stores the view in its new field and drops the old one.
+  await ui.press({ key: 'view:done' })
+  expect(held('ui')).toMatchObject({ value: { shown: ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'done'] } })
+  expect((held('ui') as { value: object }).value).not.toHaveProperty('views')
+  await ui.unmount()
+})
+
+test('a view stored as anything but the old default stays as the person set it', async ($, on) => {
+  legacyState(on, storedUi(['running', 'pending', 'failed']))
+  engine(on, [], undefined, true, { db: parked() })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(ui)).toEqual([1])
+  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, false, true, true, false, false, false])
   await ui.unmount()
 })
 

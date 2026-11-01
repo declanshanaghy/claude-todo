@@ -70,10 +70,15 @@ export type { View }
 
 export const SUMMARY: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'done']
 
-// What a fresh pane shows: the work that's live or waiting on you, a todo
-// still being prompted included. Paused, stopped and done todos are a toggle
-// away.
-export const DEFAULT_VIEW: readonly View[] = ['running', 'prompting', 'pending', 'failed']
+// What a fresh pane shows: every unfinished todo, the work that's live or
+// waiting on you (a todo still being prompted included) and the interrupted
+// work ⏵ Resume can pick up, so a pause or a stop never makes one vanish.
+// Done todos are a toggle away.
+export const DEFAULT_VIEW: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped']
+
+// The default view before paused and stopped joined it. A view stored as
+// exactly this was never chosen by hand, so it reads as today's default.
+export const OLD_DEFAULT_VIEW: readonly View[] = ['running', 'prompting', 'pending', 'failed']
 
 export const viewOf = (s: TodoStatus): View => (s === 'drafting' || s === 'planning' ? 'running' : s)
 

@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 218 of 222 cases (98.2%)** are covered by `claude plugin test .`.
+**Coverage: 220 of 224 cases (98.2%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -52,7 +52,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | K4 | A narrower terminal that unseats the pane hands the counts to the status line within a sync tick; a render of the pane takes them back | a narrower terminal that unseats the pane hands the counts to the status line until it is drawn again |
 | K5 | The detail dialog covers the header, so the status line counts until it closes | the dialog covers the header, so the status line counts until it closes |
 | K6 | The header, the status line and the rows show the same marks (▶ ◔ ● ✗ ⏸ ■ ✓) in the same order; the header and rows draw them in the same colors | the header, the status line and the rows draw the same marks in the same order and colors |
-| K7 | The status line's counts are the whole list's, whatever the view hides; drafting and planning count as running | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| K7 | The status line's counts are the whole list's, whatever the view hides; drafting and planning count as running | the default view shows running (drafting and planning too), pending, failed, paused and stopped, and hides done; the counts and the status line stay whole |
 
 ## Launching and prompts
 
@@ -221,14 +221,16 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 
 | ID | Behaviour | Covered by |
 |---|---|---|
-| V1 | The header draws one toggle per view (▶ running, ◔ prompting, ● pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
-| V2 | The default view shows running (with drafting and planning), prompting, pending and failed, and hides paused, stopped and done | the default view shows running (drafting and planning too), pending and failed; the counts and the status line stay whole |
+| V1 | The header draws one toggle per view (▶ running, ◔ prompting, ● pending, ✗ failed, ⏸ paused, ■ stopped, ✓ done), each its mark and count in its color; a hidden view's is dim and struck through | the default view shows running (drafting and planning too), pending, failed, paused and stopped, and hides done; the counts and the status line stay whole |
+| V2 | The default view shows every unfinished todo: running (with drafting and planning), prompting, pending, failed, paused and stopped, so an interrupted todo never vanishes; it hides only done | the default view shows running (drafting and planning too), pending, failed, paused and stopped, and hides done; the counts and the status line stay whole |
 | V3 | Pressing a toggle shows or hides its view's todos; done todos, when shown, sort after all others, the rest by number | each status toggle shows or hides its todos, done sorts last, and the last toggle cycles default, all, none |
 | V4 | The header's last toggle cycles default → all → none → default, reading what its next press makes: `all` (from default, or any view in between) lights every view, then reads `none`; `none` turns every view off, then reads `default`; `default` restores the default view | each status toggle shows or hides its todos, done sorts last, and the last toggle cycles default, all, none |
 | V5 | A dim footer says `N hidden by the view` while the view hides any; `Nothing in this view.` while it hides them all, directly under the header's double `═` rule, which sits directly under the add element; an empty list says only how to add one, under the same rule | each status toggle shows or hides its todos, done sorts last, and the last toggle cycles default, all, none; the view outlasts a redraw and a reload, and a list with no todos only says to add one |
 | V6 | The view is kept with the pane's UI state, across redraws, reloads and sessions | the view outlasts a redraw and a reload, and a list with no todos only says to add one |
 | V9 | A view stored before prompting had a toggle shows prompting todos wherever it showed pending ones, and the next toggle stores the view in its new field | a view stored before prompting had a toggle shows prompting todos wherever it showed pending ones |
-| V7 | A todo in hand stays in the list whatever the view (the none view aside): the one the ring is on (so Pause keeps it under the ring on ⏵ Resume) and one just stopped, until ✓ Leave | a todo in hand stays in the default view: paused under the ring, or just stopped and asking what next |
+| V12 | A view stored as exactly the old default (running, prompting, pending, failed: before paused and stopped joined it) reads as the new default, so paused and stopped todos show; the next toggle stores the view in its new field | a view stored as the old default (before paused and stopped joined it) reads as the new default, paused and stopped shown |
+| V13 | A stored view other than the old default, one the person set by hand, stays as they set it | a view stored as anything but the old default stays as the person set it |
+| V7 | A todo in hand stays in the list whatever the view (the none view aside): the one the ring is on (so Pause keeps it under the ring on ⏵ Resume) and one just stopped, until ✓ Leave | a todo in hand stays in a view that hides its status: paused under the ring, or just stopped and asking what next |
 | V10 | The none view shows no todo at all, the one the ring is on and one just stopped included: the tree draws the header's double rule, `Nothing in this view.` and the `N hidden by the view` footer under its own double rule, counting every todo, with no blank line or border; the ring, if it was on a hidden todo, moves to the view toggle | the none view hides every todo, the ones in hand too, counts them in its footer, and hands the ring to the toggle |
 | V11 | From the none view, lighting one status shows just that status's todos (the last toggle then reads `all`), and the none view outlasts a reload | from the none view, lighting one status shows just that status, and none outlasts a reload |
 | V8 | Each state draws exactly the chips docs/architecture.md's "Buttons by state" lists (prompting, pending with and without a run, drafting, planning, running, paused, stopped right after a Stop or not, with or without work to resume, failed, done, in flight in another session, and each confirmation), and each chip leads to the state the doc gives | each state draws exactly the chips docs/architecture.md lists for it, and each leads where the doc says |
