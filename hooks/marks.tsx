@@ -92,8 +92,8 @@ export const tallyText = (list: readonly Todo[]) => tally(list).map(tallyMark).j
 // The toast for a todo that settled: its mark, number and status.
 export const statusToast = (n: number, s: TodoStatus) => `${MARK[s].symbol} #${n} ${s}`
 
-// The rules the tree draws (a single ─ between todos, a double ═ above the
-// first todo and the hidden footer): one dim line in the theme's subtle grey,
+// The rules the tree draws (a double ═ under the header and above the hidden
+// footer, a single ─ between todos): one dim line in the theme's subtle grey,
 // so it parts the todos without reading as a status or as a button.
 export const DIVIDER: Color = 'subtle'
 

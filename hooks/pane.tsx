@@ -621,12 +621,14 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     return [head, ...level1.filter((x): x is JSX.Element => x !== '').map(lineAt(2)), ...(subsOpen ? agentRows(t, mine) : [])]
   }
 
-  // The one line above every todo header shown, parting each todo from the
-  // header and from the todo above it: a dim rule as wide as the tree's
-  // columns, cut rather than wrapped. The list opens with a double `═` rule
-  // above its first todo, and the `N hidden by the view` footer gets one too;
-  // every later todo keeps the single `─`. Not focusable, so it never joins
-  // the ring's order, and never drawn inside a todo's levels or in the dialog.
+  // The tree's rule lines: a dim rule as wide as the tree's columns, cut
+  // rather than wrapped. The header ends in a double `═` rule (`div2:head`),
+  // drawn under the add element whatever the view shows: it parts the header
+  // from the first todo, or from the empty note. The first todo then draws no
+  // rule of its own; each later todo gets a single `─` above it, and the `N
+  // hidden by the view` footer a double `═`. Not focusable, so a rule never
+  // joins the ring's order, and never drawn inside a todo's levels or in the
+  // dialog.
   const rule = (key: string, glyph: '─' | '═') => (
     <Box key={key} flexShrink={0} overflow="hidden">
       <Text color={DIVIDER} dimColor wrap="truncate-end">
@@ -634,7 +636,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       </Text>
     </Box>
   )
-  const divider = (n: number, isFirst: boolean) => (isFirst ? rule(`div2:${n}`, '═') : rule(`div:${n}`, '─'))
+  const divider = (n: number) => rule(`div:${n}`, '─')
 
   // The view: what the header's toggles light, plus the todo in hand.
   const keep = new Set(u.justStopped)
@@ -652,16 +654,16 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
     PAD_X + cells(`Todos ${list.length}`) + all.slice(0, i).reduce((x, m) => x + cells(markText(m.status, String(m.count))[0]) + 2, 0) + 1
 
   // The list under the header, one line per row: each todo's rule and rows,
-  // then the hidden footer. The first todo's ═ rule stays in the header,
-  // parting it from the list, so scrolling never moves it.
+  // then the hidden footer. The first todo draws no rule: the header's ═
+  // rule above it stays fixed, so scrolling never moves it.
   const lines: Line[] = [
-    ...shown.flatMap((t, i) => [...(i === 0 ? [] : [lineAt(0)(divider(t.n, false))]), ...todoRows(t)]),
+    ...shown.flatMap((t, i) => [...(i === 0 ? [] : [lineAt(0)(divider(t.n))]), ...todoRows(t)]),
     ...(hidden > 0 ? [lineAt(0)(rule('div2:hidden', '═')), lineAt(0)(<Text dimColor>{hidden} hidden by the view</Text>)] : []),
   ]
   // The header's rows, each one line: the counts and toggles, the add input
-  // (or its note), the fault and Back while shown, then either the first
-  // todo's rule or, with no todo shown, the empty note.
-  const headRows = 3 + (fault ? 1 : 0) + (agentView?.agentId ? 1 : 0)
+  // (or its note), the fault and Back while shown, the ═ rule, then, with
+  // no todo shown, the empty note.
+  const headRows = 3 + (shown.length === 0 ? 1 : 0) + (fault ? 1 : 0) + (agentView?.agentId ? 1 : 0)
   // The window shows what fits under the header, so the whole drawing stays
   // within the body and the engine never scrolls the header away; the list
   // scrolls inside it by `offset` (the ui.scroll and ui.focus hooks move it).
@@ -747,6 +749,9 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         </Text>
       )}
       {agentView?.agentId ? chip('back', 'Back', () => $.ui.view({}), 'stay', false, tipAt(PAD_X + 1, 'Back')) : ''}
+      {/* The header's last rule: the double ═ under the add element, above
+          the empty note or the list's first todo, in every state. */}
+      {rule('div2:head', '═')}
       {list.length === 0 ? (
         <Text dimColor wrap="truncate-end">
           No todos yet. Type a title above.
@@ -761,7 +766,6 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       ) : (
         ''
       )}
-      {shown[0] ? divider(shown[0].n, true) : ''}
       {/* The list's window: as tall as fits under the header, clipping the
           rows outside it. Every row is drawn, so each stays a focus stop the
           ring can reach; the negative margin is the scroll offset. */}

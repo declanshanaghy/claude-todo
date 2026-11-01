@@ -38,10 +38,10 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .pane.has-focus .panehead{color:var(--fg);border-bottom-color:var(--orange)}
 .pane.has-focus{box-shadow:inset 2px 0 0 var(--orange)}
 .panebody{padding:6px 8px 10px;overflow:auto;max-height:640px}
-/* The tree: the add input, Back, the empty notes and the first ═ rule stay fixed at the top; only the list under them scrolls. One pane, so one close ✕. */
+/* The tree: the add input, Back, the ═ rule under them and the empty notes stay fixed at the top; only the list under them scrolls. One pane, so one close ✕. */
 .panebody.tree{overflow:hidden;display:flex;flex-direction:column}.panetop{flex:none}.panelist{flex:1 1 auto;min-height:0;overflow:auto}
 .row{white-space:pre;display:flex;align-items:baseline;min-height:20px}
-/* The rule above every todo header shown: one dim line of ─, full width, cut so it never wraps; not focusable. The list opens with a double ═ above its first todo, and the hidden footer has one too. */
+/* The tree's rules: one dim line, full width, cut so it never wraps; not focusable. A double ═ under the add input (above the empty note or the first todo, which draws none of its own), a single ─ above each later todo, and a double ═ above the hidden footer. */
 .divider{color:var(--dim);opacity:.6;overflow:hidden;white-space:nowrap}.divider::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}.divider.double::before{content:"════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════"}
 /* The todo's header IS its splitter: one focusable line `▸ ◐ #N title ──── status`. */
 .thead{color:var(--dim)}.thead .tt{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}.thead .fill{flex:1 1 0;min-width:2ch;overflow:hidden;padding:0 1ch}.thead .fill::before{content:"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"}
@@ -655,16 +655,17 @@ function renderPane(){
     S.seenFid=S.fid;
     return;
   }
-  // The fixed top: the add input, Back, the empty notes and the first todo's ═ rule; `h` is the list that scrolls under it.
+  // The fixed top: the add input, Back, the ═ rule under them and the empty notes; `h` is the list that scrolls under it.
   let top = `<div class="row"><span class="or">＋&nbsp;</span><span class="inpwrap ${S.area==='pane'&&S.fid==='add'?'f':''}" data-fid="add"><input class="inp" id="addinp" placeholder="add todo…" autocomplete="off" spellcheck="false"></span></div>`;
   if(S.view) top += `<div class="row">${chipB('back','Back')}</div>`;
+  // The header's double rule, under the add input in every state: above the empty note, or above the first todo.
+  top += `<div class="row divider double"></div>`;
   let h = '';
   const list = S.todos.filter(t=>S.show.has(viewOf(t.status))).sort((a,b)=>(a.status==='done')-(b.status==='done') || a.n-b.n);
   const hidden = S.todos.length-list.length;
   list.forEach((t,i)=>{
-    // A dim rule above every todo header shown: a double one above the first (fixed, parting the top from the list), a single one above the rest.
-    if(i===0) top += `<div class="row divider double"></div>`;
-    else h += `<div class="row divider"></div>`;
+    // A single dim ─ rule above every todo header shown but the first, which sits under the header's ═ rule.
+    if(i>0) h += `<div class="row divider"></div>`;
     const [g,gc]=glyph(t.status);
     const done=t.agents.filter(a=>a.status==='done').length;
     // The right end is the status's mark in its color (a running one spins), with d/n while it has run; the word is the line's label.
@@ -712,7 +713,7 @@ function renderPane(){
       h += `<div class="row ind6">${chipB('browse:'+a.id,'Full transcript')}</div>`;
     }
   });
-  if(!S.todos.length) top += `<div class="row dim">No todos. Type a title above.</div>`;
+  if(!S.todos.length) top += `<div class="row dim">No todos yet. Type a title above.</div>`;
   else if(!list.length) top += `<div class="row dim">Nothing in this view.</div>`;
   if(hidden) h += `<div class="row divider double"></div><div class="row faint">${hidden} hidden by the view · toggle a status above</div>`;
   const keepVal = document.getElementById('addinp')?.value || '';
