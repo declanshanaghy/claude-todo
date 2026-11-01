@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 136 of 139 cases (97.8%)** are covered by `claude plugin test .`.
+**Coverage: 138 of 141 cases (97.9%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -43,6 +43,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | E1 | ▶ Exec submits the exec protocol and marks the todo drafting | M2: Exec submits the exec protocol and marks the todo drafting |
 | E1a | Exec, restart and resume all carry the git rules: own worktree branch, commit as it goes, the project's checks before landing, rebase onto `origin/<base>` resolving parallel todos' conflicts by keeping both sides, retry a rejected push, never force-push, abort and keep the branch on an unresolvable conflict; a lone Agent runs with `isolation: "worktree"` and a Workflow's merge agent is the only one that pushes | every protocol puts the work on its own worktree branch and lands it only after the checks pass |
 | E1c | ⚡ Auto (in the running color) submits the auto protocol: Claude drafts the one best prompt and records it with no AskUserQuestion, and plans multi-step work on stated defaults with no plan mode or approval; plain Exec still asks | Auto drafts the one best prompt and runs it with no questions, planning multi-step work on defaults |
+| E1d | 🔥 Fire in the header runs `/todo exec auto`'s no-target path: the lowest-numbered pending todo in auto mode, filled in the running color; it is the first stop the arrow keys reach, above the add input | 🔥 Fire in the header auto-runs the lowest-numbered pending todo, and dims while none is pending or the cap is full |
+| E1e | 🔥 Fire dims (no fill, dim text in the running color) while nothing is pending or the running agents fill the cap, and a press then toasts why and launches nothing | 🔥 Fire dims and launches nothing while the running agents fill the cap |
 | E1b | `mcp__todo__update` stores the todo's branch and landed commit, and Details shows them | mcp__todo__update reports a change and mcp__todo__list reads the backlog; a todo's Details shows its prompt, summary, run ids and agents, with nothing to press |
 | D1 | A done todo leaves the tree its lifetime after it finished; a failed one stays; `mcp__todo__list` keeps both | a done todo leaves the tree 5 minutes after it finished; a failed one stays, and the list keeps both |
 | D2 | `CLAUDE_TODO_DONE_TTL_MINUTES` overrides the option, and 0 keeps done todos | CLAUDE_TODO_DONE_TTL_MINUTES overrides the option; 0 keeps done todos |

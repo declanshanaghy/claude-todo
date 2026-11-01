@@ -9,6 +9,8 @@ import {
   cancelConfirm,
   deleteTodo,
   execTodo,
+  fireBlock,
+  fireNext,
   haltTodo,
   openDetail,
   patchUi,
@@ -122,7 +124,8 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
 
   // An action chip fills with the color of the status it moves the todo into
   // (marks.tsx), so the buttons, rows and summaries share one palette.
-  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => lit(key, statusChip(els, key, label, onPress, tone))
+  const chip = (key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral', isDimmed = false) =>
+    lit(key, statusChip(els, key, label, onPress, tone, isDimmed))
 
   const open = new Set(u.expanded)
   const view = e.props.view as { agentId?: string } | undefined
@@ -175,7 +178,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
         return [
           <Box gap={1}>
             {btn('exec', '▶ Exec', () => execTodo($, t, false), 'running')}
-            // Auto goes straight to running, so it wears running's fill too.
+            {/* Auto goes straight to running, so it wears running's fill too. */}
             {btn('auto', '⚡ Auto', () => execTodo($, t, false, true), 'running')}
             {btn('rename', '✎ Rename', () => patchUi($, x => ({ ...x, renaming: t.n })))}
             {!t.hasRun && btn('delete', '✕ Delete', () => askConfirm($, t.n, 'delete'), 'danger')}
@@ -370,6 +373,10 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { me, fault, ring, list, 
             {tallySummary(els, list)}
           </Text>
         </Box>
+        {/* 🔥 Fire is `/todo exec auto` with no target: the next pending todo,
+            in auto mode. It launches into running, so it wears running's
+            color, dimmed while nothing is pending or the cap is full. */}
+        {fault ? '' : <Box flexShrink={0} marginRight={1}>{chip('fire', '🔥 Fire', () => fireNext($), 'running', fireBlock(list, nodes, cap) !== null)}</Box>}
         <Box flexShrink={0}>
           <Text dimColor>cap {cap} agents</Text>
         </Box>

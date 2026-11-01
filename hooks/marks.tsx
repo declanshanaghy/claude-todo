@@ -79,11 +79,27 @@ export const tallySummary = ({ Text }: Els, list: readonly Todo[]) =>
   ))
 
 // A filled chip reads as a button: a plain Button (no [ ] brackets) whose one
-// Text child carries the tone's fill.
-export const statusChip = ({ Text, Button }: Pick<ElementTable, 'Text' | 'Button'>, key: string, label: string, onPress: () => unknown, tone: Tone = 'neutral') => (
-  <Button key={key} label={label} plain onPress={() => void onPress()}>
-    <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText">
-      {` ${label} `}
-    </Text>
-  </Button>
-)
+// Text child carries the tone's fill. A dimmed chip (one that can't act now)
+// drops the fill for dim text in the tone's color, so it still says what it
+// would do; it stays pressable, so the focus ring still reaches it.
+export const statusChip = (
+  { Text, Button }: Pick<ElementTable, 'Text' | 'Button'>,
+  key: string,
+  label: string,
+  onPress: () => unknown,
+  tone: Tone = 'neutral',
+  isDimmed = false,
+) =>
+  isDimmed ? (
+    <Button key={key} label={label} plain dimColor onPress={() => void onPress()}>
+      <Text weight="semibold" color={toneColor(tone)} dimColor>
+        {` ${label} `}
+      </Text>
+    </Button>
+  ) : (
+    <Button key={key} label={label} plain onPress={() => void onPress()}>
+      <Text weight="semibold" backgroundColor={toneColor(tone)} color="inverseText">
+        {` ${label} `}
+      </Text>
+    </Button>
+  )

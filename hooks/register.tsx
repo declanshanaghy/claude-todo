@@ -577,6 +577,29 @@ const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
 export const nextRunnable = (list: readonly Todo[]) =>
   list.filter(t => t.status === 'pending').sort((a, b) => a.n - b.n)[0]
 
+export const NONE_PENDING = 'No pending todo to run.'
+
+// Why 🔥 Fire can't launch the next todo right now, or null when it can:
+// nothing is pending, or this directory's live agents already fill the cap.
+export function fireBlock(list: readonly Todo[], nodes: readonly AgentNode[], cap: number): string | null {
+  if (!nextRunnable(list)) return NONE_PENDING
+  const live = nodes.filter(a => a.status === 'running').length
+  return live >= cap ? `The agent cap is reached (${live} of ${cap} running).` : null
+}
+
+// 🔥 Fire: what `/todo exec auto` with no target does, from the pane, where a
+// press may submit at once. Pressed while blocked, it says why instead.
+export async function fireNext($: $) {
+  const list = await read($, todos)
+  const why = fireBlock(list, await read($, agents), await read($, cpuCap))
+  const t = nextRunnable(list)
+  if (why !== null || !t) {
+    $.ui.toast(why ?? NONE_PENDING)
+    return why ?? NONE_PENDING
+  }
+  return execTodo($, t, false, true)
+}
+
 const execNote = (t: Todo, auto: boolean) =>
   auto
     ? `Auto-executing #${t.n} ${t.title}: Claude drafts the prompt and launches it, no questions asked.`
@@ -957,7 +980,7 @@ export const register: Register = (on, options) => {
       const words = auto ? (rest[0] === 'auto' ? rest.slice(1) : rest.slice(0, -1)) : rest
       const target = words.join(' ')
       const t = auto && target === '' ? nextRunnable(await read($, todos)) : await findTodo($, target)
-      if (!t) return { text: auto && target === '' ? 'No pending todo to run.' : `No todo matches "${target}".` }
+      if (!t) return { text: auto && target === '' ? NONE_PENDING : `No todo matches "${target}".` }
       if (!RUNNABLE.has(t.status)) return { text: `#${t.n} is ${t.status}.` }
       // A command's own hook can't submit a prompt (it would wait on the turn
       // the command holds), so the exec starts from a timer once it answered.

@@ -50,6 +50,8 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
 .chip.tone-pending{--tone:var(--dim)}.chip.tone-drafting{--tone:var(--blue)}.chip.tone-planning{--tone:var(--teal)}.chip.tone-running{--tone:var(--green)}
 .chip.tone-paused{--tone:var(--yellow)}.chip.tone-stopped{--tone:var(--red)}.chip.tone-done{--tone:var(--magenta)}.chip.tone-failed{--tone:var(--red)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
+/* A dimmed chip (🔥 Fire with nothing to run): no fill, dim text in its tone; still a focus stop. */
+.chip.off .fill{background:transparent;color:var(--tone);opacity:.55}
 /* current: Claude Code inverts the focused element, so the fill becomes text color */
 .fm-current .chip.f .fill{background:var(--inv);color:var(--tone)}
 /* uniform / both: one neutral fill; only the focused chip turns orange + bold */
@@ -377,6 +379,30 @@ function execTodo(t, refine){
       later(400, ()=> classify(t, chosen));
     }, () => { t.status = refine ? 'stopped' : 'pending'; chat('sys', `todo: exec #${t.n} dismissed; ${refine?'still stopped':'back to pending'}`); render(); });
 }
+// ⚡ Auto / `/todo exec auto`: the same run with no questions. Claude takes the
+// prompt it would have offered first and, for multi-step work, launches its
+// plan on stated defaults without plan-mode approval.
+function autoExec(t){
+  t.status='drafting'; t.confirm=null; t.expanded=true; render();
+  chat('claude', `Auto mode: drafting the one best prompt for <b>#${t.n} ${esc(t.title)}</b> and launching it, no questions asked.`);
+  const kitty=t.title.startsWith('Fix kitty'), multi=kitty||t.title.startsWith('Migrate');
+  const build=kitty?'kittyTree':t.title.startsWith('Migrate')?'statusline':'countmd', mode=multi?'workflow':'agent';
+  t.prompt=t.prompt||t.title;
+  later(500, ()=>{
+    startTodo(t, build, mode);
+    chat('tool', mode==='workflow' ? `Workflow(todo-${t.n} · ${build} · defaults stated in the plan)\n<span class="out">  ⎿ running in background · run ${t.runId} · ${t.agents.length} agents / cap ${CAP}</span>` : `Agent([todo:${t.n}] ${esc(t.title)})\n<span class="out">  ⎿ running in background</span>`);
+    toast(`▶ #${t.n} launched`); render();
+  });
+}
+// 🔥 Fire (fireBlock/fireNext in hooks/register.tsx): `/todo exec auto` with no
+// target, dimmed while nothing is pending or the running agents fill the cap.
+const nextRunnable = () => S.todos.filter(t=>t.status==='pending').sort((a,b)=>a.n-b.n)[0];
+function fireBlock(){
+  if(!nextRunnable()) return 'No pending todo to run.';
+  const live=S.todos.flatMap(t=>t.agents).filter(a=>a.status==='running').length;
+  return live>=CAP ? `The agent cap is reached (${live} of ${CAP} running).` : null;
+}
+function fireNext(){ const why=fireBlock(); if(why){ toast(why); return; } autoExec(nextRunnable()); }
 function classify(t, chosen){
   if(chosen.mode==='agent'){
     chat('claude', `Classified <span class="gr">simple</span>: one step, no subtasks → single background agent.`);
@@ -441,7 +467,8 @@ function restartTodo(t){ startTodo(t, t.build, t.mode); t.justStopped=false; cha
 function addTodo(title){ const n=Math.max(0,...S.todos.map(t=>t.n))+1; S.todos.push(T(n,title,'pending')); toast(`＋ added #${n}`); return n; }
 
 /* ---------- focus model ---------- */
-function focusables(){ return [...document.querySelectorAll('#panebody [data-fid]')].map(el=>el.dataset.fid); }
+// The header's 🔥 Fire comes first, then the body's items, as the pane's ring walks them.
+function focusables(){ return [...document.querySelectorAll('#pane [data-fid]')].map(el=>el.dataset.fid); }
 function focusPane(fid){ S.area='pane'; S.fid = fid || S.fid || focusables()[0]; render(); }
 function leavePane(){ S.area = S.dialog ? 'dialog' : 'prompt'; render(); }
 function move(d){ const f=focusables(); let i=f.indexOf(S.fid); i = i<0 ? 0 : (i+d+f.length)%f.length; S.fid=f[i]; render(); }
@@ -457,9 +484,10 @@ function press(fid){
   else if(kind==='fold'){ const k=fid.slice(5); if(k==='earlier') S.earlier++; else if(S.unfold.has(k)) S.unfold.delete(k); else S.unfold.add(k); }
   else if(kind==='view'){ S.view=id; S.fid='back'; }
   else if(kind==='back'){ S.view=null; }
+  else if(kind==='fire'){ chat('user','/todo exec auto'); fireNext(); }
   else if(kind==='act'){
     const t=findTodo(id);
-    ({ exec:()=>execTodo(t,false), pause:()=>pauseTodo(t), resume:()=>resumeTodo(t),
+    ({ exec:()=>execTodo(t,false), auto:()=>autoExec(t), pause:()=>pauseTodo(t), resume:()=>resumeTodo(t),
        stop:()=>{ t.confirm='stop'; S.fid='act:'+t.id+':keep'; },
        keep:()=>{ t.confirm=null; S.fid='act:'+t.id+':stop'; },
        stopyes:()=>stopTodo(t),
@@ -491,7 +519,7 @@ function actRow(t){
   if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? The todo is kept. </div><div class="row ind2 confirm">${a('stopyes','■ Stop','stopped')} ${a('keep','Keep')}</div>`;
   if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','✕ Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
-    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','running')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
+    case 'pending': return `<div class="row ind2">${a('exec','▶ Exec','running')} ${a('auto','⚡ Auto','running')} ${a('rename','✎ Rename')} ${t.agents.length?'':a('delete','✕ Delete','danger')}</div>`;
     case 'running': return `<div class="row ind2">${a('pause','⏸ Pause','paused')} ${a('stop','■ Stop','stopped')}</div>`;
     case 'paused':  return `<div class="row ind2">${a('resume','▶ Resume','running')} ${a('stop','■ Stop','stopped')}</div>`;
     case 'stopped': return `${t.justStopped?`<div class="row ind2 followup"><span class="cy">Stopped. What next?</span></div>`:''}<div class="row ind2 ${t.justStopped?'followup':''}">${a('refine','✎ Refine','drafting')} ${a('restart','↻ Restart','drafting')}</div><div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','▶ Resume','running')} ${a('leave','Leave')}</div>`;
@@ -547,7 +575,9 @@ function renderPane(){
   const body=document.getElementById('panebody');
   const c = st => S.todos.filter(t=>t.status===st).length;
   document.getElementById('panetitle').innerHTML = `Todos <span class="dim">${S.todos.length} · </span>${tallyHtml(c)}`;
-  document.getElementById('panecap').textContent = `cap ${CAP} agents`;
+  // The call browser replaces the tree, header and all, so Fire leaves with it.
+  const fire = S.browse ? '' : B('fire', `<span class="fill">🔥 Fire</span>`, `chip tone-running ${fireBlock()?'off':''}`)+' ';
+  document.getElementById('panecap').innerHTML = `${fire}cap ${CAP} agents`;
   if(S.browse){
     body.innerHTML = renderBrowser();
     const pane=document.getElementById('pane'); pane.classList.toggle('has-focus', S.area==='pane');
@@ -635,6 +665,7 @@ document.addEventListener('keydown', e => {
     const el=document.getElementById('prompt'); const v=el.value.trim(); el.value=''; if(!v) return;
     let m;
     if(m=v.match(/^\/todo\s+add\s+(.+)/)){ chat('user',esc(v)); const n=addTodo(m[1]); chat('sys',`todo: added #${n} ${esc(m[1])}`); render(); }
+    else if(/^\/todo\s+exec\s+auto$/.test(v)){ chat('user',esc(v)); fireNext(); }
     else if(m=v.match(/^\/todo\s+exec\s+#?(\d+)/)){ const t=S.todos.find(x=>x.n===+m[1]); if(t && (t.status==='pending')) { t.expanded=true; execTodo(t,false); } else { chat('user',esc(v)); chat('sys', t?`todo: #${t.n} is ${t.status}`:`todo: no #${m[1]}`); } }
     else if(/^\/todo\s*(list)?$/.test(v)){ chat('user',esc(v)); chat('sys','todo: pane opened'); focusPane(); }
     else { chat('user',esc(v)); chat('sys','(mockup: only /todo commands are simulated)'); }
@@ -648,7 +679,12 @@ document.getElementById('panebody').addEventListener('mousedown', e => {
   if(fid==='add'||fid.startsWith('ren:')){ render(); return; }
   e.preventDefault(); press(fid);
 });
-document.getElementById('pane').addEventListener('mousedown', e => { if(!e.target.closest('#panebody')){ e.preventDefault(); focusPane(); } });
+document.getElementById('pane').addEventListener('mousedown', e => {
+  if(e.target.closest('#panebody')) return;
+  e.preventDefault();
+  const el=e.target.closest('[data-fid]');
+  if(el){ S.area='pane'; S.fid=el.dataset.fid; press(S.fid); } else focusPane();
+});
 document.getElementById('prompt').addEventListener('focus', () => { if(S.area==='pane'){ S.area = S.dialog?'dialog':'prompt'; renderPane(); renderStatus(); } });
 
 /* ---------- ticker ---------- */

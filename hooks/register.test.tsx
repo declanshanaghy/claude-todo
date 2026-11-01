@@ -753,7 +753,7 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
   await arrow(-1)
   expect(await lit(ui, 'act:1:details')).toBe(true)
   for (let i = 0; i < 10; i++) await arrow(-1)
-  expect(await lit(ui, 'add')).toBe(true)
+  expect(await lit(ui, 'fire')).toBe(true)
   // The wheel and page keys still scroll.
   expect((await $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 4, by: 4, bodyRows: 4, contentRows: 40, origin: { kind: 'person' } })).deny).toBeUndefined()
   await ui.unmount()
@@ -853,6 +853,70 @@ test('/todo exec auto runs a named todo with the keyword before or after it, or 
   expect((await todo($, 'exec auto nothing-like-it')).text).toBe('No todo matches "nothing-like-it".')
   await clock.settle()
   expect(submitted).toHaveLength(3)
+})
+
+test('🔥 Fire in the header auto-runs the lowest-numbered pending todo, and dims while none is pending or the cap is full', async ($, on) => {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  const db = seeded([
+    aTodo(1, 'Stopped one', { status: 'stopped', hasRun: true, prompt: 'p' }),
+    aTodo(2, 'Count md files'),
+    aTodo(3, 'Fix kitty tab titles'),
+  ])
+  engine(on, submitted, undefined, true, { db, toasts })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const fill = async () => {
+    const chip = await ui.find({ type: 'Button', key: 'fire' })
+    expect(chip?.props['label']).toBe('🔥 Fire')
+    return (chip?.children ?? []).find((c): c is { props: Record<string, unknown> } => typeof c === 'object' && c !== null && 'props' in c)?.props
+  }
+  // Live: filled with running's color, like Exec and Auto.
+  expect((await fill())?.['backgroundColor']).toBe(MARK.running.color)
+  // The arrow keys reach it: it is the first stop, above the add input.
+  const arrow = (by: 1 | -1) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'todo', offset: 0, by, bodyRows: 60, contentRows: 60, origin: { kind: 'person' } })
+  await $.ui.focus({ component: 'Pane', requestId: 'todo', plugin: 'todo', element: 'add', origin: { kind: 'person' } })
+  await arrow(-1)
+  expect(await isLit(ui, 'fire')).toBe(true)
+  await arrow(1)
+  expect(await isLit(ui, 'add')).toBe(true)
+
+  // The same path as `/todo exec auto`: #2, skipping the lower stopped #1.
+  await ui.press({ key: 'fire' })
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toContain('Execute todo #2 "Count md files" in auto mode')
+  expect(todoAt(db, 2).status).toBe('drafting')
+  await ui.press({ key: 'fire' })
+  expect(submitted.at(-1)).toContain('Execute todo #3 "Fix kitty tab titles" in auto mode')
+
+  // Nothing pending: dimmed, unfilled, and a press says why and runs nothing.
+  const dim = await fill()
+  expect(dim?.['backgroundColor']).toBeUndefined()
+  expect(dim?.['dimColor']).toBe(true)
+  expect(dim?.['color']).toBe(MARK.running.color)
+  await ui.press({ key: 'fire' })
+  expect(submitted).toHaveLength(2)
+  expect(toasts.at(-1)).toBe('No pending todo to run.')
+  await ui.unmount()
+})
+
+test('🔥 Fire dims and launches nothing while the running agents fill the cap', async ($, on) => {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  // The engine's cap is 6 (10 CPUs less 4): six running agents fill it.
+  const full = [1, 2, 3, 4, 5, 6].map(i => agentNode(`a${i}`, 1))
+  const db = seeded([running(1, 'Busy'), aTodo(2, 'Count md files')], [...full, agentNode('a7', 1, { status: 'done' })])
+  engine(on, submitted, undefined, true, { db, toasts })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const chip = await ui.find({ type: 'Button', key: 'fire' })
+  expect(chip?.props['dimColor']).toBe(true)
+  await ui.press({ key: 'fire' })
+  expect(submitted).toHaveLength(0)
+  expect(toasts.at(-1)).toBe('The agent cap is reached (6 of 6 running).')
+  expect(todoAt(db, 2).status).toBe('pending')
+  await ui.unmount()
 })
 
 test('the status line counts todos by status and clears with the last one', async ($, on) => {
