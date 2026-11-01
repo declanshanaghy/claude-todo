@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -p . --noEmit"
+    "typecheck": "tsc -p . --noEmit",
+    "coverage": "node scripts/coverage.mjs"
   },
   "devDependencies": {
     "eslint": "10.13.0",

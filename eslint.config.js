@@ -25,5 +25,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true }],
     },
   },
-  { files: ['eslint.config.js'], ...tseslint.configs.disableTypeChecked },
+  // The repo's own Node scripts aren't part of the mod's TypeScript project.
+  { files: ['eslint.config.js', 'scripts/**'], ...tseslint.configs.disableTypeChecked },
 )
