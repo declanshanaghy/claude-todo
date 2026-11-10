@@ -26,7 +26,7 @@ The state diagram in [architecture.md](architecture.md#a-todos-life) is drawn by
 
 - It is the only candidate that does all four checks from **one MIT-licensed jar** fetched by URL, with no build tool.
 - It is actively maintained, and it is the standard choice for model checking with a CLI.
-- Our machine is tiny (9 states), so TLC explores all of it in about a second.
+- Our machine is tiny (10 states), so TLC explores all of it in about a second.
 - The runner-up was Alloy 6: the same checks, but clumsier headless use and slower releases.
 
 ## How it works

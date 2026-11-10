@@ -413,15 +413,16 @@ test('every protocol puts the work on its own worktree branch and lands it only 
     aTodo(1, 'New'),
     aTodo(2, 'Stopped', { status: 'stopped', hasRun: true, prompt: 'p', mode: 'agent' }),
     aTodo(3, 'Paused', { status: 'paused', hasRun: true, prompt: 'p', mode: 'agent', taskId: 'ag3' }),
+    aTodo(4, 'Blocked', { status: 'blocked', hasRun: true, prompt: 'p', mode: 'agent', branch: 'todo-4', summary: 'push refused' }),
   ])
   engine(on, submitted, undefined, true, { db })
   await start($)
   const ui = await mountAll($)
-  for (const [n, act] of [[1, 'exec'], [2, 'restart'], [3, 'resume']] as const) {
+  for (const [n, act] of [[1, 'exec'], [2, 'restart'], [3, 'resume'], [4, 'land']] as const) {
     await ui.press({ key: `todo:${n}` })
     await ui.press({ key: `act:${n}:${act}` })
   }
-  expect(submitted).toHaveLength(3)
+  expect(submitted).toHaveLength(4)
   for (const text of submitted) {
     // Its own worktree, commits as it goes, the checks before landing.
     expect(text).toContain('Work only in your own git worktree')
@@ -432,7 +433,7 @@ test('every protocol puts the work on its own worktree branch and lands it only 
     expect(text).toContain('git commit --amend')
     expect(text).toContain('"<area>: <what it does, imperative>"')
     expect(text).toContain('One todo lands as one commit')
-    expect(text).toMatch(/Todo: #[123]"/)
+    expect(text).toMatch(/Todo: #[1234]"/)
     expect(text).toContain("run the project's own checks")
     // Parallel todos: rebase onto the base, resolve keeping both sides, retry; never force.
     expect(text).toContain('git rebase origin/<base>')
@@ -443,8 +444,13 @@ test('every protocol puts the work on its own worktree branch and lands it only 
     expect(text).toContain('Never force-push')
     expect(text).toContain('landed: "<the pushed commit')
     expect(text).not.toContain('it never pushes')
+    // Finished work held up outside the todo is blocked, never failed, and
+    // keeps its branch for Land; failed is for work that failed.
+    expect(text).toContain('push nothing, keep your branch, and report the landing as blocked, naming the blocker')
+    expect(text).toContain('status is "blocked", with a summary naming the blocker and the branch')
+    expect(text).toContain('status is "failed" only when the work itself failed or its checks can\'t be made to pass')
   }
-  const [exec, restart] = submitted as [string, string, string]
+  const [exec, restart] = submitted as [string, string, string, string]
   for (const text of [exec, restart]) {
     expect(text).toContain('isolation: "worktree", a description starting "[todo:')
     expect(text).toContain('it is the only agent that pushes')
@@ -847,7 +853,7 @@ test('in the tree an arrow key walks the ring like Tab, even when the tree is ta
   for (let i = 0; i < 20; i++) await arrow(-1)
   expect(await lit(ui, 'view:running')).toBe(true)
   // The header's toggles come first, then 🔥 Fire, then add, then the list.
-  for (const key of ['view:prompting', 'view:pending', 'view:failed', 'view:paused', 'view:stopped', 'view:done', 'view:all', 'fire', 'add', 'todo:1']) {
+  for (const key of ['view:prompting', 'view:pending', 'view:failed', 'view:paused', 'view:stopped', 'view:blocked', 'view:done', 'view:all', 'fire', 'add', 'todo:1']) {
     await arrow(1)
     expect(await lit(ui, key)).toBe(true)
   }
@@ -1339,7 +1345,7 @@ test('the status line counts todos by status and clears with the last one', asyn
   const { statuses } = engine(on, [], undefined, true, { unplaced: 'the terminal is too narrow' })
   await start($)
   await todo($, 'add One')
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ⊘0 ✓0')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'act:1:delete' })
   await ui.press({ key: 'act:1:deleteyes' })
@@ -1373,13 +1379,13 @@ test('open: a placed pane counts in its header and clears the status line; an un
   // Never both: the status line said nothing while the header counted.
   expect(statuses.filter(x => x !== undefined)).toEqual([])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '◔0', '●1', '✗0', '⏸0', '■0', '✓0'])
+  expect((await headerMarks(ui)).map(m => m.text)).toEqual(['▶0', '◔0', '●1', '✗0', '⏸0', '■0', '⊘0', '✓0'])
   await ui.unmount()
 
   where.unplaced = 'the terminal is too narrow'
   await start($)
   await clock.settle()
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ⊘0 ✓0')
 })
 
 // The header row as drawn: the pane's first child.
@@ -1586,9 +1592,9 @@ test('noshow hands the counts to the status line, and show takes them back', asy
   await todo($, 'add One')
   expect(statuses.at(-1)).toBeUndefined()
   await todo($, 'noshow')
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ⊘0 ✓0')
   await todo($, 'add Two')
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●2 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●2 ✗0 ⏸0 ■0 ⊘0 ✓0')
   await todo($, 'show')
   await clock.settle()
   expect(statuses.at(-1)).toBeUndefined()
@@ -1604,7 +1610,7 @@ test('closing the pane with its × hands the counts to the status line; drawing 
   // so the engine just forgets the pane, as the × leaves it: the next tick sees.
   isOpen.delete('todo')
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ⊘0 ✓0')
   // The person opens it again: its render takes the counts back.
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await clock.advance(1)
@@ -1622,7 +1628,7 @@ test('a narrower terminal that unseats the pane hands the counts to the status l
   expect(statuses.at(-1)).toBeUndefined()
   where.unplaced = 'the terminal is too narrow'
   await clock.advance(2000)
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ⊘0 ✓0')
   // Widened: the pane is drawn again.
   delete where.unplaced
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1640,7 +1646,7 @@ test('the dialog covers the header, so the status line counts until it closes', 
   await todo($, 'add One')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'act:1:details' })
-  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ✓0')
+  expect(statuses.at(-1)).toBe('todo ▶0 ◔0 ●1 ✗0 ⏸0 ■0 ⊘0 ✓0')
   await ui.unmount()
   const blurred = await $.ui.mount({ ...PANE, props: { ...PANE.props, isFocused: false }, surface: 'terminal' })
   await clock.advance(1)
@@ -1664,12 +1670,12 @@ test('the header, the status line and the rows draw the same marks in the same o
   await start($)
   await clock.settle()
   const line = statuses.at(-1)
-  expect(line).toBe('todo ▶1 ◔1 ●2 ✗0 ⏸1 ■1 ✓1')
+  expect(line).toBe('todo ▶1 ◔1 ●2 ✗0 ⏸1 ■1 ⊘0 ✓1')
 
   const ui = await mountAll($)
   const header = await headerMarks(ui)
   expect(`todo ${header.map(m => m.text).join(' ')}`).toBe(line)
-  expect(header.map(m => m.color)).toEqual(['#55f155', '#5555f1', '#8b919c', '#f1a355', '#f1f155', STOP_RED, '#a355f1'])
+  expect(header.map(m => m.color)).toEqual(['#55f155', '#5555f1', '#8b919c', '#f1a355', '#f1f155', STOP_RED, '#f155a3', '#a355f1'])
   expect(header.map(m => m.color)).toEqual(SUMMARY.map(s => MARK[s].color))
   // Each row's glyph is its status's mark; a running row spins in its color.
   for (const [n, s] of [[2, 'paused'], [3, 'stopped'], [4, 'done'], [5, 'pending'], [7, 'prompting']] as const) {
@@ -1710,12 +1716,12 @@ test('the default view shows running (drafting and planning too), pending, faile
   await start($)
   await clock.settle()
   // The status line counts every todo, whatever the pane shows.
-  expect(statuses.at(-1)).toBe('todo ▶3 ◔0 ●1 ✗1 ⏸1 ■1 ✓1')
+  expect(statuses.at(-1)).toBe('todo ▶3 ◔0 ●1 ✗1 ⏸1 ■1 ⊘0 ✓1')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // Paused #6 and stopped #7 are unfinished work, so they're drawn; done #1 isn't.
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8])
   const marks = await headerMarks(ui)
-  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '●1', '✗1', '⏸1', '■1', '✓1 hidden'])
+  expect(marks.map(m => `${m.text}${m.isLit ? '' : ' hidden'}`)).toEqual(['▶3', '◔0', '●1', '✗1', '⏸1', '■1', '⊘0', '✓1 hidden'])
   // A hidden view's toggle is dim and struck through, in its own color.
   const struck = (await ui.find({ type: 'Button', key: 'view:done' })) as Drawn | undefined
   expect(JSON.stringify(struck?.children)).toContain('"strikethrough":true')
@@ -1754,7 +1760,7 @@ test('each status toggle shows or hides its todos, done sorts last, and the last
   // Pressed from none, it puts the default view back, paused and stopped in it.
   await ui.press({ key: 'view:all' })
   expect(await rowsDrawn(ui)).toEqual([2, 3, 4, 5, 6, 7, 8])
-  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, true, true, true, true, true, false])
+  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, true, true, true, true, true, true, false])
   expect((await ui.find({ type: 'Button', key: 'view:all' }))?.props['label']).toBe('all')
   // And round again: all, none, default.
   await ui.press({ key: 'view:all' })
@@ -1947,6 +1953,17 @@ const BY_STATE: StateRow[] = [
     state: 'failed',
     todo: n => aTodo(n, 'Broke', { status: 'failed', hasRun: true, mode: 'agent', taskId: `ag${n}` }),
     chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting' },
+  },
+  {
+    state: 'blocked',
+    todo: n => aTodo(n, 'Held', { status: 'blocked', hasRun: true, mode: 'agent', branch: `todo-${n}`, summary: 'push refused' }),
+    chips: { land: 'drafting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+  },
+  {
+    state: 'blocked, confirming Delete',
+    todo: n => aTodo(n, 'Held', { status: 'blocked', hasRun: true, mode: 'agent', branch: `todo-${n}`, summary: 'push refused' }),
+    before: ['delete'],
+    chips: { deleteyes: 'removed', cancel: 'blocked' },
   },
   // Done far ahead of the test clock, so it can't leave the tree mid-table.
   { state: 'done', todo: n => aTodo(n, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }), chips: { details: 'browser' } },
@@ -2675,7 +2692,7 @@ test('a view stored before prompting had a toggle shows prompting todos wherever
   expect(await rowsDrawn(ui)).toEqual([])
   // A toggle stores the new view in its place, prompting still hidden.
   await ui.press({ key: 'view:pending' })
-  expect(held('ui')).toMatchObject({ value: { shown: ['running', 'pending', 'failed'] } })
+  expect(held('ui')).toMatchObject({ value: { filter: ['running', 'pending', 'failed', 'blocked'] } })
   expect((held('ui') as { value: object }).value).not.toHaveProperty('view')
   await ui.unmount()
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -2693,10 +2710,10 @@ test('a view stored as the old default (before paused and stopped joined it) rea
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await rowsDrawn(ui)).toEqual([1, 2, 3])
-  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, true, true, true, true, true, false])
+  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, true, true, true, true, true, true, false])
   // The next toggle stores the view in its new field and drops the old one.
   await ui.press({ key: 'view:done' })
-  expect(held('ui')).toMatchObject({ value: { shown: ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'done'] } })
+  expect(held('ui')).toMatchObject({ value: { filter: ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'blocked', 'done'] } })
   expect((held('ui') as { value: object }).value).not.toHaveProperty('views')
   await ui.unmount()
 })
@@ -2707,7 +2724,7 @@ test('a view stored as anything but the old default stays as the person set it',
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await rowsDrawn(ui)).toEqual([1])
-  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, false, true, true, false, false, false])
+  expect((await headerMarks(ui)).map(m => m.isLit)).toEqual([true, false, true, true, false, false, true, false])
   await ui.unmount()
 })
 
@@ -3608,6 +3625,7 @@ test('an enabled chip is never grey or dim, in any state: only a disabled one is
       aTodo(7, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }),
       aTodo(8, 'Broke', { status: 'failed', hasRun: true, prompt: 'p' }),
       running(9, 'Runs too'),
+      aTodo(10, 'Held', { status: 'blocked', hasRun: true, prompt: 'p', branch: 'todo-10', summary: 'push refused: auth' }),
     ],
     [agentNode('ag2', 2)],
   )
@@ -3625,10 +3643,11 @@ test('an enabled chip is never grey or dim, in any state: only a disabled one is
     }
   }
   const ui = await mountAll($)
-  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9]) await ui.press({ key: `todo:${n}` })
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) await ui.press({ key: `todo:${n}` })
   await ui.press({ key: 'subs:2' })
   await ui.press({ key: 'ag:ag2' })
   await sweep(ui)
+  expect(await ui.find({ type: 'Button', key: 'act:10:land' })).toBeDefined()
   // Each confirmation, then a stop's what-next row with ✓ Leave.
   await ui.press({ key: 'act:1:delete' })
   await sweep(ui)
@@ -3933,7 +3952,7 @@ test('every status and tone has its own color and focused twin, spread evenly ro
   // 10° off stopped's pure red.
   const hued = tones.filter(t => t !== 'pending')
   const hues = hued.filter(t => t !== 'danger').map(t => hsl(String(toneColor(t))).hue).sort((a, b) => a - b)
-  expect(hues).toEqual(Array.from({ length: 11 }, (_, i) => i * 30))
+  expect(hues).toEqual(Array.from({ length: 12 }, (_, i) => i * 30))
   const danger = hsl(String(toneColor('danger')))
   expect(danger.hue).toBe(350)
   expect(Math.round(danger.light * 100)).toBe(64)
@@ -4241,7 +4260,7 @@ test('a paused lone Agent is woken first, with the fallback spelled out if the w
   const text = submitted.at(-1) ?? ''
   expect(text).toContain('Send the stopped background agent "ag1" a SendMessage')
   expect(text).toContain('If the message is refused')
-  expect(text).toContain('2. Fallback')
+  expect(text).toContain('3. Fallback')
   expect(text).toContain('none found: no worktree of its agents is left')
   expect(text).toContain('status: "paused", summary: "resume failed: <why>"')
   await ui.unmount()
@@ -4262,7 +4281,7 @@ test('a Workflow resume merges the branches its interrupted writers kept, and fa
   expect(text).toContain('{scriptPath: "/tmp/s.js", resumeFromRunId: "wf_abc"}')
   expect(text).toContain('its merge agent also merges the kept branches above')
   expect(text).toContain('- fix: /proj/.claude/worktrees/agent-w1 (branch worktree-agent-w1)')
-  expect(text).toContain('the run belongs to another session or an earlier process), go to 2')
+  expect(text).toContain('the run belongs to another session or an earlier process), go to 3')
   await ui.unmount()
 })
 
@@ -4291,6 +4310,135 @@ test('the run protocol never leaves a stopped todo running', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'act:1:exec' })
   expect(submitted.at(-1)).toContain('A notification that says it was stopped (by the user or by Claude) means status "stopped"')
+  await ui.unmount()
+})
+
+// ---------- finished work whose landing is blocked ----------
+
+// Its work is finished and checked on its branch; only its landing is held up.
+const blockedTodo = (n: number, over: Partial<Todo> = {}) =>
+  aTodo(n, 'Held up', { status: 'blocked', hasRun: true, mode: 'agent', prompt: 'do it', taskId: `ag${n}`, isAgentGone: true, branch: `todo-${n}`, summary: `base has an unpushed commit; branch todo-${n}`, ...over })
+
+test('a blocked todo offers ⇡ Land and never Resume: Land submits the land protocol for its kept branch, redoing nothing', async ($, on) => {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  const db = seeded([blockedTodo(1)], [agentNode('ag1', 1, { status: 'done', name: 'Held' })])
+  engine(on, submitted, undefined, true, { db, toasts, worktrees: porcelain(['/proj/.claude/worktrees/agent-ag1', 'todo-1']) })
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag9' } }))
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  expect(await ui.find({ type: 'Button', key: 'act:1:resume' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:refine' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:1:restart' })).toBeUndefined()
+  await ui.press({ key: 'act:1:land' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toContain('[todo] Land todo #1 "Held up"')
+  expect(text).toContain("Don't redo, rework or extend it.")
+  expect(text).toContain('What blocked it: base has an unpushed commit; branch todo-1')
+  expect(text).toContain('Its branch: todo-1')
+  expect(text).toContain('- Held: /proj/.claude/worktrees/agent-ag1 (branch todo-1)')
+  // Still blocked: nothing is launched, and it goes back to blocked saying why.
+  expect(text).toContain('Still blocked: launch nothing. Call mcp__todo__update {n: 1, status: "blocked", summary: "still blocked: <the blocker>; branch <its branch>"}')
+  expect(text).toContain('description starting "[todo:1] land" (no isolation')
+  expect(text).toContain('already on origin/<base> (landed by hand), push nothing')
+  expect(text).toContain('status is "blocked", with a summary naming the blocker and the branch')
+  expect(text).toContain('git push origin HEAD:<base>')
+  expect(toasts).toContain('⇡ landing #1')
+  // In the chat's hands until the land agent is going.
+  expect(todoAt(db, 1).status).toBe('drafting')
+  expect(await isLit(ui, 'todo:1')).toBe(true)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu9', description: '[todo:1] land Held up', prompt: 'p', subagent_type: 'general-purpose' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'running', taskId: 'ag9' })
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'done', landed: 'abc1234' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'done', landed: 'abc1234' })
+  await ui.unmount()
+})
+
+test('a refused Land puts the todo back blocked, and resume and exec refuse a blocked todo, pointing to Land', async ($, on) => {
+  const submitted: string[] = []
+  const toasts: string[] = []
+  const db = seeded([blockedTodo(1), blockedTodo(2), aTodo(3, 'Waiting')])
+  engine(on, submitted, undefined, false, { db, toasts, drop: 'a hook refused it' })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  expect((await todo($, 'land 1')).text).toBe('Landing #1 Held up: Claude retries landing its branch in the chat.')
+  await clock.settle()
+  expect(submitted).toHaveLength(0)
+  expect(todoAt(db, 1).status).toBe('blocked')
+  expect(toasts).toContain("#1 didn't start: a hook refused it")
+  const note = '#2 is blocked: its work is finished and only its landing is held up; /todo land 2 retries it.'
+  expect((await todo($, 'resume 2')).text).toBe(note)
+  expect((await todo($, 'exec 2')).text).toBe(note)
+  await clock.settle()
+  expect(todoAt(db, 2).status).toBe('blocked')
+  expect(submitted).toHaveLength(0)
+  // Land is for a blocked todo only.
+  expect((await todo($, 'land 3')).text).toMatch(/^#3 is pending, so \/todo land doesn't apply/)
+  expect(todoAt(db, 3).status).toBe('pending')
+})
+
+test('mcp__todo__update records finished work whose landing is blocked: toasted, its blocker on its row and in Details', async ($, on) => {
+  const toasts: string[] = []
+  const db = seeded([running(1, 'Ship it'), aTodo(2, 'Broke', { status: 'failed', hasRun: true, summary: 'done on todo-2, but the push was refused' })])
+  engine(on, [], undefined, true, { db, toasts })
+  await start($)
+  const r = await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'blocked', summary: 'needs designs/ committed; branch todo-1', branch: 'todo-1' } as never)
+  expect(r.isError).toBeFalsy()
+  expect(todoAt(db, 1)).toMatchObject({ status: 'blocked', summary: 'needs designs/ committed; branch todo-1', branch: 'todo-1' })
+  expect(toasts).toContain(statusToast(1, 'blocked'))
+  expect(statusToast(1, 'blocked')).toBe('⊘ #1 blocked')
+  // A failed todo whose work was finished can be put right, never on its own.
+  expect(todoAt(db, 2).status).toBe('failed')
+  expect((await $.tool.call({ tool: 'mcp__todo__update', n: 2, status: 'blocked' } as never)).isError).toBeFalsy()
+  expect(todoAt(db, 2).status).toBe('blocked')
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  const line = (await ui.find({ type: 'Text', text: /⊘ needs designs\/ committed; branch todo-1/ })) as Drawn | undefined
+  expect(line?.props?.['color']).toBe(MARK.blocked.color)
+  await ui.press({ key: 'act:1:delete' })
+  expect(await ui.find({ type: 'Text', text: /Delete "#1 Ship it"\? Its branch todo-1 stays\./ })).toBeDefined()
+  await ui.press({ key: 'act:1:cancel' })
+  await ui.press({ key: 'act:1:details' })
+  expect(await ui.find({ type: 'Text', text: 'Landing blocked' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'needs designs/ committed; branch todo-1' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a resume first checks whether the work was already finished, and records it blocked rather than redoing it', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([aTodo(1, 'Count', { status: 'failed', hasRun: true, mode: 'agent', taskId: 'ag1', isAgentGone: true, branch: 'todo-1', summary: 'checks pass; push refused' })])
+  engine(on, submitted, undefined, true, { db })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:resume' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toContain('Its last report: checks pass; push refused (branch todo-1)')
+  expect(text).toContain('relaunch nothing and redo nothing. Call mcp__todo__update {n: 1, status: "blocked"')
+  expect(text).toContain('⇡ Land retries the landing')
+  // Claude finds it so: drafting → blocked, and the row offers Land.
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'blocked', summary: 'push refused; branch todo-1' } as never)
+  expect(todoAt(db, 1).status).toBe('blocked')
+  expect(await ui.find({ type: 'Button', key: 'act:1:land' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a view stored before blocked had a toggle shows blocked todos wherever it showed failed ones', async ($, on) => {
+  const db = seeded([blockedTodo(1), aTodo(2, 'Broke', { status: 'failed', hasRun: true }), aTodo(3, 'Waits')])
+  const kept = legacyState(on, { ui: { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, shown: ['running', 'pending', 'failed'] } })
+  engine(on, [], undefined, true, { db })
+  await start($)
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(ui)).toEqual([1, 2, 3])
+  expect((await headerMarks(ui)).filter(m => m.isLit).map(m => m.view)).toEqual(['running', 'pending', 'failed', 'blocked'])
+  // A toggle stores the view in its new field, blocked still shown.
+  await ui.press({ key: 'view:failed' })
+  expect(kept('ui')).toMatchObject({ value: { filter: ['running', 'pending', 'blocked'] } })
+  expect((kept('ui') as { value: object }).value).not.toHaveProperty('shown')
+  await ui.unmount()
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await rowsDrawn(ui)).toEqual([1, 3])
   await ui.unmount()
 })
 
@@ -4558,7 +4706,7 @@ test('a held prompt the host refuses for another reason puts the todo back as it
 // ---------- a /todo verb for every chip ----------
 
 // Every chip a todo's row can draw, each a /todo verb of the same name.
-const CHIP_VERBS: Chip[] = ['exec', 'auto', 'rename', 'delete', 'reset', 'pause', 'stop', 'resume', 'refine', 'restart', 'leave', 'takeover', 'details']
+const CHIP_VERBS: Chip[] = ['exec', 'auto', 'rename', 'delete', 'reset', 'pause', 'stop', 'resume', 'land', 'refine', 'restart', 'leave', 'takeover', 'details']
 // What the yes of a chip's confirmation leads to: its command acts at once.
 const CONFIRMED: Record<string, Lead> = { deleteyes: 'removed', stopyes: 'stopped', takeyes: 'stopped' }
 
@@ -4739,6 +4887,7 @@ test('every status move the code makes is in hooks/transitions.json, and every m
     aTodo(7, 'Plan again', { status: 'planning', hasRun: true, owner: 's1' }),
     aTodo(8, 'Drafting elsewhere', { status: 'prompting', owner: 'other', promptingAt: Date.now() }),
     aTodo(9, 'Delete me'),
+    running(1, 'Land me'),
   ])
   const sql = (op: Op, d: Db) => {
     if (op.kind !== 'todos') return undefined
@@ -4775,6 +4924,14 @@ test('every status move the code makes is in hooks/transitions.json, and every m
   await run('stop 2')
   await run('stop 3')
   await report(4, 'failed')
+  // Finished work whose landing is held up: blocked, Land, still blocked,
+  // then landed by hand; a failed one reclassified, then deleted.
+  await report(1, 'blocked')
+  await run('land 1')
+  await report(1, 'blocked')
+  await report(1, 'done')
+  await report(4, 'blocked')
+  await run('delete 4')
   await run('reset 5')
   await run('reset 6')
   await run('reset 7')

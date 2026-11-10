@@ -31,6 +31,7 @@ import {
   fireBlock,
   fireNext,
   haltTodo,
+  landTodo,
   leaveTodo,
   openDetail,
   patchUi,
@@ -350,6 +351,9 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       pause: () => btn('pause', 'Pause', () => haltTodo($, t, 'paused'), 'paused'),
       stop: () => btn('stop', 'Stop', () => askConfirm($, t.n, 'stop'), 'stopped'),
       resume: () => btn('resume', 'Resume', () => resumeTodo($, t), 'running'),
+      // Land starts a run too (one agent landing the kept branch), so it
+      // wears running's fill, as Resume does.
+      land: () => btn('land', 'Land', () => landTodo($, t), 'running'),
       refine: () => btn('refine', 'Refine', () => execTodo($, t, true), 'drafting'),
       restart: () => btn('restart', 'Restart', () => restartTodo($, t), 'drafting'),
       leave: () => btn('leave', 'Leave', () => leaveTodo($, t.n)),
@@ -378,7 +382,9 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
       return {
         labels,
         rows: [
-          <Text color="error">Delete "#{t.n} {t.title}"?</Text>,
+          <Text color="error" wrap="truncate-end">
+            Delete "#{t.n} {t.title}"?{t.status === 'blocked' && t.branch ? ` Its branch ${t.branch} stays.` : ''}
+          </Text>,
           <Box gap={1}>
             {btn('deleteyes', 'Delete', () => deleteTodo($, t), 'danger')}
             {btn('cancel', 'Cancel', () => cancelConfirm($, t.n, 'delete'))}
@@ -603,9 +609,12 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
                 </Text>
               ),
             ]),
-      t.status === 'done' && t.summary ? (
-        <Text color={markOf('done').color} wrap="truncate-end">
-          {' '}✓ {gist(t.summary)}
+      // What it ended with: a done todo's report, or what blocks a blocked
+      // one's landing, in its status's color behind its mark.
+      (t.status === 'done' || t.status === 'blocked') && t.summary ? (
+        <Text color={markOf(t.status).color} wrap="truncate-end">
+          {' '}
+          {markOf(t.status).symbol} {gist(t.summary)}
         </Text>
       ) : (
         ''

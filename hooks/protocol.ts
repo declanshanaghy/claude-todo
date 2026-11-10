@@ -24,9 +24,20 @@ const GIT_RULES = (n: number) => `Git rules: copy them, with <base> filled in, i
   3. Run every check again on the rebased commit. Fix anything by amending that one commit (git commit --amend), so what lands passes on its own.
   4. git push origin HEAD:<base>. Rejected because <base> moved (another todo landed first)? git fetch origin and go back to 2.
   5. A conflict you can't resolve with confidence, or checks that fail after the rebase: git rebase --abort, push nothing, and report the conflicting files and your branch, which keeps the work.
+  6. Finished and checked, but landing is blocked by something outside your work (files it depends on are uncommitted or await the user's review, <base> has unpushed commits, the push is refused for auth or by a hook): push nothing, keep your branch, and report the landing as blocked, naming the blocker. Don't work around it.
   Never force-push, and push nothing but HEAD:<base>. With no origin remote, commit only and say so.
 - The landing message: a summary line of at most 72 characters, "<area>: <what it does, imperative>"; a blank line; why it was needed and what changed, wrapped at 72 columns; the checks it passed; then the line "Todo: #${n}", then your usual commit attribution trailer. One todo lands as one commit: no merge, fixup or work-in-progress commits on <base>.
-- Report back: your branch, the landed commit's hash and summary line, each check run and its result, and whether it landed or why not.`
+- Report back: your branch, the landed commit's hash and summary line, each check run and its result, and whether it landed, what blocked its landing, or why the work failed.`
+
+// How a run ends, as Claude reports it: the one rule that every protocol
+// (exec, restart, resume, land) closes with. Finished work whose landing is
+// held up outside the todo is blocked, never failed, so the pane offers
+// ⇡ Land rather than a ⏵ Resume that would redo it.
+const OUTCOME = `status is "done" only if the work landed (or there's no remote and it's committed). If the work is complete and its checks pass on its branch but landing it is blocked by something outside the todo (files it needs are uncommitted or await the user's review, <base> has unpushed commits, the push is refused for auth or by a hook), status is "blocked", with a summary naming the blocker and the branch; it keeps its worktree and branch for ⇡ Land to retry the landing. status is "failed" only when the work itself failed or its checks can't be made to pass, with a summary saying why and where the work is; it keeps its worktree and branch too. A notification that says it was stopped (by the user or by Claude) means status "stopped", with a summary of where its work is. Never leave the todo "running".`
+
+// The worktrees a todo's agents kept, one line each.
+const keptLines = (kept: readonly Kept[]) =>
+  kept.length ? kept.map(k => `   - ${k.name}: ${k.path} (branch ${k.branch})`).join('\n') : '   - none found: no worktree of its agents is left'
 
 const RUN_STEPS = (t: Todo, cap: number, auto = false) => `Base branch: before launching, run git branch --show-current in the main checkout; that branch is <base>. If git status there shows uncommitted changes, tell the user in one line that the todo won't see them, then go on.
 3. Classify the final prompt:
@@ -49,9 +60,9 @@ ${
       - at most ${cap} agents in total; default to pipeline(), use a barrier only where a stage needs all prior results
       - a writer follows the git rules but doesn't land: it commits on its worktree branch, runs the checks that cover its part, and returns its branch name
       - the last wave is one "w<K>:merge@wt" agent in its own worktree: it merges every returned branch into its branch, resolving conflicts between writers by keeping both intents, then validates and lands per the git rules; it is the only agent that pushes
-      - the script returns a one-line summary that says whether the work landed
+      - the script returns a one-line summary that says whether the work landed, and if not, what blocked its landing or why the work failed
    d. Call mcp__todo__update {n: ${t.n}, status: "running"}.
-6. When the background task's completion notification arrives, call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. status is "done" only if the work landed (or there's no remote and it's committed); otherwise "failed", with a summary saying why and where the work is. Once it landed, remove its worktree (git worktree remove) and delete its local branch; a failed todo keeps both. A notification that says it was stopped (by the user or by Claude) means status "stopped", with a summary of where its work is; never leave the todo "running".
+6. When the background task's completion notification arrives, call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. ${OUTCOME} Once it landed, remove its worktree (git worktree remove) and delete its local branch.
 If the user dismisses a question at any point, call mcp__todo__update {n: ${t.n}, status: "${t.hasRun ? 'stopped' : 'pending'}"} and stop.
 
 ${GIT_RULES(t.n)}
@@ -113,27 +124,49 @@ ${RUN_STEPS(t, cap)}`
 export type ResumeContext = { kept: Kept[]; digest: string; canWake: boolean }
 
 export function resumePrompt(t: Todo, ctx: ResumeContext): string {
-  const kept = ctx.kept.length
-    ? ctx.kept.map(k => `   - ${k.name}: ${k.path} (branch ${k.branch})`).join('\n')
-    : '   - none found: no worktree of its agents is left'
+  const kept = keptLines(ctx.kept)
   const wake =
     !ctx.canWake
-      ? `1. Its agent can't be woken (stopped by the user, or its session is gone): go straight to 2.`
+      ? `2. Its agent can't be woken (stopped by the user, or its session is gone): go straight to 3.`
       : t.mode === 'workflow' && t.runId
-        ? `1. Call Workflow with {scriptPath: ${JSON.stringify(t.scriptPath ?? '')}, resumeFromRunId: ${JSON.stringify(t.runId)}} so finished agents come back from cache.${ctx.kept.length ? ' First edit the script so its merge agent also merges the kept branches above that no finished agent returned (an interrupted writer re-runs in a new worktree, so its partial commits would otherwise be left out).' : ''} If that call is refused or fails (the run belongs to another session or an earlier process), go to 2.`
-        : `1. Send the stopped background agent ${JSON.stringify(t.taskId ?? '')} a SendMessage: "Continue the task where you stopped." It carries on in the worktree it had. If the message is refused (e.g. it was stopped by the user and won't be resumed) or the agent is unknown, go to 2.`
+        ? `2. Call Workflow with {scriptPath: ${JSON.stringify(t.scriptPath ?? '')}, resumeFromRunId: ${JSON.stringify(t.runId)}} so finished agents come back from cache.${ctx.kept.length ? ' First edit the script so its merge agent also merges the kept branches above that no finished agent returned (an interrupted writer re-runs in a new worktree, so its partial commits would otherwise be left out).' : ''} If that call is refused or fails (the run belongs to another session or an earlier process), go to 3.`
+        : `2. Send the stopped background agent ${JSON.stringify(t.taskId ?? '')} a SendMessage: "Continue the task where you stopped." It carries on in the worktree it had. If the message is refused (e.g. it was stopped by the user and won't be resumed) or the agent is unknown, go to 3.`
   return `[todo] Resume todo #${t.n} "${t.title}".
 Its prompt: ${t.prompt ?? t.title}
+Its last report: ${t.summary ?? '(none)'}${t.branch ? ` (branch ${t.branch})` : ''}
 Work it kept (git worktrees of its agents):
 ${kept}
 What its agents did before it stopped, newest last:
 ${ctx.digest || '   (nothing recorded)'}
 
 Base branch: run git branch --show-current in the main checkout; that branch is <base>.
+1. First, from its last report and its branch (git log origin/<base>..<branch>, without changing anything): if its work is already complete and checked, and only landing it was blocked by something outside the todo, relaunch nothing and redo nothing. Call mcp__todo__update {n: ${t.n}, status: "blocked", summary: "<the blocker>; branch <its branch>"}, tell the user in one line that ⇡ Land retries the landing once the blocker is cleared, and stop. Otherwise go on.
 ${wake}
-2. Fallback: launch Agent with run_in_background: true and a description starting "[todo:${t.n}] " (no isolation: it works in a kept worktree). Its prompt: the todo's prompt above, then that it resumes work an earlier agent left, the kept worktrees and the record above, and these steps: cd into the first kept worktree (if it's gone or none was kept, git worktree add a new one, from that branch if it still exists, else off origin/<base>); read git log origin/<base>..HEAD, git status and git diff to see what's done; merge any other kept branches into it, keeping both sides' intent; then finish the task and land it under the git rules below.
-3. Call mcp__todo__update {n: ${t.n}, status: "running"} only once the agent or run is actually going again. If neither 1 nor 2 started anything, call mcp__todo__update {n: ${t.n}, status: "${t.status}", summary: "resume failed: <why>"} and stop.
-4. On its completion notification call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}: "done" only if the work landed; "stopped" if it was stopped; else "failed" saying why and where the work is. Once it landed, remove its worktree and every kept worktree above, and delete their local branches.
+3. Fallback: launch Agent with run_in_background: true and a description starting "[todo:${t.n}] " (no isolation: it works in a kept worktree). Its prompt: the todo's prompt above, then that it resumes work an earlier agent left, the kept worktrees and the record above, and these steps: cd into the first kept worktree (if it's gone or none was kept, git worktree add a new one, from that branch if it still exists, else off origin/<base>); read git log origin/<base>..HEAD, git status and git diff to see what's done; merge any other kept branches into it, keeping both sides' intent; then finish the task and land it under the git rules below.
+4. Call mcp__todo__update {n: ${t.n}, status: "running"} only once the agent or run is actually going again. If neither 2 nor 3 started anything, call mcp__todo__update {n: ${t.n}, status: "${t.status}", summary: "resume failed: <why>"} and stop.
+5. On its completion notification call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. ${OUTCOME} Once it landed, remove its worktree and every kept worktree above, and delete their local branches.
+
+${GIT_RULES(t.n)}
+
+${TAG_RULES(t.n)}`
+}
+
+// ⇡ Land: a blocked todo's work is finished and checked on its branch, and
+// only its landing was held up by something outside it. Nothing is redone:
+// Claude checks the blocker, and one agent retries the landing alone.
+export function landPrompt(t: Todo, kept: readonly Kept[]): string {
+  const branch = t.branch ?? '(not recorded: take it from the kept worktrees)'
+  return `[todo] Land todo #${t.n} "${t.title}". Its work is finished and was checked on its branch; only landing it was blocked. Don't redo, rework or extend it. Follow this protocol exactly.
+What blocked it: ${t.summary ?? '(no reason recorded)'}
+Its branch: ${branch}
+Work it kept (git worktrees of its agents):
+${keptLines(kept)}
+
+Base branch: run git branch --show-current in the main checkout; that branch is <base>.
+1. Check the blocker from the main checkout, changing nothing (git status for files the work needs, git log origin/<base>..<base> for unpushed commits, git fetch origin for access).
+2. Still blocked: launch nothing. Call mcp__todo__update {n: ${t.n}, status: "blocked", summary: "still blocked: <the blocker>; branch <its branch>"}, tell the user in one line what to clear, and stop.
+3. Cleared: launch Agent with run_in_background: true and a description starting "[todo:${t.n}] land" (no isolation: it works in the kept worktree), then call mcp__todo__update {n: ${t.n}, status: "running"}. Its prompt: that it lands finished work and changes nothing else, the branch and kept worktrees above, and these steps: cd into the worktree on that branch (gone? git worktree add one from the branch; the branch gone too? report the work lost); git fetch origin; if the branch's change is already on origin/<base> (landed by hand), push nothing and report that commit's hash as landed; otherwise land it under the git rules below, re-running every check on the rebased commit. If it can't be launched, call mcp__todo__update {n: ${t.n}, status: "blocked", summary: "land didn't start: <why>; branch <its branch>"} and stop.
+4. On its completion notification call mcp__todo__update {n: ${t.n}, status, summary: "<one line>", branch: "<its branch>", landed: "<the pushed commit's hash, if it landed>"}. ${OUTCOME} Once it landed, remove its worktree and every kept worktree above, and delete their local branches.
 
 ${GIT_RULES(t.n)}
 

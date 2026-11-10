@@ -59,20 +59,20 @@ h1{font-size:16px;margin:0 0 4px;font-weight:600}
    same colors as MARK below), danger = Delete's red (350°), details = its own cyan (Details
    moves no status), edit = Rename's lime, stay = a magenta (Reset, Leave,
    Keep/Cancel/Back); a subtask's ☰ Details wears details like a todo's. Every color is raw hex, its own hue 30° apart
-   round the wheel (stopped a pure red, Delete's softer red the one off the grid at 350°), with pending's grey the one exception, which
+   round the wheel (stopped a pure red, blocked's rose the last step at 330°, Delete's softer red the one off the grid at 350°), with pending's grey the one exception, which
    no chip fills with. --tf is each tone's focused twin, the same hue halfway to white:
    a chip under the ring or the pointer brightens to it rather than going black.
    An enabled chip is never grey: only a dimmed (disabled) one is muted. The focus
    style depends on the option picked in the "Focus style" switcher (html.fm-*). */
 :root{--s-stopped:#ff0000;--f-stopped:#ff8080;--s-failed:#f1a355;--f-failed:#f8d1aa;--s-paused:#f1f155;--f-paused:#f8f8aa;--s-edit:#a3f155;--f-edit:#d1f8aa;
   --s-running:#55f155;--f-running:#aaf8aa;--s-planning:#55f1a3;--f-planning:#aaf8d1;--s-details:#55f1f1;--f-details:#aaf8f8;--s-drafting:#55a3f1;--f-drafting:#aad1f8;
-  --s-prompting:#5555f1;--f-prompting:#aaaaf8;--s-done:#a355f1;--f-done:#d1aaf8;--s-stay:#f155f1;--f-stay:#f8aaf8;--s-danger:#f1556f;--f-danger:#f8aab7;--s-pending:#8b919c;--f-pending:#c5c8ce}
+  --s-prompting:#5555f1;--f-prompting:#aaaaf8;--s-done:#a355f1;--f-done:#d1aaf8;--s-stay:#f155f1;--f-stay:#f8aaf8;--s-danger:#f1556f;--f-danger:#f8aab7;--s-pending:#8b919c;--f-pending:#c5c8ce;--s-blocked:#f155a3;--f-blocked:#f8aad1}
 .chip{display:inline-block;padding:0;border-radius:0;line-height:1.35}
 .chip{--tone:var(--s-stay);--tf:var(--f-stay)}.chip.tone-stay{--tone:var(--s-stay);--tf:var(--f-stay)}.chip.tone-edit{--tone:var(--s-edit);--tf:var(--f-edit)}.chip.tone-danger{--tone:var(--s-danger);--tf:var(--f-danger)}.chip.tone-details{--tone:var(--s-details);--tf:var(--f-details)}
 .chip.tone-prompting{--tone:var(--s-prompting);--tf:var(--f-prompting)}.chip.tone-pending{--tone:var(--s-pending);--tf:var(--f-pending)}.chip.tone-drafting{--tone:var(--s-drafting);--tf:var(--f-drafting)}.chip.tone-planning{--tone:var(--s-planning);--tf:var(--f-planning)}.chip.tone-running{--tone:var(--s-running);--tf:var(--f-running)}
-.chip.tone-paused{--tone:var(--s-paused);--tf:var(--f-paused)}.chip.tone-stopped{--tone:var(--s-stopped);--tf:var(--f-stopped)}.chip.tone-done{--tone:var(--s-done);--tf:var(--f-done)}.chip.tone-failed{--tone:var(--s-failed);--tf:var(--f-failed)}
+.chip.tone-paused{--tone:var(--s-paused);--tf:var(--f-paused)}.chip.tone-stopped{--tone:var(--s-stopped);--tf:var(--f-stopped)}.chip.tone-done{--tone:var(--s-done);--tf:var(--f-done)}.chip.tone-failed{--tone:var(--s-failed);--tf:var(--f-failed)}.chip.tone-blocked{--tone:var(--s-blocked);--tf:var(--f-blocked)}
 /* The status marks and row titles, in MARK's colors. */
-.st-prompting{color:var(--s-prompting)}.st-pending{color:var(--s-pending)}.st-drafting{color:var(--s-drafting)}.st-planning{color:var(--s-planning)}.st-running{color:var(--s-running)}.st-paused{color:var(--s-paused)}.st-stopped{color:var(--s-stopped)}.st-done{color:var(--s-done)}.st-failed{color:var(--s-failed)}
+.st-prompting{color:var(--s-prompting)}.st-pending{color:var(--s-pending)}.st-drafting{color:var(--s-drafting)}.st-planning{color:var(--s-planning)}.st-running{color:var(--s-running)}.st-paused{color:var(--s-paused)}.st-stopped{color:var(--s-stopped)}.st-done{color:var(--s-done)}.st-failed{color:var(--s-failed)}.st-blocked{color:var(--s-blocked)}
 .chip .fill{display:inline-block;padding:0 1ch;background:var(--tone);color:var(--inv);font-weight:700}
 /* Under the pointer (each chip's own hover) or the ring: the tone's focused twin, never black. */
 .chip:not(.off):hover .fill,.chip.f:not(.off) .fill{background:var(--tf);color:var(--inv)}
@@ -334,12 +334,15 @@ const SCENES = [
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending',{expanded:true}); startTodo(t2,'statusline','workflow'); t2.prompt='Make both statuslines read colors from the theme lib via a new generator; keep output identical.'; advance(t2,10); S.todos=[t2]; S.chat=[['user','/todo exec 2'],['tool','Workflow(todo-2 · migrate-statusline)\n<span class="out">  ⎿ running · run '+t2.runId+'</span>']]; focusPane('act:t2:stop'); }},
  {name:'6 · Delete task', hint:'Only todos that have never run can be deleted. The ring is on <b>✕ Delete</b> for #1. Pressing it shows a confirmation with the ring on <b>Cancel</b>. #2 has run, so its action row has no Delete.',
   setup(){ const t2=T(2,'Count md files in ~/.claude','pending',{expanded:true}); startTodo(t2,'countmd','agent'); advance(t2,20); S.show=new Set(VIEWS); S.todos=[T(1,'Fix kitty tab titles','pending',{expanded:true}), t2]; S.chat=[['sys','todo: 1 pending · 1 done']]; focusPane('act:t1:delete'); }},
- {name:'7 · Views', hint:'The header, after its count (<b>3 Todos</b>) and before 🔥 Fire, holds one toggle per status on its one line: <b>▶ running</b> (drafting and planning count here), <b>◔ prompting</b>, <b>● pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is every unfinished todo: running, prompting, pending, failed, paused and stopped, so interrupted work never vanishes and only finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. The last toggle cycles: <b>all</b> lights every toggle; pressed again (now <b>none</b>) it turns them all off and the list is empty; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
+ {name:'7 · Views', hint:'The header, after its count (<b>3 Todos</b>) and before 🔥 Fire, holds one toggle per status on its one line: <b>▶ running</b> (drafting and planning count here), <b>◔ prompting</b>, <b>● pending</b>, <b>✗ failed</b>, <b>⏸ paused</b>, <b>■ stopped</b>, <b>⊘ blocked</b>, <b>✓ done</b>, each with its count. A lit toggle shows that status\'s todos; a struck one hides them. The default view is every unfinished todo: running, prompting, pending, failed, paused, stopped and blocked, so interrupted work never vanishes and only finished work stays out of the way. Press <b>✓</b> to bring done todos back: they always sort to the bottom. The last toggle cycles: <b>all</b> lights every toggle; pressed again (now <b>none</b>) it turns them all off and the list is empty; pressed again (now <b>default</b>) it returns to the default view. A footer says how many todos the view hides.',
   setup(){ const t2=T(2,'Migrate statusline to theme lib','pending'); startTodo(t2,'statusline','workflow'); advance(t2,6);
     const t4=T(4,'Count md files in ~/.claude','pending'); startTodo(t4,'countmd','agent'); advance(t4,20);
     const t6=T(6,'Fix kitty tab titles','pending'); startTodo(t6,'kittySimple','agent'); advance(t6,20);
     S.todos=[T(1,'Rename theme presets','pending'), t2, T(3,'Bump plugin version','failed',{prompt:'Bump the version and tag it.'}), t4, T(5,'Tidy README badges','paused'), t6, T(7,'Try a lighter palette','stopped'), T(8,'Echo the added number','pending')];
     S.chat=[['sys','todo: 8 todos · 2 done hidden by the view']]; focusPane('flt:done'); }},
+ {name:'8 · Blocked: land it', hint:'#9\'s work is finished and its checks passed on its branch, but it couldn\'t land: the files it needs await your review. Claude recorded it <b>⊘ blocked</b>, not failed, and its row says what blocks it. It offers no ⏵ Resume (which would redo finished work), only <b>⇡ Land</b>, <b>✕ Delete</b> (its branch stays) and <b>☰ Details</b>. The ring is on <b>⇡ Land</b>: press it and Claude checks the blocker first; it is still there, so nothing launches and the todo stays blocked. Press <b>⇡ Land</b> again (as if you had cleared it): one agent lands the kept branch, and the todo turns <b>✓ done</b>.',
+  setup(){ S.todos=[T(9,'Export the bracket designs','blocked',{expanded:true, prompt:'Export each bracket design and commit its .sc file.', branch:'todo-9-brackets', blocker:'designs/ awaits your review, uncommitted', summary:'designs/ awaits your review, uncommitted; branch todo-9-brackets', landTries:0})];
+    S.chat=[['claude','⊘ <b>#9 Export the bracket designs</b> blocked: designs/ awaits your review, uncommitted; branch todo-9-brackets']]; focusPane('act:t9:land'); }},
 ];
 
 /* ---------- chat ---------- */
@@ -493,6 +496,17 @@ function resumeTodo(t){
   chat('tool', t.mode==='workflow' ? `Workflow(resumeFromRunId: ${t.runId})\n<span class="out">  ⎿ resumed · ${t.agents.filter(a=>a.status==='done').length} finished agents served from cache</span>` : `SendMessage(to: [todo:${t.n}] agent, "continue")\n<span class="out">  ⎿ resumed with context intact</span>`);
   toast(`▶ #${t.n} resumed`); S.fid='act:'+t.id+':pause'; render();
 }
+// ⇡ Land: Claude checks the blocker, then one agent lands the kept branch, redoing nothing.
+function landTodo(t){
+  t.status='drafting'; t.confirm=null;
+  chat('claude', `Checking what blocked <b>#${t.n}</b>: ${esc(t.summary||'')}`);
+  later(400, ()=>{
+    if(t.landTries===0){ t.landTries=1; t.status='blocked'; t.summary=`still blocked: ${t.blocker}; branch ${t.branch}`; chat('claude', `⊘ <b>#${t.n}</b> is still blocked: clear it, then ⇡ Land again.`); toast(`⊘ #${t.n} blocked`); S.fid='act:'+t.id+':land'; render(); return; }
+    t.status='running'; chat('tool', `Agent([todo:${t.n}] land ${esc(t.title)})\n<span class="out">  ⎿ running in background · in ${esc(t.branch)}'s kept worktree</span>`); render();
+    later(900, ()=>{ t.status='done'; t.summary=`landed ${t.branch} as one commit`; chat('claude', `✓ <b>#${t.n} ${esc(t.title)}</b> done: ${esc(t.summary)}`); toast(`✓ #${t.n} done`); S.fid='todo:'+t.id; render(); });
+  });
+  toast(`⇡ landing #${t.n}`); render();
+}
 function stopTodo(t){
   t.agents.forEach(a=>{ if(a.status==='running'||a.status==='paused'){ a.status='stopped'; a.calls.forEach(c=>{ if(c.state==='run'||c.state==='paused') c.state='stopped'; }); } });
   t.status='stopped'; t.confirm=null; t.justStopped=true;
@@ -536,6 +550,7 @@ function press(fid){
        refine:()=>{ t.justStopped=false; execTodo(t,true); },
        restart:()=>restartTodo(t),
        resume2:()=>{ t.justStopped=false; resumeTodo(t); },
+       land:()=>landTodo(t),
        leave:()=>{ t.justStopped=false; t.expanded=false; t.subsOpen=false; S.fid='todo:'+t.id; },
        rename:()=>{ t.renaming=true; S.fid='ren:'+t.id; },
        delete:()=>{ t.confirm='delete'; S.fid='act:'+t.id+':cancel'; },
@@ -549,13 +564,13 @@ function press(fid){
 
 /* ---------- pane render ---------- */
 // MARK in hooks/marks.tsx: one symbol and color per status, for rows, header, status line and chips.
-const MARK={prompting:['◔','st-prompting'],pending:['●','st-pending'],drafting:['✎','st-drafting'],planning:['◇','st-planning'],running:['▶','st-running'],paused:['⏸','st-paused'],stopped:['■','st-stopped'],done:['✓','st-done'],failed:['✗','st-failed']};
+const MARK={prompting:['◔','st-prompting'],pending:['●','st-pending'],drafting:['✎','st-drafting'],planning:['◇','st-planning'],running:['▶','st-running'],paused:['⏸','st-paused'],stopped:['■','st-stopped'],done:['✓','st-done'],failed:['✗','st-failed'],blocked:['⊘','st-blocked']};
 function glyph(st){ if(st==='running'||st==='run') return [SPIN[spin],'st-running']; return MARK[st] || ({queued:['◌','faint'],ok:['✓','gr']})[st] || ['?','dim']; }
 // tallySummary(): the header's colored counts, in SUMMARY's order.
-// Views: each status in the header is a toggle for its own rows. Default view: running, prompting, pending, failed, paused, stopped.
+// Views: each status in the header is a toggle for its own rows. Default view: running, prompting, pending, failed, paused, stopped, blocked.
 // drafting and planning count as running (they're the start of a run). Done sorts last when shown.
-const VIEWS=['running','prompting','pending','failed','paused','stopped','done'];
-const DEFAULT_VIEW=['running','prompting','pending','failed','paused','stopped'];
+const VIEWS=['running','prompting','pending','failed','paused','stopped','blocked','done'];
+const DEFAULT_VIEW=['running','prompting','pending','failed','paused','stopped','blocked'];
 const viewOf = st => (st==='drafting'||st==='planning') ? 'running' : st;
 const tallyHtml = c => VIEWS.map(st=>`<span class="${MARK[st][1]}">${MARK[st][0]}${c(st)}</span>`).join(' ');
 function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area==='pane'&&S.fid===fid?'f':''}" data-fid="${fid}">${inner}</span>`; }
@@ -564,7 +579,7 @@ function B(fid, inner, cls='', ind=''){ return `<span class="btn ${cls} ${S.area
 // Details (its own cyan, as it moves no status), 'edit' for Rename, or 'stay'.
 // A chip draws only its symbol (CHIP there); the word is its label, its hover label, and with
 // `does` the todo's hint line while the ring is on it.
-const CHIP={Exec:['▶','run it, picking or writing its prompt first'],Auto:['⚡','run it on its first draft, asking nothing'],Fire:['🔥','auto-run the lowest-numbered pending todo'],Rename:['✎','give the todo a new title'],Refine:['✨','rework its prompt in the chat, then run it'],Restart:['↻','run it again from a fresh start'],Resume:['⏵','pick its run up where it left off'],Pause:['⏸','halt it, keeping its run to resume'],Stop:['■','execution halts; the todo is kept'],Delete:['✕','remove the todo for good'],Takeover:['⇄',"it's marked stopped here; its run in the other session isn't stopped"],Details:['☰','browse its prompt, subtasks and calls'],Reset:['↺','take it back from the chat'],Keep:['↩','leave it as it is'],Cancel:['↩','leave it as it is'],Back:['↩','back to the list'],Leave:['✓','fold it away as it is']};
+const CHIP={Exec:['▶','run it, picking or writing its prompt first'],Auto:['⚡','run it on its first draft, asking nothing'],Fire:['🔥','auto-run the lowest-numbered pending todo'],Rename:['✎','give the todo a new title'],Refine:['✨','rework its prompt in the chat, then run it'],Restart:['↻','run it again from a fresh start'],Resume:['⏵','pick its run up where it left off'],Land:['⇡','retry landing its finished branch'],Pause:['⏸','halt it, keeping its run to resume'],Stop:['■','execution halts; the todo is kept'],Delete:['✕','remove the todo for good'],Takeover:['⇄',"it's marked stopped here; its run in the other session isn't stopped"],Details:['☰','browse its prompt, subtasks and calls'],Reset:['↺','take it back from the chat'],Keep:['↩','leave it as it is'],Cancel:['↩','leave it as it is'],Back:['↩','back to the list'],Leave:['✓','fold it away as it is']};
 const SYM=Object.fromEntries(Object.entries(CHIP).map(([w,[sym]])=>[w,sym]));
 const sentence = l => { const d=CHIP[l][1]; return d[0].toUpperCase()+d.slice(1)+'.'; };
 // The word each drawn act: chip carries, by its fid, for the hint line.
@@ -575,7 +590,7 @@ function actRow(t){
   const a = (k,l,tone) => chipB(`act:${t.id}:${k}`, l, tone, k==='details'?'right':'');
   const det = a('details','Details','details');
   if(t.confirm==='stop') return `<div class="row ind2 confirm">Stop #${t.n}? ${sentence('Stop')} </div><div class="row ind2 confirm">${a('stopyes','Stop','stopped')} ${a('keep','Keep')}</div>`;
-  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"? </div><div class="row ind2 confirm">${a('deleteyes','Delete','danger')} ${a('cancel','Cancel')}</div>`;
+  if(t.confirm==='delete') return `<div class="row ind2 confirm">Delete "#${t.n} ${esc(t.title)}"?${t.status==='blocked'&&t.branch?` Its branch ${esc(t.branch)} stays.`:''} </div><div class="row ind2 confirm">${a('deleteyes','Delete','danger')} ${a('cancel','Cancel')}</div>`;
   switch(t.status){
     // Prompting: nothing may start it yet, so Exec and Auto are left out; Rename and Delete as ever.
     case 'prompting': return `<div class="row ind2">${a('rename','Rename','edit')} ${t.agents.length?'':a('delete','Delete','danger')} ${det}</div>`;
@@ -583,6 +598,8 @@ function actRow(t){
     case 'running': return `<div class="row ind2">${a('pause','Pause','paused')} ${a('stop','Stop','stopped')} ${det}</div>`;
     case 'paused':  return `<div class="row ind2">${a('resume','Resume','running')} ${a('stop','Stop','stopped')} ${det}</div>`;
     case 'stopped': return `<div class="row ind2 ${t.justStopped?'followup':''}">${a('resume2','Resume','running')} ${a('refine','Refine','drafting')} ${a('restart','Restart','drafting')}${t.justStopped?' '+a('leave','Leave'):''} ${det}</div>`;
+    // Finished on its branch, its landing held up outside it: Land retries only the landing; no Resume, Refine or Restart.
+    case 'blocked': return `<div class="row ind2">${a('land','Land','running')} ${a('delete','Delete','danger')} ${det}</div>`;
     case 'done': return `<div class="row ind2">${det}</div>`;
     case 'drafting': return `<div class="row ind2 dim">${t.agents.length ? 'continuing in the chat…' : !t.isAuto ? 'answer the prompt question in the chat…' : t.prompt ? 'starting with the first draft…' : 'drafting the prompt…'}</div>`;
     case 'planning': return `<div class="row ind2 dim">planning in the chat…</div>`;
@@ -687,6 +704,7 @@ function renderPane(){
     if(on) h += `<div class="row ind2 chiphint"><b>${CHIP[on][0]} ${esc(on)}</b><span class="dim">: ${esc(CHIP[on][1])}</span></div>${t.prompt?`<div class="row ind2 dim clamp1">“${esc(t.prompt)}”</div>`:''}`;
     else h += `<div class="row ind2 dim clamp">${t.prompt ? '“'+esc(t.prompt)+'”' : (t.status==='prompting' ? '<i class="st-prompting">no prompt yet: drafting prompts…</i>' : (t.status==='pending' && t.drafts ? '<i>'+t.drafts+' drafts: ▶ Exec asks, ⚡/🔥 take the 1st</i>' : (t.status==='pending' ? '<i>no prompt yet: ▶ Exec drafts one</i>' : (t.status==='drafting'||t.status==='planning' ? '<i>prompt being settled in the chat…</i>' : '<i>prompt not recorded</i>'))))}</div>`;
     if(t.status==='done' && t.summary) h += `<div class="row ind2"><span class="st-done">✓ ${esc(t.summary)}</span></div>`;
+    if(t.status==='blocked' && t.summary) h += `<div class="row ind2"><span class="st-blocked">⊘ ${esc(t.summary)}</span></div>`;
     h += acts;
     if(t.agents.length){
       const calls=t.agents.reduce((n,a)=>n+a.calls.filter(c=>!c.say).length,0);
@@ -732,7 +750,7 @@ function renderPane(){
 }
 function renderStatus(){
   const c = st => S.todos.filter(t=>t.status===st).length;
-  document.getElementById('statusline').innerHTML = `<span class="or">todo</span> ▶${c('running')} ◔${c('prompting')} ●${c('pending')} ✗${c('failed')} ⏸${c('paused')} ■${c('stopped')} ✓${c('done')}${S.ctrlX?` · <span class="ctrlx">${S.ctrlX} … tab</span>`:''}`;
+  document.getElementById('statusline').innerHTML = `<span class="or">todo</span> ▶${c('running')} ◔${c('prompting')} ●${c('pending')} ✗${c('failed')} ⏸${c('paused')} ■${c('stopped')} ⊘${c('blocked')} ✓${c('done')}${S.ctrlX?` · <span class="ctrlx">${S.ctrlX} … tab</span>`:''}`;
   document.getElementById('promptbox').classList.toggle('f', S.area==='prompt');
 }
 function render(){ renderPane(); renderChat(); renderStatus(); if(S.area==='prompt' && !S.view && canFocus()) document.getElementById('prompt').focus(); }
@@ -775,7 +793,7 @@ document.addEventListener('keydown', e => {
     else if(/^\/todo\s+exec\s+auto$/.test(v)){ chat('user',esc(v)); fireNext(); }
     else if(m=v.match(/^\/todo\s+exec\s+#?(\d+)/)){ const t=S.todos.find(x=>x.n===+m[1]); if(t && (t.status==='pending')) { t.expanded=true; execTodo(t,false); } else { chat('user',esc(v)); chat('sys', !t ? `todo: no #${m[1]}` : t.status==='prompting' ? `todo: ${stillPrompting(t)}` : `todo: #${t.n} is ${t.status}`); } }
     else if(/^\/todo\s*(list)?$/.test(v)){ chat('user',esc(v)); chat('sys','todo: pane opened'); focusPane(); }
-    else if(m=v.match(/^\/todo\s+(?!(?:list|show|noshow|add|exec|auto|resume|pause|stop|refine|restart|reset|delete|takeover|rename|leave|details)(?:\s|$))(.+)/)){ chat('user',esc(v)); const n=addTodo(m[1]); chat('sys',`todo: added #${n} ${esc(m[1])}`); render(); }
+    else if(m=v.match(/^\/todo\s+(?!(?:list|show|noshow|add|exec|auto|resume|land|pause|stop|refine|restart|reset|delete|takeover|rename|leave|details)(?:\s|$))(.+)/)){ chat('user',esc(v)); const n=addTodo(m[1]); chat('sys',`todo: added #${n} ${esc(m[1])}`); render(); }
     else { chat('user',esc(v)); chat('sys','(mockup: only /todo commands are simulated)'); }
   }
 });

@@ -76,7 +76,7 @@ A failed run (most often a write the host aborts as the turn it served ends) is 
 
 ## A todo's life
 
-A todo is always in one of nine states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire and ⏵ Resume launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. ☰ Details, a todo's or a subtask's, changes no status either, so it wears a cyan of its own (the `details` tone) and stands apart from the statuses. ✎ Rename wears its own lime `edit` tone, ✕ Delete the red `danger` tone (350°, softer than stopped's pure red), and the other buttons that change no status (✓ Leave, ↩ Keep/Cancel/Back) and ↺ Reset, which only hands the todo back, share the magenta `stay` tone. The colors are raw hex, not theme keys, so they don't follow `/theme`: the theme's keys cluster and have no lighter twin of each. Every status and tone instead takes its own hue, 30° apart round the wheel (stopped a pure red at 0°, done's purple 150° from running's green), but Delete's red, which sits at 350° so it reads as red, not rose, and pending's grey, and each carries a `focus` twin of the same hue, halfway to white. The engine inverts a Button under the focus ring or the pointer, which would swap a chip's fill with its dark text and turn it black, so `statusChip` draws the chip the ring is on, and every chip's `hover` (scoped by its own keyed `tip:` Box, so it lights that chip alone), already inverted in the focused twin: the engine's inversion then changes nothing, and the chip brightens instead. None is grey: grey and dim mean disabled (`GREYS` in `hooks/marks.tsx`), and a test walks every chip in every state to keep it so. A todo's button is drawn only while it can act, so only the header's 🔥 Fire is ever dimmed. While a todo is prompting, ▶ Exec and ⚡ Auto are left out of its row (level 1 says why), and 🔥 Fire is left out of the header while nothing is runnable. When the button the focus ring is on disappears, the ring moves to its todo's header (from Fire, to the header's last toggle).
+A todo is always in one of ten states. `MARK` in `hooks/marks.tsx` gives each one its symbol and color, and every button is filled with the color of the state it leads to, so a button's color tells you where it takes the todo. ▶ Exec, ⚡ Auto, 🔥 Fire, ⏵ Resume and ⇡ Land launch a run, so they wear running's green although the todo passes through drafting on the way; ✨ Refine and ↻ Restart wear drafting's blue, as they draft it again. ☰ Details, a todo's or a subtask's, changes no status either, so it wears a cyan of its own (the `details` tone) and stands apart from the statuses. ✎ Rename wears its own lime `edit` tone, ✕ Delete the red `danger` tone (350°, softer than stopped's pure red), and the other buttons that change no status (✓ Leave, ↩ Keep/Cancel/Back) and ↺ Reset, which only hands the todo back, share the magenta `stay` tone. The colors are raw hex, not theme keys, so they don't follow `/theme`: the theme's keys cluster and have no lighter twin of each. Every status and tone instead takes its own hue, 30° apart round the wheel (stopped a pure red at 0°, done's purple 150° from running's green, blocked's rose the last step at 330°), but Delete's red, which sits at 350° so it reads as red, not rose, and pending's grey, and each carries a `focus` twin of the same hue, halfway to white. The engine inverts a Button under the focus ring or the pointer, which would swap a chip's fill with its dark text and turn it black, so `statusChip` draws the chip the ring is on, and every chip's `hover` (scoped by its own keyed `tip:` Box, so it lights that chip alone), already inverted in the focused twin: the engine's inversion then changes nothing, and the chip brightens instead. None is grey: grey and dim mean disabled (`GREYS` in `hooks/marks.tsx`), and a test walks every chip in every state to keep it so. A todo's button is drawn only while it can act, so only the header's 🔥 Fire is ever dimmed. While a todo is prompting, ▶ Exec and ⚡ Auto are left out of its row (level 1 says why), and 🔥 Fire is left out of the header while nothing is runnable. When the button the focus ring is on disappears, the ring moves to its todo's header (from Fire, to the header's last toggle).
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "20px"}, "state": {"nodeSpacing": 60, "rankSpacing": 70}}}%%
@@ -97,7 +97,11 @@ stateDiagram-v2
   running --> stopped: ■ Stop
   paused --> stopped: ■ Stop
   running --> done: Claude reports landed
-  running --> failed: Claude reports not landed
+  running --> failed: Claude reports the work failed
+  running --> blocked: Claude reports it finished, landing blocked
+  failed --> blocked: Claude reports it finished (asked to)
+  blocked --> drafting: ⇡ Land
+  blocked --> done: Claude reports it landed by hand
 
   stopped --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
   failed --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
@@ -108,13 +112,15 @@ stateDiagram-v2
   planning --> stopped: ↺ Reset (has run)
   drafting --> paused: prompt refused · resume started nothing
   drafting --> failed: prompt refused · resume started nothing
+  drafting --> blocked: prompt refused · land started nothing · resume found it finished
 
   prompting --> [*]: ✕ Delete
   pending --> [*]: ✕ Delete (never ran)
+  blocked --> [*]: ✕ Delete (branch kept)
   done --> [*]: expires
 ```
 
-Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would. Every other chip has a verb of its own name too (`/todo pause 3`, `/todo rename 3 <new title>`; see [Buttons by state](#buttons-by-state)). A dropped prompt (`drafting → paused/failed/pending/stopped`) puts the todo back where it was. A lone Agent's end leaves its todo running: only Claude knows whether the work landed, and reports done or failed.
+Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would. Every other chip has a verb of its own name too (`/todo pause 3`, `/todo rename 3 <new title>`; see [Buttons by state](#buttons-by-state)). `/todo land` is ⇡ Land typed. A dropped prompt (`drafting → paused/failed/blocked/pending/stopped`) puts the todo back where it was. A lone Agent's end leaves its todo running: only Claude knows whether the work landed, and reports done, blocked or failed. Blocked is finished work, not failed work: its checks passed on its branch and only the landing was held up by something outside the todo (files it needs await your review or aren't committed, the base branch has an unpushed commit, a push refused for auth). So it offers no ⏵ Resume, which would launch an agent to redo finished work, nor ✨ Refine or ↻ Restart; ⇡ Land retries only the landing, and ▶ Exec and `/todo resume` refuse it, pointing to `/todo land`. A todo recorded failed before blocked existed stays failed (nothing rewrites it), but its ⏵ Resume first checks whether the work was already finished and, if so, records it blocked instead of relaunching anything; asked to, Claude can also move it to blocked with `mcp__todo__update`.
 
 `hooks/transitions.json` is the one table of the moves a todo may make. Every status write goes through one guard (`editTodos` in `hooks/register.tsx`), which reads the table's mirror in `hooks/transitions.ts` (a hooks module can't import JSON; `node scripts/transitions.mjs` checks the two are identical and `--write` regenerates the mirror). A move the table doesn't allow keeps the old status, says so once, and lets the rest of the write stand; `mcp__todo__update` answers such a move with an error naming the moves that are allowed, and writes nothing. A test drives every move and checks the code makes exactly the table's moves. `node scripts/state-check.mjs` model-checks this diagram against the table with TLA+'s TLC; [state-validation.md](state-validation.md) has why that tool, how to run it, and what it found.
 
@@ -124,11 +130,12 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 | pending | ● | Ready to run: never run (or run, then reset before it started again) | You |
 | drafting | ✎ | Claude is writing or refining the prompt, or resuming | Claude, via `mcp__todo__update` |
 | planning | ◇ | Multi-step: plan-mode questions and the execution tree | Claude |
-| running | ▶ (spins) | An Agent or Workflow is working | Claude's report once it ends (done, failed or stopped); an abort or refusal at once |
+| running | ▶ (spins) | An Agent or Workflow is working | Claude's report once it ends (done, blocked, failed or stopped); an abort or refusal at once |
 | paused | ⏸ | Halted with its run kept, so Resume picks up where it was | You |
 | stopped | ■ | Halted for good; its worktree and branch are kept | You |
 | done | ✓ | Landed (or committed, with no remote) | Expires after the keep period |
-| failed | ✗ | Finished without landing; its worktree and branch are kept | You |
+| failed | ✗ | The work itself failed, or its checks can't pass; its worktree and branch are kept | You |
+| blocked | ⊘ | The work is finished and checked on its branch, but landing it is blocked by something outside the todo; its summary names the blocker and the branch, both kept | You, once the blocker is cleared |
 
 `drafting` and `planning` belong to the chat: the todo leaves them only when Claude reports, or when you press Reset.
 
@@ -144,17 +151,18 @@ Each button is filled with the color of the state it leads to (the launchers in 
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
 | stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ☰ Details, all on one row | drafting · drafting · drafting · collapses it · call browser |
+| blocked | ⇡ Land · ✕ Delete · ☰ Details; level 1 shows `⊘ <what blocks it>`, and Details heads the summary "Landing blocked"; no ⏵ Resume, ✨ Refine or ↻ Restart | drafting (Claude checks the blocker, then one agent lands the kept branch) · confirm (naming the branch, which stays) → removed · call browser |
 | done | ☰ Details | call browser |
 | in flight in another session | ⇄ Takeover · ☰ Details | confirm → stopped here · call browser |
 
-Every chip is also a `/todo` verb of its own name taking `<n|title>` (`/todo rename <n> <new title>` takes the number, then the title): `exec`, `auto`, `rename`, `delete`, `reset`, `pause`, `stop`, `resume`, `refine`, `restart`, `leave`, `takeover`, `details`. The row and the verb read the same `offers()` (`hooks/moves.ts`) and call the same action function, so a verb works exactly where its chip is drawn; anywhere else it answers in one line with the todo's status and the verbs that do apply, and changes nothing. `exec` and `auto` keep their wider reach (a stopped or failed todo too). A verb whose chip asks first (Stop, Delete, Takeover) acts at once, since typing it is already the explicit request, and answers any confirmation the pane had open for that todo. A verb that submits a prompt (refine, restart, as exec and resume) does so from a timer once the command answered; `details` opens the dialog with the pane holding the keys, and Esc goes back.
+Every chip is also a `/todo` verb of its own name taking `<n|title>` (`/todo rename <n> <new title>` takes the number, then the title): `exec`, `auto`, `rename`, `delete`, `reset`, `pause`, `stop`, `resume`, `land`, `refine`, `restart`, `leave`, `takeover`, `details`. The row and the verb read the same `offers()` (`hooks/moves.ts`) and call the same action function, so a verb works exactly where its chip is drawn; anywhere else it answers in one line with the todo's status and the verbs that do apply, and changes nothing. `exec` and `auto` keep their wider reach (a stopped or failed todo too). A verb whose chip asks first (Stop, Delete, Takeover) acts at once, since typing it is already the explicit request, and answers any confirmation the pane had open for that todo. A verb that submits a prompt (land, refine, restart, as exec and resume) does so from a timer once the command answered; `details` opens the dialog with the pane holding the keys, and Esc goes back.
 
 The confirmations:
 
 | Confirm for | Buttons |
 |---|---|
 | Stop | ■ Stop · ↩ Keep (back to running or paused) |
-| Delete | ✕ Delete · ↩ Cancel (back to pending or prompting) |
+| Delete | ✕ Delete · ↩ Cancel (back to pending, prompting or blocked) |
 | Takeover | ⇄ Takeover · ↩ Cancel (left in flight there) |
 
 Pane-wide controls:
@@ -164,7 +172,7 @@ Pane-wide controls:
 | ＋ add todo… | top of the list | adds a pending todo |
 | 🔥 Fire | header | `/todo exec auto` on the lowest-numbered pending todo (prompting ones are skipped); dimmed (disabled, never hidden) while none is pending or the agent cap is full, still a focus stop whose press only toasts why, and filled again once one is runnable |
 | ☰ Details (subtask) | at the right end of each subtask's row, open or closed | opens the call browser; Esc returns to the subtask |
-| status toggles `▶ ◔ ● ✗ ⏸ ■ ✓` · all/none/default | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is every unfinished todo: running, prompting, pending, failed, paused and stopped, so a paused or stopped todo, which ⏵ Resume can pick up, never vanishes; only done is hidden. A view stored before prompting had a toggle shows it wherever it showed pending, and one stored as exactly the old default (running, prompting, pending, failed) reads as the new default, while a view set by hand stays as set; done sorts last when shown. The last toggle cycles default → all → none → default and reads what its next press makes: `all` lights every one, then reads `none`; `none` turns every one off, so the tree shows no todo, then reads `default`, which restores the default. From none, lighting one status shows just that status. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view, except none, which hides them too and moves a ring left on one to the toggle. The view is kept with the pane's layout; the counts and the status line always count the whole list |
+| status toggles `▶ ◔ ● ✗ ⏸ ■ ⊘ ✓` · all/none/default | header, before 🔥 Fire | each shows or hides its state's todos (drafting and planning go with ▶ running), drawn as its mark and count, dimmed and struck through while hidden. The default view is every unfinished todo: running, prompting, pending, failed, paused, stopped and blocked, so a paused or stopped todo, which ⏵ Resume can pick up, and a blocked one, which ⇡ Land can land, never vanish; only done is hidden. A view stored before blocked had a toggle shows blocked wherever it showed failed, one stored before prompting had a toggle shows it wherever it showed pending, and one stored as exactly the old default (running, prompting, pending, failed) reads as the new default, while a view set by hand stays as set; done sorts last when shown. The last toggle cycles default → all → none → default and reads what its next press makes: `all` lights every one, then reads `none`; `none` turns every one off, so the tree shows no todo, then reads `default`, which restores the default. From none, lighting one status shows just that status. A footer counts what the view hides. The todo the ring is on, and one just stopped, stay in the list whatever the view, except none, which hides them too and moves a ring left on one to the toggle. The view is kept with the pane's layout; the counts and the status line always count the whole list |
 
 ## Running a todo
 
@@ -206,12 +214,31 @@ sequenceDiagram
   W->>W: run the project's checks
   W->>O: fetch, rebase onto origin/base, push HEAD:base
   W-->>M: report: branch, commits, checks, landed hash
-  M->>H: mcp__todo__update (done or failed, branch, landed)
+  M->>H: mcp__todo__update (done, blocked or failed, branch, landed)
 ```
 
 Without drafts (the drafter ended with none, couldn't start, or was lost), the protocol has Claude draft 2–3 prompts in the chat. Drafts that arrive after the todo started are kept but change nothing. The drafter's tag is `[todo-drafts:N]`, which the linking hooks skip, so it never becomes the todo's run.
 
 A dropped prompt (the host refusing it, a Stop standing) puts the todo back where it was and says why. An agent stopped outside the pane ends with an aborted turn, which marks its todo stopped and its agent as one that can't be woken. ⏵ Resume then has Claude start a fresh agent in the worktree the old one kept, briefed with its branch and the turns and calls already recorded; it does the same when a Workflow run belongs to another session, or after a takeover.
+
+```mermaid
+sequenceDiagram
+  actor U as You
+  participant H as Hooks module
+  participant M as Claude
+  participant W as Land agent (kept worktree)
+  U->>H: ⇡ Land on a blocked todo
+  H->>M: land protocol: the blocker (its summary), its branch, the kept worktrees
+  M->>M: check the blocker, changing nothing
+  alt still blocked
+    M->>H: mcp__todo__update (blocked, "still blocked: …")
+  else cleared
+    M->>W: Agent "[todo:N] land …" (no isolation)
+    W->>W: already on origin/base? report its hash · else squash, rebase, re-check
+    W-->>M: landed, still blocked, or failed
+    M->>H: mcp__todo__update (done, blocked or failed)
+  end
+```
 
 ## Parallel todos meet at the push
 
@@ -219,7 +246,9 @@ Each todo works on its own branch and never touches your checkout. Two todos tha
 
 ```mermaid
 flowchart TD
-  C["Checks pass on the todo's branch"] --> S["git fetch · squash the branch<br/>into one commit (Todo: #N)"]
+  C["Checks pass on the todo's branch"] --> B{"Landing blocked outside the todo?<br/>files awaiting review · unpushed base"}
+  B -- yes --> BL["push nothing · todo blocked,<br/>branch kept for ⇡ Land"]
+  B -- no --> S["git fetch · squash the branch<br/>into one commit (Todo: #N)"]
   S --> F["git rebase origin/base"]
   F --> X{Conflict?}
   X -- no --> V["Run every check again on that commit;<br/>fixes amend it"]
@@ -230,6 +259,7 @@ flowchart TD
   V --> P["git push origin HEAD:base"]
   P --> J{Rejected?}
   J -- "yes: another todo landed first" --> G["git fetch"] --> F
+  J -- "refused: auth or a hook" --> BL
   J -- no --> D["Done: worktree and branch removed"]
 ```
 

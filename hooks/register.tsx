@@ -8,7 +8,7 @@ import { imageRefs, splitImages, thumbnail } from './images'
 import { DEFAULT_VIEW, OLD_DEFAULT_VIEW, SUMMARY, statusToast, tallyText } from './marks'
 import { type Chip, INFLIGHT, canMove, canResume, isOwnedElsewhere, moveRefusal, offers } from './moves'
 import { drawPane, focusOrder, listWindow, rehome, showRow } from './pane'
-import { draftsPrompt, execPrompt, restartPrompt, resumePrompt } from './protocol'
+import { draftsPrompt, execPrompt, landPrompt, restartPrompt, resumePrompt } from './protocol'
 
 export const PANE = 'todo'
 
@@ -50,10 +50,10 @@ const thumbs = atom({ plugin: 'todo', key: 'thumbs' } as const, {} as Record<str
 // The pane's layout, kept across reloads and sessions: what's open, a pending
 // confirmation, the view the header toggles. The views are optional, so the
 // tag stays: what an earlier version stored (without them) reads as the
-// default, or as its `views` or `view` from before (see viewIn).
+// default, or as its `shown`, `views` or `view` from before (see viewIn).
 const ui = atom(
   { plugin: 'todo', key: 'ui' } as const,
-  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, shown: [...DEFAULT_VIEW] },
+  { expanded: [], confirm: null, renaming: null, justStopped: [], isHidden: false, filter: [...DEFAULT_VIEW] },
   { shape: 'ui-2' },
 )
 // Whether the pane draws its hover labels. $.store's `tooltips` keeps the
@@ -631,17 +631,22 @@ export async function toggle($: $, id: string) {
 // turns every view off; pressed then (it reads `default`), it puts the
 // default view back. From any other view it reads `all`. Kept in SUMMARY's
 // order, so the stored view reads the same way.
-// The view is stored as `shown`. One stored as `views`, before paused and
-// stopped joined the default, reads as today's default when it is exactly the
-// old one (nobody picked it by hand) and as itself otherwise. A view stored
-// as `view`, before prompting had its own toggle, shows prompting todos
-// wherever it showed pending ones, as they were pending then. A toggle writes
-// `shown` and drops both older fields.
+// The view is stored as `filter`. Every older field predates blocked's
+// toggle, so it shows blocked todos wherever it showed failed ones, where
+// they were recorded then. One stored as `shown` reads that way. One stored as
+// `views`, before paused and stopped joined the default, reads as today's
+// default when it is exactly the old one (nobody picked it by hand) and as
+// itself otherwise. A view stored as `view`, before prompting had its own
+// toggle, also shows prompting todos wherever it showed pending ones, as they
+// were pending then. A toggle writes `filter` and drops every older field.
 const isOldDefault = (vs: readonly View[]) => vs.length === OLD_DEFAULT_VIEW.length && OLD_DEFAULT_VIEW.every(v => vs.includes(v))
+const olderView = (vs: readonly View[], was: (v: View) => View = v => v) =>
+  SUMMARY.filter(v => vs.includes(v === 'blocked' ? 'failed' : was(v)))
 export const viewIn = (u: PaneUi): readonly View[] => {
-  if (u.shown) return u.shown
-  if (u.views) return isOldDefault(u.views) ? DEFAULT_VIEW : u.views
-  return u.view ? SUMMARY.filter(v => u.view?.includes(v === 'prompting' ? 'pending' : v)) : DEFAULT_VIEW
+  if (u.filter) return u.filter
+  if (u.shown) return olderView(u.shown)
+  if (u.views) return isOldDefault(u.views) ? DEFAULT_VIEW : olderView(u.views)
+  return u.view ? olderView(u.view, v => (v === 'prompting' ? 'pending' : v)) : DEFAULT_VIEW
 }
 
 export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
@@ -653,7 +658,7 @@ export const nextView = (view: readonly View[], v: View | 'all'): View[] => {
 }
 
 export async function toggleView($: $, v: View | 'all') {
-  await patchUi($, u => assign(u, { shown: nextView(viewIn(u), v), views: undefined, view: undefined }))
+  await patchUi($, u => assign(u, { filter: nextView(viewIn(u), v), shown: undefined, views: undefined, view: undefined }))
 }
 
 // How an action was asked for. A chip's press moves the pane's ring and
@@ -696,12 +701,13 @@ export const VERBS: readonly { verb: string; also?: readonly string[]; use: stri
   { verb: 'exec', use: '/todo exec [auto] <n|title>', means: 'run a todo; auto asks nothing' },
   { verb: 'auto', use: '/todo auto [<n|title>]', means: 'exec auto, by default the next pending' },
   { verb: 'resume', use: '/todo resume <n|title>', means: 'pick a paused or stopped todo up' },
+  { verb: 'land', use: '/todo land <n|title>', means: "retry landing a blocked todo's branch" },
   { verb: 'pause', use: '/todo pause <n|title>', means: 'pause a running todo' },
   { verb: 'stop', use: '/todo stop <n|title>', means: 'stop a todo and keep it' },
   { verb: 'refine', use: '/todo refine <n|title>', means: 'pick a new prompt, then restart' },
   { verb: 'restart', use: '/todo restart <n|title>', means: 'run again with the same prompt' },
   { verb: 'reset', use: '/todo reset <n|title>', means: 'put a stuck todo back to pending or stopped' },
-  { verb: 'delete', use: '/todo delete <n|title>', means: 'remove a todo that never ran' },
+  { verb: 'delete', use: '/todo delete <n|title>', means: 'remove a todo that never ran, or a blocked one' },
   { verb: 'takeover', use: '/todo takeover <n|title>', means: "take another session's todo over" },
   { verb: 'rename', use: '/todo rename <n> <new title>', means: 'retitle a todo, drafting again' },
   { verb: 'leave', use: '/todo leave <n|title>', means: 'leave a just-stopped todo as it is' },
@@ -977,6 +983,10 @@ async function flushQueued($: $) {
 
 const RUNNABLE = new Set<Todo['status']>(['pending', 'stopped', 'failed'])
 
+// What anything that would run a blocked todo again says instead: its work
+// is finished, and only ⇡ Land, which retries the landing, applies.
+const blockedNote = (t: Todo) => `#${t.n} is blocked: its work is finished and only its landing is held up; /todo land ${t.n} retries it.`
+
 // What ▶ Exec can start: a todo at rest, or one paused before it ever ran
 // (paused for a new session, say), which has no run to resume.
 const isRunnable = (t: Todo) => RUNNABLE.has(t.status) || (t.status === 'paused' && !t.hasRun)
@@ -992,6 +1002,8 @@ function resumeRefusal(t: Todo) {
       return `${at} with nothing to resume: /todo exec ${t.n}`
     case 'done':
       return `${at}: nothing to resume.`
+    case 'blocked':
+      return blockedNote(t)
     case 'prompting':
       return stillPrompting(t.n)
     default:
@@ -1006,7 +1018,7 @@ export const USAGE = `Usage: ${VERBS.map(v => v.use).join(' · ')}`
 // The chips with a /todo verb of their own name beyond exec, auto and resume,
 // which have theirs above. Each acts through the function its chip calls,
 // once offers() (moves.ts) says the todo's row offers that chip.
-const CHIP_VERBS: readonly Chip[] = ['pause', 'stop', 'refine', 'restart', 'reset', 'delete', 'takeover', 'rename', 'leave', 'details']
+const CHIP_VERBS: readonly Chip[] = ['pause', 'stop', 'land', 'refine', 'restart', 'reset', 'delete', 'takeover', 'rename', 'leave', 'details']
 const isChipVerb = (v: string): v is Chip => (CHIP_VERBS as readonly string[]).includes(v)
 
 // Why `verb` can't take `t`: the chip isn't on its row now. `on` is what the
@@ -1051,6 +1063,9 @@ async function chipCommand($: $, verb: Chip, words: readonly string[]) {
       return haltTodo($, t, 'paused', 'command')
     case 'stop':
       return haltTodo($, t, 'stopped', 'command')
+    case 'land':
+      later(now => landTodo($, now))
+      return `Landing #${t.n} ${t.title}: Claude retries landing its branch in the chat.`
     case 'refine':
       later(now => execTodo($, now, true))
       return `Refining #${t.n} ${t.title}: answer the prompt question in the chat.`
@@ -1130,7 +1145,13 @@ const execNote = (t: Todo, auto: boolean) =>
 // Why `t` can't be executed now, or undefined when it can. A prompting todo
 // waits for its drafter, whatever asked (▶ Exec, ⚡ Auto, 🔥 Fire, /todo exec).
 const execBlock = (t: Todo, refine: boolean) =>
-  t.status === 'prompting' ? stillPrompting(t.n) : !refine && !isRunnable(t) ? `#${t.n} is ${t.status}.` : undefined
+  t.status === 'prompting'
+    ? stillPrompting(t.n)
+    : t.status === 'blocked'
+      ? blockedNote(t)
+      : !refine && !isRunnable(t)
+        ? `#${t.n} is ${t.status}.`
+        : undefined
 
 // `auto` skips every question: Claude picks the prompt and, for multi-step
 // work, plans on defaults and runs it without plan-mode approval.
@@ -1255,6 +1276,11 @@ export async function resumeTodo($: $, t: Todo, via: Via = 'chip') {
     $.ui.toast(`#${t.n} is ${t.status} in another session.`)
     return
   }
+  // Finished work is never relaunched: ⇡ Land retries its landing instead.
+  if (t.status === 'blocked') {
+    $.ui.toast(blockedNote(t))
+    return
+  }
   if (!canMove(t.status, 'drafting')) {
     $.ui.toast(moveRefusal(t.n, t.status, 'drafting'))
     return
@@ -1277,6 +1303,26 @@ export async function resumeTodo($: $, t: Todo, via: Via = 'chip') {
   if ((await submit($, t, resumePrompt(t, ctx))) !== undefined) return
   if (via === 'chip') await focus($, `todo:${t.n}`)
   $.ui.toast(`▶ resuming #${t.n}`)
+}
+
+// ⇡ Land: a blocked todo's work is finished on its branch, and only its
+// landing was held up. Claude checks the blocker and, once it's cleared, has
+// one agent land the kept branch; nothing is redone. Like a resume, the todo
+// turns running only once Claude reports the agent is going, and a land that
+// starts nothing goes back to blocked.
+export async function landTodo($: $, t: Todo, via: Via = 'chip') {
+  if (await isForeign($, t)) {
+    $.ui.toast(`#${t.n} is ${t.status} in another session.`)
+    return
+  }
+  if (t.status !== 'blocked') {
+    $.ui.toast(`#${t.n} is ${t.status}: only a blocked todo has a landing to retry.`)
+    return
+  }
+  if ((await patchTodo($, t.n, x => ({ ...x, status: 'drafting' }))) !== undefined) return
+  if ((await submit($, t, landPrompt(t, await keptWork($, t)))) !== undefined) return
+  if (via === 'chip') await focus($, `todo:${t.n}`)
+  $.ui.toast(`⇡ landing #${t.n}`)
 }
 
 // Claims a todo another session put in flight. Its task there isn't stopped
@@ -1532,20 +1578,20 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'todo',
       description:
-        'Per-directory todos: /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume|pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title> · /todo show · /todo noshow · /todo help',
+        'Per-directory todos: /todo [add] <title> · /todo exec [auto] <n|title> · /todo auto [<n|title>] · /todo resume|land|pause|stop|refine|restart|reset|delete|takeover|leave|details <n|title> · /todo rename <n> <new title> · /todo show · /todo noshow · /todo help',
     })
     await $.tool.register({
       name: 'update',
       description:
-        'Report a todo-pane todo change: its final prompt, mode, status, or one-line summary. Called by the [todo] exec/resume protocol.',
+        'Report a todo-pane todo change: its final prompt, mode, status, or one-line summary. Called by the [todo] exec/resume/land protocol. Status "done" only once the work landed; "blocked" when the work is complete and checked on its branch but landing it is blocked by something outside the todo (summary: the blocker and the branch; its worktree and branch are kept for Land); "failed" only when the work itself failed or its checks cannot pass; "stopped" when it was stopped.',
       inputSchema: {
         type: 'object',
         properties: {
           n: { type: 'integer', description: 'Todo number' },
-          status: { type: 'string', enum: ['pending', 'drafting', 'planning', 'running', 'paused', 'stopped', 'done', 'failed'] },
+          status: { type: 'string', enum: ['pending', 'drafting', 'planning', 'running', 'paused', 'stopped', 'done', 'failed', 'blocked'] },
           prompt: { type: 'string' },
           mode: { type: 'string', enum: ['agent', 'workflow'] },
-          summary: { type: 'string', description: 'One line, for done/failed' },
+          summary: { type: 'string', description: 'One line, for done/failed/blocked: for blocked, what blocks the landing and the branch' },
           branch: { type: 'string', description: "The todo's git branch" },
           landed: { type: 'string', description: 'The commit hash it pushed to the base branch' },
         },
@@ -1714,7 +1760,7 @@ export const register: Register = (on, options) => {
     }))
     // Moved meanwhile (another session's write) to where the move isn't allowed.
     if (held !== undefined) return { result: held, isError: true as const }
-    if (a.status === 'done' || a.status === 'failed') $.ui.toast(statusToast(t.n, a.status))
+    if (a.status === 'done' || a.status === 'failed' || a.status === 'blocked') $.ui.toast(statusToast(t.n, a.status))
     const now = (await read($, todos)).find(x => x.n === t.n)
     return { result: `#${t.n} ${now?.title ?? t.title}: ${now?.status ?? t.status}` }
   }).catch(toolFailed)

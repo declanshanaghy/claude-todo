@@ -19,7 +19,21 @@ export const canResume = (t: Todo) =>
   t.status === 'paused' || ((t.status === 'stopped' || t.status === 'failed') && (t.taskId !== undefined || t.isAgentGone === true))
 
 // A todo row's action chips, each a /todo verb of the same name.
-export type Chip = 'exec' | 'auto' | 'rename' | 'delete' | 'reset' | 'pause' | 'stop' | 'resume' | 'refine' | 'restart' | 'leave' | 'takeover' | 'details'
+export type Chip =
+  | 'exec'
+  | 'auto'
+  | 'rename'
+  | 'delete'
+  | 'reset'
+  | 'pause'
+  | 'stop'
+  | 'resume'
+  | 'land'
+  | 'refine'
+  | 'restart'
+  | 'leave'
+  | 'takeover'
+  | 'details'
 
 // The chips a todo's row offers, in the row's order: carry on, start over,
 // put away or destroy, Details last. `justStopped` are the todos stopped
@@ -49,6 +63,10 @@ export function offers(t: Todo, me: string, justStopped: readonly number[]): Chi
         ...(justStopped.includes(t.n) ? (['leave'] as const) : []),
         'details',
       ]
+    case 'blocked':
+      // Its work is finished: nothing to resume or redo, only its landing to
+      // retry, or the todo to drop (its branch stays either way).
+      return ['land', 'delete', 'details']
     case 'done':
       return ['details']
   }

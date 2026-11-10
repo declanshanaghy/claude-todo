@@ -8,6 +8,9 @@ export type TodoStatus =
   | 'stopped'
   | 'done'
   | 'failed'
+  // Its work is complete and checked on its branch, but landing it is
+  // blocked by something outside the todo: ⇡ Land retries the landing.
+  | 'blocked'
 
 export type Todo = {
   n: number
@@ -127,6 +130,9 @@ export type PaneUi = {
   isHidden: boolean
   // The statuses the list shows, toggled in the header; absent (stored by an
   // earlier version), the default view.
+  filter?: View[]
+  // What `filter` was before blocked had a toggle: it shows blocked todos
+  // wherever it showed failed ones. Read until a toggle drops it.
   shown?: View[]
   // What `shown` was before paused and stopped joined the default view (the
   // old default exactly reads as the new one): read until a toggle drops it.

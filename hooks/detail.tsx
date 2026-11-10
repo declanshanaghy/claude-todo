@@ -341,7 +341,8 @@ export function drawDetail($: EngineInterface, e: RenderInput<'Pane'>, data: Det
         {heading('Prompt')}
         <Text wrap="wrap">{t.prompt ?? '(none yet: chosen when you exec it)'}</Text>
 
-        {t.summary ? heading('Summary') : ''}
+        {/* A blocked todo's summary is what holds its landing up. */}
+        {t.summary ? heading(t.status === 'blocked' ? 'Landing blocked' : 'Summary') : ''}
         {t.summary ? <Text wrap="wrap">{t.summary}</Text> : ''}
 
         {t.taskId || t.runId || t.branch ? heading('Run') : ''}

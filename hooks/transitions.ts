@@ -59,6 +59,12 @@ export const TABLE: { about: string; transitions: Move[] } = {
       "at": "register.tsx resumeTodo, execTodo"
     },
     {
+      "from": "blocked",
+      "to": "drafting",
+      "by": "⇡ Land · /todo land",
+      "at": "register.tsx landTodo"
+    },
+    {
       "from": "drafting",
       "to": "planning",
       "by": "Claude reports multi-step",
@@ -68,7 +74,7 @@ export const TABLE: { about: string; transitions: Move[] } = {
       "from": "drafting",
       "to": "running",
       "by": "Claude reports simple or resumed / Agent launched",
-      "at": "protocol.ts step 4, resume step 3; register.tsx tool.call (Agent)"
+      "at": "protocol.ts step 4, resume step 4, land step 3; register.tsx tool.call (Agent)"
     },
     {
       "from": "planning",
@@ -103,8 +109,26 @@ export const TABLE: { about: string; transitions: Move[] } = {
     {
       "from": "running",
       "to": "failed",
-      "by": "lone agent refused / Claude reports not landed",
+      "by": "lone agent refused / Claude reports the work failed",
       "at": "register.tsx turn.complete; protocol.ts step 6"
+    },
+    {
+      "from": "running",
+      "to": "blocked",
+      "by": "Claude reports the work finished but its landing blocked",
+      "at": "protocol.ts step 6, resume step 5, land step 4"
+    },
+    {
+      "from": "failed",
+      "to": "blocked",
+      "by": "Claude reports a failed todo's work was finished, only its landing blocked (asked to)",
+      "at": "mcp__todo__update"
+    },
+    {
+      "from": "blocked",
+      "to": "done",
+      "by": "Claude reports it landed outside the todo",
+      "at": "mcp__todo__update"
     },
     {
       "from": "drafting",
@@ -122,7 +146,7 @@ export const TABLE: { about: string; transitions: Move[] } = {
       "from": "drafting",
       "to": "stopped",
       "by": "↺ Reset · /todo reset (has run) · ⇄ Takeover · prompt refused · resume started nothing",
-      "at": "register.tsx resetTodo, takeOver, submit; protocol.ts resume step 3"
+      "at": "register.tsx resetTodo, takeOver, submit; protocol.ts resume step 4"
     },
     {
       "from": "planning",
@@ -134,13 +158,19 @@ export const TABLE: { about: string; transitions: Move[] } = {
       "from": "drafting",
       "to": "failed",
       "by": "prompt refused · resume started nothing",
-      "at": "register.tsx submit; protocol.ts resume step 3"
+      "at": "register.tsx submit; protocol.ts resume step 4"
     },
     {
       "from": "drafting",
       "to": "paused",
       "by": "prompt refused · resume started nothing",
-      "at": "register.tsx submit; protocol.ts resume step 3"
+      "at": "register.tsx submit; protocol.ts resume step 4"
+    },
+    {
+      "from": "drafting",
+      "to": "blocked",
+      "by": "prompt refused · land started nothing · resume found the work finished",
+      "at": "register.tsx submit; protocol.ts land steps 2 and 3, resume step 1"
     },
     {
       "from": "prompting",
@@ -152,6 +182,12 @@ export const TABLE: { about: string; transitions: Move[] } = {
       "from": "pending",
       "to": "[*]",
       "by": "✕ Delete · /todo delete (never ran)",
+      "at": "register.tsx deleteTodo"
+    },
+    {
+      "from": "blocked",
+      "to": "[*]",
+      "by": "✕ Delete · /todo delete (its branch is kept)",
       "at": "register.tsx deleteTodo"
     },
     {

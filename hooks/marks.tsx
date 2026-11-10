@@ -12,7 +12,7 @@ import type { Todo, TodoStatus, View } from '../types'
 // The colors are raw hex, not theme keys: the theme's keys cluster (three
 // greens, two reds) and have no lighter twin of each, so the hues couldn't be
 // spread evenly. So the statuses and the chip tones below sit 30° apart round
-// the color wheel, from stopped's 0° to the magenta's 300°, every one at 85%
+// the color wheel, from stopped's 0° to blocked's 330°, every one at 85%
 // saturation and 64% lightness but stopped, a pure red. Delete's red is the
 // one off the 30° grid: 350°, so it reads as red rather than the rose 330°
 // would give, yet stays apart from stopped's pure red. A raw hex color is a Color the engine paints as is. `focus` is
@@ -42,6 +42,11 @@ export const MARK: Record<TodoStatus, Mark> = {
   // row never reads as a running one. 270°.
   done: { symbol: '✓', color: '#a355f1', focus: '#d1aaf8' },
   failed: { symbol: '✗', color: '#f1a355', focus: '#f8d1aa' }, // 30°
+  // Finished and checked on its branch, its landing held up by something
+  // outside the todo (a review, a push it can't make): a rose, the wheel's
+  // last free 30° step, apart from failed's orange so finished work never
+  // reads as broken. 330°.
+  blocked: { symbol: '⊘', color: '#f155a3', focus: '#f8aad1' },
 }
 
 // Claude Code's own spinner, which a running row draws in place of ▶.
@@ -70,13 +75,13 @@ export function markText(s: TodoStatus, rest = '', f?: number): [string, Color] 
 // same, and their counts add up to the whole list.
 export type { View }
 
-export const SUMMARY: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'done']
+export const SUMMARY: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'blocked', 'done']
 
 // What a fresh pane shows: every unfinished todo, the work that's live or
 // waiting on you (a todo still being prompted included) and the interrupted
-// work ⏵ Resume can pick up, so a pause or a stop never makes one vanish.
-// Done todos are a toggle away.
-export const DEFAULT_VIEW: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped']
+// work ⏵ Resume can pick up, so a pause or a stop never makes one vanish,
+// and the finished work ⇡ Land has yet to land. Done todos are a toggle away.
+export const DEFAULT_VIEW: readonly View[] = ['running', 'prompting', 'pending', 'failed', 'paused', 'stopped', 'blocked']
 
 // The default view before paused and stopped joined it. A view stored as
 // exactly this was never chosen by hand, so it reads as today's default.
@@ -187,6 +192,7 @@ export const CHIP: Readonly<Record<string, { symbol: string; does: string }>> = 
   Refine: { symbol: '✨', does: 'rework its prompt in the chat, then run it' },
   Restart: { symbol: '↻', does: 'run it again from a fresh start' },
   Resume: { symbol: '⏵', does: 'pick its run up where it left off' },
+  Land: { symbol: '⇡', does: 'retry landing its finished branch' },
   Pause: { symbol: '⏸', does: 'halt it, keeping its run to resume' },
   Stop: { symbol: '■', does: 'execution halts; the todo is kept' },
   Delete: { symbol: '✕', does: 'remove the todo for good' },
