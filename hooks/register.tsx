@@ -1153,6 +1153,22 @@ const execBlock = (t: Todo, refine: boolean) =>
         ? `#${t.n} is ${t.status}.`
         : undefined
 
+// /todo exec and mcp__todo__exec: refuses what can't run now (a prompting
+// todo waits for its drafts, as everywhere), else starts the exec. A hook's
+// own submit would wait on the turn it holds (the command's, or the tool
+// call's), so the exec starts from a timer once the hook answered.
+function queueExec($: $, t: Todo, auto: boolean): { text: string; isQueued: boolean } {
+  const why = execBlock(t, false)
+  if (why !== undefined) return { text: why, isQueued: false }
+  $.clock.after(0, () => {
+    void (async () => {
+      const now = (await read($, todos)).find(x => x.n === t.n)
+      if (now) await execTodo($, now, false, auto)
+    })()
+  })
+  return { text: execNote(t, auto), isQueued: true }
+}
+
 // `auto` skips every question: Claude picks the prompt and, for multi-step
 // work, plans on defaults and runs it without plan-mode approval.
 export async function execTodo($: $, t: Todo, refine: boolean, auto = false) {
@@ -1626,6 +1642,42 @@ export const register: Register = (on, options) => {
       isDeferred: false,
     })
     await $.tool.register({
+      name: 'add',
+      description:
+        "Add a todo to this repo's todo-pane backlog (the home directory's outside a repo). Its prompt drafts are written in the background; it can be executed once they are in. Answers the new todo's number and title.",
+      inputSchema: {
+        type: 'object',
+        properties: { title: { type: 'string', description: 'What the todo is, in a few words' } },
+        required: ['title'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'delete',
+      description:
+        'Delete a todo-pane todo that never ran (pending or still prompting), or a blocked one (its branch is kept). Any other todo is refused, naming what applies to it.',
+      inputSchema: {
+        type: 'object',
+        properties: { n: { type: 'integer', description: 'Todo number' } },
+        required: ['n'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'exec',
+      description:
+        'Fire off a todo-pane todo: queue its exec, which starts once this turn ends. auto (default true) takes its first drafted prompt and runs it with no questions, as ⚡ Auto does; auto false asks the prompt question in the chat, as ▶ Exec does. A todo still prompting (drafts not in yet), in flight, blocked or done is refused with why; retry a prompting one once mcp__todo__list shows it pending.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          n: { type: 'integer', description: 'Todo number' },
+          auto: { type: 'boolean', description: 'Take the first draft and run it without asking (default true)' },
+        },
+        required: ['n'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
       name: 'list',
       description: "List this repo's todos, or the home directory's outside a repo (number, title, status, prompt, summary).",
       inputSchema: { type: 'object', properties: {} },
@@ -1697,17 +1749,7 @@ export const register: Register = (on, options) => {
       if (!auto && target === '') return { text: 'Usage: /todo exec [auto] <n|title>' }
       const t = auto && target === '' ? nextRunnable(await read($, todos)) : await findTodo($, target)
       if (!t) return { text: auto && target === '' ? noneRunnable(await read($, todos)) : `No todo matches "${target}".` }
-      const why = execBlock(t, false)
-      if (why !== undefined) return { text: why }
-      // A command's own hook can't submit a prompt (it would wait on the turn
-      // the command holds), so the exec starts from a timer once it answered.
-      $.clock.after(0, () => {
-        void (async () => {
-          const now = (await read($, todos)).find(x => x.n === t.n)
-          if (now) await execTodo($, now, false, auto)
-        })()
-      })
-      return { text: execNote(t, auto) }
+      return { text: queueExec($, t, auto).text }
     }
     if (verb === 'resume') {
       // What the pane's ⏵ Resume does, for the todos it is offered on.
@@ -1773,6 +1815,35 @@ export const register: Register = (on, options) => {
   on('agent.offer', async ($, e, next) => (e.agent === (await read($, drafterType)) && e.agent !== 'Explore' ? { isOffered: false } : next(e))).catch(
     (_, e, next) => next(e),
   )
+
+  on('tool.call', { tool: 'mcp__todo__add' as never }, async ($, e) => {
+    const { title } = argsOf(e) as { title?: unknown }
+    const clean = typeof title === 'string' ? title.trim() : ''
+    const n = await addTodo($, clean)
+    if (n === undefined) return { result: 'Not added: the title is empty.', isError: true as const }
+    if (n === null) return { result: 'Not added: the todo list could not be saved.', isError: true as const }
+    return { result: `Added #${n} ${clean}` }
+  }).catch(toolFailed)
+
+  // The chip's and the command's rule: only a todo whose row offers ✕ Delete.
+  on('tool.call', { tool: 'mcp__todo__delete' as never }, async ($, e) => {
+    const { n } = argsOf(e) as { n?: number }
+    const t = (await read($, todos)).find(x => x.n === n)
+    if (!t) return { result: `No todo #${n}.`, isError: true as const }
+    const can = offers(t, await $.session.id(), (await read($, ui)).justStopped)
+    if (!can.includes('delete')) return { result: chipRefusal(t, 'delete', can), isError: true as const }
+    const said = await deleteTodo($, t, 'command')
+    return said.startsWith('✕') ? { result: said } : { result: `#${t.n} not deleted: ${said}`, isError: true as const }
+  }).catch(toolFailed)
+
+  // /todo exec [auto] <n>, from the model: the same check and the same timer.
+  on('tool.call', { tool: 'mcp__todo__exec' as never }, async ($, e) => {
+    const { n, auto } = argsOf(e) as { n?: number; auto?: boolean }
+    const t = (await read($, todos)).find(x => x.n === n)
+    if (!t) return { result: `No todo #${n}.`, isError: true as const }
+    const { text, isQueued } = queueExec($, t, auto !== false)
+    return isQueued ? { result: `Queued: ${text} It starts once this turn ends.` } : { result: text, isError: true as const }
+  }).catch(toolFailed)
 
   on('tool.call', { tool: 'mcp__todo__list' as never }, async $ => {
     const list = await read($, todos)

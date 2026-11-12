@@ -2365,6 +2365,66 @@ test('mcp__todo__update reports a change and mcp__todo__list reads the backlog',
   expect(JSON.parse(String(listed.result))).toEqual([{ n: 1, title: 'Count md files', status: 'done', prompt: 'count them', summary: '12 files', mode: 'agent' }])
 })
 
+test('mcp__todo__add adds a todo and answers its number; an empty title answers as an error', async ($, on) => {
+  const { db } = engine(on, [], undefined, true)
+  await start($)
+  const r = await $.tool.call({ tool: 'mcp__todo__add', title: '  Count md files ' } as never)
+  expect(r).toMatchObject({ result: 'Added #1 Count md files' })
+  expect(r.isError).toBeFalsy()
+  expect(todoAt(db, 1)).toMatchObject({ title: 'Count md files', hasRun: false })
+  const empty = await $.tool.call({ tool: 'mcp__todo__add', title: '   ' } as never)
+  expect(empty).toMatchObject({ result: 'Not added: the title is empty.', isError: true })
+  const missing = await $.tool.call({ tool: 'mcp__todo__add' } as never)
+  expect(missing).toMatchObject({ isError: true })
+})
+
+test('mcp__todo__delete removes a todo that never ran and refuses one that ran, as the chip and the command do', async ($, on) => {
+  const db = seeded([aTodo(1, 'Never ran'), aTodo(2, 'Ran once', { status: 'stopped', hasRun: true, prompt: 'p' })])
+  engine(on, [], undefined, true, { db })
+  await start($)
+  expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 1 } as never)).toMatchObject({ result: '✕ #1 deleted' })
+  expect(db.todos['/proj']?.[1]).toBeUndefined()
+  const listed = await $.tool.call({ tool: 'mcp__todo__list' } as never)
+  expect((JSON.parse(String(listed.result)) as { n: number }[]).map(t => t.n)).toEqual([2])
+  const ran = await $.tool.call({ tool: 'mcp__todo__delete', n: 2 } as never)
+  expect(ran).toMatchObject({ isError: true })
+  expect(String(ran.result)).toBe((await todo($, 'delete 2')).text)
+  expect(todoAt(db, 2).status).toBe('stopped')
+  expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 9 } as never)).toMatchObject({ result: 'No todo #9.', isError: true })
+})
+
+test('mcp__todo__exec queues an auto exec from a timer, as /todo exec auto does, and refuses what /todo exec refuses', async ($, on) => {
+  const submitted: string[] = []
+  const db = seeded([
+    aTodo(1, 'Count md files', { drafts: DRAFTS }),
+    aTodo(2, 'Still drafting', { status: 'prompting' }),
+    aTodo(3, 'Fix kitty tab titles'),
+  ])
+  engine(on, submitted, undefined, false, { db })
+  const clock = mock.clock(on, { now: 1000 })
+  await start($)
+  const r = await $.tool.call({ tool: 'mcp__todo__exec', n: 1 } as never)
+  expect(r.isError).toBeFalsy()
+  expect(String(r.result)).toMatch(/^Queued: Auto-executing #1 Count md files: Claude takes the best drafted prompt/)
+  // Nothing submitted inside the tool's own hook: the exec waits on a timer.
+  expect(submitted).toHaveLength(0)
+  await clock.settle()
+  expect(submitted.at(-1)).toContain('Execute todo #1 "Count md files" in auto mode')
+  expect(todoAt(db, 1)).toMatchObject({ status: 'drafting', isAuto: true, prompt: DRAFTS[0]?.prompt })
+  // auto false is ▶ Exec: Claude asks the prompt question.
+  expect(String((await $.tool.call({ tool: 'mcp__todo__exec', n: 3, auto: false } as never)).result)).toContain('Executing #3')
+  await clock.settle()
+  expect(todoAt(db, 3)).toMatchObject({ status: 'drafting', isAuto: false })
+  expect(submitted).toHaveLength(2)
+  // Refused as /todo exec refuses: still prompting, already in flight, unknown.
+  expect(await $.tool.call({ tool: 'mcp__todo__exec', n: 2 } as never)).toMatchObject({ result: (await todo($, 'exec auto 2')).text, isError: true })
+  expect(await $.tool.call({ tool: 'mcp__todo__exec', n: 1 } as never)).toMatchObject({ result: '#1 is drafting.', isError: true })
+  expect(await $.tool.call({ tool: 'mcp__todo__exec', n: 9 } as never)).toMatchObject({ result: 'No todo #9.', isError: true })
+  await clock.settle()
+  expect(submitted).toHaveLength(2)
+  expect(todoAt(db, 2).status).toBe('prompting')
+})
+
 // ---------- prompt drafts ----------
 
 // The spawn as the engine raises it: the Agent tool spells the type subagent_type.

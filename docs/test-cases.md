@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 229 of 233 cases (98.3%)** are covered by `claude plugin test .`.
+**Coverage: 232 of 236 cases (98.3%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -171,6 +171,9 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | M5 | `mcp__todo__update` refuses a status move hooks/transitions.json doesn't allow with an error naming the allowed moves, and writes none of the report | mcp__todo__update refuses a status move the table does not allow, naming the moves it does, and writes nothing |
 | M6 | Every internal status write passes the guard: a refused move keeps the old status, is said once, and the rest of the write stands | the guard keeps a todo's status when an internal move isn't in the table, saying so once, and the rest of the write stands |
 | M7 | The moves the code writes are exactly the table's (bar its self-loop and the expiry, which write nothing), and the guard refuses none of them | every status move the code makes is in hooks/transitions.json, and every move there is one the code makes |
+| M8 | `mcp__todo__add` adds a todo as `/todo add` does (its drafter queued) and answers `Added #N <title>`; an empty or missing title answers as an error and adds nothing | mcp__todo__add adds a todo and answers its number; an empty title answers as an error |
+| M9 | `mcp__todo__delete` deletes only a todo whose row offers ✕ Delete; any other answers as an error with the same refusal `/todo delete` gives, and an unknown number as an error | mcp__todo__delete removes a todo that never ran and refuses one that ran, as the chip and the command do |
+| M10 | `mcp__todo__exec` (auto by default, `auto: false` for ▶ Exec) answers at once that the exec is queued and submits nothing inside its own hook; the exec starts from a timer, the auto one taking the first draft; a todo `/todo exec` refuses (prompting, in flight, unknown) answers as an error with the same text, and starts nothing | mcp__todo__exec queues an auto exec from a timer, as /todo exec auto does, and refuses what /todo exec refuses |
 
 ## Storage
 
@@ -190,7 +193,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | S12 | Otherwise it is under `~/.claude` | without CLAUDE_CONFIG_DIR the database is under ~/.claude |
 | S14 | A `/clear` (or `/new`) resets the session's state without a `session.start`; the list loads again from the database at its `SessionStart` | a /clear resets the session state, and the list loads again from the database |
 | S15 | A sync tick that finds no database handle sets the session up again | the sync tick sets the session up again when its state was reset under it |
-| S16 | A failure in one of the mod's own tools (`update`, `drafts`, `list`) answers with what failed, rather than the host's "no hook answered" | a failure in one of the mod's own tools answers with what failed, not as a tool nobody answered |
+| S16 | A failure in one of the mod's own tools (`update`, `drafts`, `list`, `add`, `delete`, `exec`) answers with what failed, rather than the host's "no hook answered" | a failure in one of the mod's own tools answers with what failed, not as a tool nobody answered |
 | S17 | A todo paused before it ever ran belongs to no session: ▶ Exec, `/todo exec` and `/todo resume` start it from any | a todo paused before it ever ran belongs to no session: exec or resume starts it from any |
 | S18 | A `/clear` hands the todos the ended session owned to the session that goes on; other sessions' stay theirs | a /clear hands the todos the ended session owned to the session that goes on |
 | S13 | The SQL scripts do what the stand-in models (the rev guard, the run-once import, paging) against real sqlite3 | not covered: the test sandbox runs no processes, so the scripts never reach a real sqlite3 |

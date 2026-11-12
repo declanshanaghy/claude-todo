@@ -15,7 +15,7 @@ flowchart LR
     D["Drafter<br/>haiku, read-only,<br/>one per added todo"]
     P -- "press: exec, pause, stop…" --> H
     H -- "protocol prompt" --> M
-    M -- "mcp__todo__update / list" --> H
+    M -- "mcp__todo__update / list<br/>add · delete · exec" --> H
     M -- "launches" --> A
     A -. "tool calls, turns<br/>(seen through hooks)" .-> H
     H -- "atoms: the session's copy" --> P
