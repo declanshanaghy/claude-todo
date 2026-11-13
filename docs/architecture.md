@@ -102,6 +102,7 @@ stateDiagram-v2
   failed --> blocked: Claude reports it finished (asked to)
   blocked --> drafting: ⇡ Land
   blocked --> done: Claude reports it landed by hand
+  blocked --> running: Claude launches the land (blocker cleared)
 
   stopped --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
   failed --> drafting: ✨ Refine · ↻ Restart · ⏵ Resume
@@ -120,7 +121,7 @@ stateDiagram-v2
   done --> [*]: expires
 ```
 
-Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would. Every other chip has a verb of its own name too (`/todo pause 3`, `/todo rename 3 <new title>`; see [Buttons by state](#buttons-by-state)). `/todo land` is ⇡ Land typed. A dropped prompt (`drafting → paused/failed/blocked/pending/stopped`) puts the todo back where it was. A lone Agent's end leaves its todo running: only Claude knows whether the work landed, and reports done, blocked or failed. Blocked is finished work, not failed work: its checks passed on its branch and only the landing was held up by something outside the todo (files it needs await your review or aren't committed, the base branch has an unpushed commit, a push refused for auth). So it offers no ⏵ Resume, which would launch an agent to redo finished work, nor ✨ Refine or ↻ Restart; ⇡ Land retries only the landing, and ▶ Exec and `/todo resume` refuse it, pointing to `/todo land`. A todo recorded failed before blocked existed stays failed (nothing rewrites it), but its ⏵ Resume first checks whether the work was already finished and, if so, records it blocked instead of relaunching anything; asked to, Claude can also move it to blocked with `mcp__todo__update`.
+Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would. Every other chip has a verb of its own name too (`/todo pause 3`, `/todo rename 3 <new title>`; see [Buttons by state](#buttons-by-state)). `/todo land` is ⇡ Land typed. A dropped prompt (`drafting → paused/failed/blocked/pending/stopped`) puts the todo back where it was. A lone Agent's end leaves its todo running: only Claude knows whether the work landed, and reports done, blocked or failed. Blocked is finished work, not failed work: its checks passed on its branch and only the landing was held up by something outside the todo (files it needs await your review or aren't committed, the base branch has an unpushed commit, a push refused for auth). So it offers no ⏵ Resume, which would launch an agent to redo finished work, nor ✨ Refine or ↻ Restart; ⇡ Land retries only the landing, and ▶ Exec and `/todo resume` refuse it, pointing to `/todo land`. When ⇡ Land finds the blocker still standing, the todo goes back to blocked; if it clears later in that session, Claude launches the `[todo:N] land` agent itself, without a second ⇡ Land, and that launch alone takes a blocked todo straight to running (no other Agent or Workflow launch moves or links a blocked todo). A todo recorded failed before blocked existed stays failed (nothing rewrites it), but its ⏵ Resume first checks whether the work was already finished and, if so, records it blocked instead of relaunching anything; asked to, Claude can also move it to blocked with `mcp__todo__update`.
 
 `hooks/transitions.json` is the one table of the moves a todo may make. Every status write goes through one guard (`editTodos` in `hooks/register.tsx`), which reads the table's mirror in `hooks/transitions.ts` (a hooks module can't import JSON; `node scripts/transitions.mjs` checks the two are identical and `--write` regenerates the mirror). A move the table doesn't allow keeps the old status, says so once, and lets the rest of the write stand; `mcp__todo__update` answers such a move with an error naming the moves that are allowed, and writes nothing. A test drives every move and checks the code makes exactly the table's moves. `node scripts/state-check.mjs` model-checks this diagram against the table with TLA+'s TLC; [state-validation.md](state-validation.md) has why that tool, how to run it, and what it found.
 
@@ -135,7 +136,7 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 | stopped | ■ | Halted for good; its worktree and branch are kept | You |
 | done | ✓ | Landed (or committed, with no remote) | Expires after the keep period |
 | failed | ✗ | The work itself failed, or its checks can't pass; its worktree and branch are kept | You |
-| blocked | ⊘ | The work is finished and checked on its branch, but landing it is blocked by something outside the todo; its summary names the blocker and the branch, both kept | You, once the blocker is cleared |
+| blocked | ⊘ | The work is finished and checked on its branch, but landing it is blocked by something outside the todo; its summary names the blocker and the branch, both kept | You, once the blocker is cleared (⇡ Land); Claude, when it clears later in the session after a ⇡ Land found it still blocked |
 
 `drafting` and `planning` belong to the chat: the todo leaves them only when Claude reports, or when you press Reset.
 
@@ -232,6 +233,11 @@ sequenceDiagram
   M->>M: check the blocker, changing nothing
   alt still blocked
     M->>H: mcp__todo__update (blocked, "still blocked: …")
+    opt the blocker clears later in this session
+      M->>W: Agent "[todo:N] land …" (blocked → running)
+      W-->>M: landed, still blocked, or failed
+      M->>H: mcp__todo__update (done, blocked or failed)
+    end
   else cleared
     M->>W: Agent "[todo:N] land …" (no isolation)
     W->>W: already on origin/base? report its hash · else squash, rebase, re-check

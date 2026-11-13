@@ -131,6 +131,12 @@ export const TABLE: { about: string; transitions: Move[] } = {
       "at": "mcp__todo__update"
     },
     {
+      "from": "blocked",
+      "to": "running",
+      "by": "Claude launches the land itself once the blocker it reported clears (land step 3 after a still-blocked step 2) / [todo:N] land Agent launched",
+      "at": "protocol.ts land step 3 → mcp__todo__update; register.tsx tool.call (Agent)"
+    },
+    {
       "from": "drafting",
       "to": "pending",
       "by": "↺ Reset · /todo reset (never ran) · question dismissed · prompt refused",

@@ -24,6 +24,7 @@
     { "from": "running", "to": "blocked", "by": "Claude reports the work finished but its landing blocked", "at": "protocol.ts step 6, resume step 5, land step 4" },
     { "from": "failed", "to": "blocked", "by": "Claude reports a failed todo's work was finished, only its landing blocked (asked to)", "at": "mcp__todo__update" },
     { "from": "blocked", "to": "done", "by": "Claude reports it landed outside the todo", "at": "mcp__todo__update" },
+    { "from": "blocked", "to": "running", "by": "Claude launches the land itself once the blocker it reported clears (land step 3 after a still-blocked step 2) / [todo:N] land Agent launched", "at": "protocol.ts land step 3 → mcp__todo__update; register.tsx tool.call (Agent)" },
 
     { "from": "drafting", "to": "pending", "by": "↺ Reset · /todo reset (never ran) · question dismissed · prompt refused", "at": "register.tsx resetTodo, submit; protocol.ts" },
     { "from": "planning", "to": "pending", "by": "↺ Reset · /todo reset (never ran) · question dismissed", "at": "register.tsx resetTodo; protocol.ts" },

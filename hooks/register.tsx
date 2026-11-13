@@ -1873,8 +1873,14 @@ export const register: Register = (on, options) => {
       const ran = await next(e)
       if (ran.deny === undefined && !ran.isError) {
         const r = (ran.result ?? {}) as { agentId?: string; taskId?: string; runId?: string; scriptPath?: string }
+        // A blocked todo's finished work only ever lands: its `[todo:N] land`
+        // agent (⇡ Land, or Claude once the blocker clears) becomes its run,
+        // and no other launch moves or links it.
+        const isLand = tool === 'Agent' && str(a['description']).startsWith(`[todo:${n}] land`)
         await patchTodo($, n, t =>
-          tool === 'Agent'
+          t.status === 'blocked' && !isLand
+            ? t
+            : tool === 'Agent'
             ? assign(t, { mode: 'agent', status: 'running', taskId: r.agentId ?? t.taskId, isAgentGone: undefined })
             : assign(t, {
                 mode: 'workflow',

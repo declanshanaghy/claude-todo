@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 232 of 236 cases (98.3%)** are covered by `claude plugin test .`.
+**Coverage: 234 of 238 cases (98.3%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -149,6 +149,8 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | BL4 | `mcp__todo__update` takes `blocked` from running, and from failed when Claude is asked to put an old row right; it is toasted `⊘ #N blocked`, its row's level 1 shows `⊘ <blocker>` in blocked's color, Delete's question names the branch that stays, and Details heads the summary "Landing blocked" | mcp__todo__update records finished work whose landing is blocked: toasted, its blocker on its row and in Details |
 | BL5 | ⏵ Resume first reads the todo's last report and branch, and records finished work whose landing was blocked as blocked instead of relaunching it, after which the row offers ⇡ Land | a resume first checks whether the work was already finished, and records it blocked rather than redoing it |
 | BL6 | A view stored as `shown`, before blocked had a toggle, shows blocked todos wherever it showed failed ones; the next toggle stores it as `filter` and drops `shown` | a view stored before blocked had a toggle shows blocked todos wherever it showed failed ones |
+| BL7 | The land protocol's still-blocked step has Claude go on with the land itself if the blocker clears later in the session, without waiting for another ⇡ Land | a blocked todo offers ⇡ Land and never Resume: Land submits the land protocol for its kept branch, redoing nothing |
+| BL8 | `mcp__todo__update` takes `running` from blocked, and a `[todo:N] land` Agent launch moves a blocked todo to running and links it as its run; its later done, failed or blocked report is recorded. Any other Agent launch for a blocked todo neither moves nor links it | Claude lands a blocked todo itself once its blocker clears: the land agent links as its run, and its outcome is recorded |
 
 ## A turn's end
 

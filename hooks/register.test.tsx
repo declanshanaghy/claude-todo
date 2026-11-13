@@ -4400,6 +4400,7 @@ test('a blocked todo offers ⇡ Land and never Resume: Land submits the land pro
   expect(text).toContain('- Held: /proj/.claude/worktrees/agent-ag1 (branch todo-1)')
   // Still blocked: nothing is launched, and it goes back to blocked saying why.
   expect(text).toContain('Still blocked: launch nothing. Call mcp__todo__update {n: 1, status: "blocked", summary: "still blocked: <the blocker>; branch <its branch>"}')
+  expect(text).toContain("If the blocker clears later in this session, go on with step 3 yourself; don't wait for another ⇡ Land.")
   expect(text).toContain('description starting "[todo:1] land" (no isolation')
   expect(text).toContain('already on origin/<base> (landed by hand), push nothing')
   expect(text).toContain('status is "blocked", with a summary naming the blocker and the branch')
@@ -4482,6 +4483,30 @@ test('a resume first checks whether the work was already finished, and records i
   expect(todoAt(db, 1).status).toBe('blocked')
   expect(await ui.find({ type: 'Button', key: 'act:1:land' })).toBeDefined()
   await ui.unmount()
+})
+
+test('Claude lands a blocked todo itself once its blocker clears: the land agent links as its run, and its outcome is recorded', async ($, on) => {
+  const db = seeded([blockedTodo(1), blockedTodo(2), blockedTodo(3), blockedTodo(4)])
+  engine(on, [], undefined, true, { db })
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { status: 'async_launched', agentId: 'ag9' } }))
+  await start($)
+  // Claude reports the land it launched: running from blocked, then the outcome.
+  const r = await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'running' } as never)
+  expect(r.isError).toBeFalsy()
+  expect(todoAt(db, 1).status).toBe('running')
+  await $.tool.call({ tool: 'mcp__todo__update', n: 1, status: 'blocked', summary: 'still blocked: push refused; branch todo-1' } as never)
+  expect(todoAt(db, 1)).toMatchObject({ status: 'blocked', summary: 'still blocked: push refused; branch todo-1' })
+  // The `[todo:N] land` agent's launch moves it to running and links it.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu2', description: '[todo:2] land Held up', prompt: 'p', subagent_type: 'general-purpose' } as never)
+  expect(todoAt(db, 2)).toMatchObject({ status: 'running', mode: 'agent', taskId: 'ag9' })
+  expect((await $.tool.call({ tool: 'mcp__todo__update', n: 2, status: 'failed', summary: 'rebase conflict; branch todo-2' } as never)).isError).toBeFalsy()
+  expect(todoAt(db, 2)).toMatchObject({ status: 'failed', summary: 'rebase conflict; branch todo-2' })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu4', description: '[todo:4] land Held up', prompt: 'p', subagent_type: 'general-purpose' } as never)
+  await $.tool.call({ tool: 'mcp__todo__update', n: 4, status: 'done', landed: 'abc1234' } as never)
+  expect(todoAt(db, 4)).toMatchObject({ status: 'done', landed: 'abc1234' })
+  // Any other launch for a blocked todo neither moves nor links it.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'tu3', description: '[todo:3] Held up', prompt: 'p', subagent_type: 'general-purpose' } as never)
+  expect(todoAt(db, 3)).toMatchObject({ status: 'blocked', taskId: 'ag3' })
 })
 
 test('a view stored before blocked had a toggle shows blocked todos wherever it showed failed ones', async ($, on) => {
@@ -4985,9 +5010,12 @@ test('every status move the code makes is in hooks/transitions.json, and every m
   await run('stop 3')
   await report(4, 'failed')
   // Finished work whose landing is held up: blocked, Land, still blocked,
-  // then landed by hand; a failed one reclassified, then deleted.
+  // the land Claude launches once it clears, blocked again, then landed by
+  // hand; a failed one reclassified, then deleted.
   await report(1, 'blocked')
   await run('land 1')
+  await report(1, 'blocked')
+  await report(1, 'running')
   await report(1, 'blocked')
   await report(1, 'done')
   await report(4, 'blocked')
