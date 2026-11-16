@@ -116,9 +116,11 @@ stateDiagram-v2
   drafting --> blocked: prompt refused · land started nothing · resume found it finished
 
   prompting --> [*]: ✕ Delete
-  pending --> [*]: ✕ Delete (never ran)
+  pending --> [*]: ✕ Delete (branch kept)
+  stopped --> [*]: ✕ Delete (branch kept)
+  failed --> [*]: ✕ Delete (branch kept)
   blocked --> [*]: ✕ Delete (branch kept)
-  done --> [*]: expires
+  done --> [*]: ✕ Delete (branch kept) · expires
 ```
 
 Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask first. A todo is prompting from the moment its drafter is spawned (an add, or a rename that changed its title) until the drafts are stored; it falls back to pending when the drafter ends without drafts, can't be spawned (then it never leaves pending), or isn't running in any session: the next sync tick hands back one this session prompts whose drafter it no longer tracks (a `/clear` or a restart lost it), and another session's after 2 minutes. A dismissed prompt question acts like ↺ Reset, an agent stopped outside the pane acts like ■ Stop, and `/todo exec` (with or without `auto`) is ▶ Exec or ⚡ Auto typed, which also starts a stopped or failed todo again, never a prompting one (`/todo auto` is short for `/todo exec auto`). `/todo resume` is ⏵ Resume typed, for the same todos; a todo paused before it ever ran starts as ▶ Exec would. Every other chip has a verb of its own name too (`/todo pause 3`, `/todo rename 3 <new title>`; see [Buttons by state](#buttons-by-state)). `/todo land` is ⇡ Land typed. A dropped prompt (`drafting → paused/failed/blocked/pending/stopped`) puts the todo back where it was. A lone Agent's end leaves its todo running: only Claude knows whether the work landed, and reports done, blocked or failed. Blocked is finished work, not failed work: its checks passed on its branch and only the landing was held up by something outside the todo (files it needs await your review or aren't committed, the base branch has an unpushed commit, a push refused for auth). So it offers no ⏵ Resume, which would launch an agent to redo finished work, nor ✨ Refine or ↻ Restart; ⇡ Land retries only the landing, and ▶ Exec and `/todo resume` refuse it, pointing to `/todo land`. When ⇡ Land finds the blocker still standing, the todo goes back to blocked; if it clears later in that session, Claude launches the `[todo:N] land` agent itself, without a second ⇡ Land, and that launch alone takes a blocked todo straight to running (no other Agent or Workflow launch moves or links a blocked todo). A todo recorded failed before blocked existed stays failed (nothing rewrites it), but its ⏵ Resume first checks whether the work was already finished and, if so, records it blocked instead of relaunching anything; asked to, Claude can also move it to blocked with `mcp__todo__update`.
@@ -134,7 +136,7 @@ Edges are labeled with the button that takes them; ■ Stop and ✕ Delete ask f
 | running | ▶ (spins) | An Agent or Workflow is working | Claude's report once it ends (done, blocked, failed or stopped); an abort or refusal at once |
 | paused | ⏸ | Halted with its run kept, so Resume picks up where it was | You |
 | stopped | ■ | Halted for good; its worktree and branch are kept | You |
-| done | ✓ | Landed (or committed, with no remote) | Expires after the keep period |
+| done | ✓ | Landed (or committed, with no remote) | Expires after the keep period, or you (✕ Delete) |
 | failed | ✗ | The work itself failed, or its checks can't pass; its worktree and branch are kept | You |
 | blocked | ⊘ | The work is finished and checked on its branch, but landing it is blocked by something outside the todo; its summary names the blocker and the branch, both kept | You, once the blocker is cleared (⇡ Land); Claude, when it clears later in the session after a ⇡ Land found it still blocked |
 
@@ -146,14 +148,14 @@ Each button is filled with the color of the state it leads to (the launchers in 
 
 | State | Buttons | Leads to |
 |---|---|---|
-| prompting | ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and the hint "no prompt yet: drafting prompts…"; no ▶ Exec or ⚡ Auto until its drafts turn it pending | prompting under a new drafter · confirm → removed · call browser |
-| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete (only if it never ran) · ☰ Details, and a hint: "3 drafts: ▶ Exec asks, ⚡/🔥 take the 1st" once its drafts are stored, else "no prompt yet: ▶ Exec drafts one" | drafting · drafting · prompting · confirm → removed · call browser |
+| prompting | ✎ Rename · ✕ Delete · ☰ Details, and the hint "no prompt yet: drafting prompts…"; no ▶ Exec or ⚡ Auto until its drafts turn it pending | prompting under a new drafter · confirm → removed · call browser |
+| pending | ▶ Exec · ⚡ Auto · ✎ Rename · ✕ Delete · ☰ Details, and a hint: "3 drafts: ▶ Exec asks, ⚡/🔥 take the 1st" once its drafts are stored, else "no prompt yet: ▶ Exec drafts one" | drafting · drafting · prompting · confirm → removed · call browser |
 | drafting / planning | ↺ Reset (and a hint: "answer the prompt question in the chat…" after ▶ Exec, "starting with the first draft…" after ⚡ Auto or 🔥 Fire with drafts, "drafting the prompt…" after one without, "continuing in the chat…" once it has run, "planning in the chat…"); level 1 shows the prompt, or "prompt being settled in the chat…" until Claude stores it, never "no prompt yet" | pending if it never ran, else stopped |
 | running | ⏸ Pause · ■ Stop · ☰ Details | paused · confirm → stopped · call browser |
 | paused | ⏵ Resume · ■ Stop · ☰ Details | drafting · confirm → stopped · call browser |
-| stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ☰ Details, all on one row | drafting · drafting · drafting · collapses it · call browser |
+| stopped / failed | ⏵ Resume (if there's an agent or worktree to pick up) · ✨ Refine · ↻ Restart · ✓ Leave (right after a Stop) · ✕ Delete · ☰ Details, all on one row (six chips at most) | drafting · drafting · drafting · collapses it · confirm → removed · call browser |
 | blocked | ⇡ Land · ✕ Delete · ☰ Details; level 1 shows `⊘ <what blocks it>`, and Details heads the summary "Landing blocked"; no ⏵ Resume, ✨ Refine or ↻ Restart | drafting (Claude checks the blocker, then one agent lands the kept branch) · confirm (naming the branch, which stays) → removed · call browser |
-| done | ☰ Details | call browser |
+| done | ✕ Delete · ☰ Details | confirm → removed · call browser |
 | in flight in another session | ⇄ Takeover · ☰ Details | confirm → stopped here · call browser |
 
 Every chip is also a `/todo` verb of its own name taking `<n|title>` (`/todo rename <n> <new title>` takes the number, then the title): `exec`, `auto`, `rename`, `delete`, `reset`, `pause`, `stop`, `resume`, `land`, `refine`, `restart`, `leave`, `takeover`, `details`. The row and the verb read the same `offers()` (`hooks/moves.ts`) and call the same action function, so a verb works exactly where its chip is drawn; anywhere else it answers in one line with the todo's status and the verbs that do apply, and changes nothing. `exec` and `auto` keep their wider reach (a stopped or failed todo too). A verb whose chip asks first (Stop, Delete, Takeover) acts at once, since typing it is already the explicit request, and answers any confirmation the pane had open for that todo. A verb that submits a prompt (land, refine, restart, as exec and resume) does so from a timer once the command answered; `details` opens the dialog with the pane holding the keys, and Esc goes back.
@@ -163,8 +165,10 @@ The confirmations:
 | Confirm for | Buttons |
 |---|---|
 | Stop | ■ Stop · ↩ Keep (back to running or paused) |
-| Delete | ✕ Delete · ↩ Cancel (back to pending, prompting or blocked) |
+| Delete | ✕ Delete · ↩ Cancel (back to the state it was in) |
 | Takeover | ⇄ Takeover · ↩ Cancel (left in flight there) |
+
+✕ Delete is on the row of every todo that isn't in flight, whether or not it has run: prompting, pending, stopped, failed, blocked and done. It removes the todo (and its agents' and calls' rows) and nothing else: a branch or worktree its run left stays, and when the todo records a branch the question (`Its branch <branch> stays.`) and the answer (`✕ #N deleted; its branch <branch> stays`) name it. A todo in flight has no Delete: `/todo delete` and `mcp__todo__delete` answer with the verb that takes it out of flight first, `/todo stop N` for a running or paused one, `/todo reset N` for a drafting or planning one, `/todo takeover N` for one held in another session, each of which leaves it in a state whose row offers ✕ Delete.
 
 Pane-wide controls:
 

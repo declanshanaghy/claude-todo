@@ -35,8 +35,10 @@
     { "from": "drafting", "to": "blocked", "by": "prompt refused · land started nothing · resume found the work finished", "at": "register.tsx submit; protocol.ts land steps 2 and 3, resume step 1" },
 
     { "from": "prompting", "to": "[*]", "by": "✕ Delete · /todo delete", "at": "register.tsx deleteTodo" },
-    { "from": "pending", "to": "[*]", "by": "✕ Delete · /todo delete (never ran)", "at": "register.tsx deleteTodo" },
+    { "from": "pending", "to": "[*]", "by": "✕ Delete · /todo delete (its branch is kept)", "at": "register.tsx deleteTodo" },
+    { "from": "stopped", "to": "[*]", "by": "✕ Delete · /todo delete (its branch is kept)", "at": "register.tsx deleteTodo" },
+    { "from": "failed", "to": "[*]", "by": "✕ Delete · /todo delete (its branch is kept)", "at": "register.tsx deleteTodo" },
     { "from": "blocked", "to": "[*]", "by": "✕ Delete · /todo delete (its branch is kept)", "at": "register.tsx deleteTodo" },
-    { "from": "done", "to": "[*]", "by": "expires", "at": "register.tsx expire" }
+    { "from": "done", "to": "[*]", "by": "✕ Delete · /todo delete (its branch is kept) · expires", "at": "register.tsx deleteTodo, expire" }
   ]
 }

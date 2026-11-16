@@ -1,6 +1,6 @@
 # Test cases
 
-**Coverage: 234 of 238 cases (98.3%)** are covered by `claude plugin test .`.
+**Coverage: 236 of 240 cases (98.3%)** are covered by `claude plugin test .`.
 
 Each row is one behaviour worth testing. "Covered by" names the test (by its title) that would fail if the behaviour broke. The tests run against `engine()`, the tests' stand-in for the host, which includes an in-memory SQLite that answers each script from its `-- op` header, so the rows below are about the mod's behaviour, not about the SQL text it sends.
 
@@ -35,7 +35,7 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | C23 | `/todo auto [<n\|title>]` is `/todo exec auto [<n\|title>]`; a bare `/todo exec` answers with its usage instead of running the first todo | /todo auto is short for /todo exec auto, with or without a target |
 | C24 | Every chip (exec, auto, rename, delete, reset, pause, stop, resume, land, refine, restart, leave, takeover, details) has a `/todo` verb of its name that, in every state whose row draws the chip, leads where the chip does (a confirming chip to its yes) | every chip has a /todo verb that does what the chip does wherever it is drawn, and refuses it everywhere else |
 | C25 | In every state whose row doesn't draw a chip, its verb refuses in one line naming the todo, changes nothing and submits nothing | every chip has a /todo verb that does what the chip does wherever it is drawn, and refuses it everywhere else |
-| C26 | A refusal names the todo's status and the verbs it does take; deleting a todo that ran, leaving one not just stopped, taking over one not elsewhere and acting on another session's todo each say why | a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so |
+| C26 | A refusal names the todo's status and the verbs it does take; deleting a todo in flight (which names the verb that takes it out of flight first: stop, reset or takeover), leaving one not just stopped, taking over one not elsewhere and acting on another session's todo each say why | a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so |
 | C27 | A chip verb with no target, no match or (rename) no number and title answers with its usage or the miss; rename to the same title says so | a chip verb refused names the todo, its status and the commands that do apply, and a bad target says so |
 | C28 | Every chip verb is in TODO_VERBS, so `/todo <verb> …` runs the verb and never adds a todo titled after it | a chip verb is a verb, never a title: /todo <verb> runs it rather than adding a todo |
 | C29 | Stop, Delete and Takeover typed act at once, without the pane's question, and answer a confirmation the pane had open for that todo; Leave typed folds a just-stopped todo | a command acts without the question its chip asks, answering a confirmation the pane had open |
@@ -132,7 +132,9 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | P5 | Stop asks first; Keep running cancels; confirming writes the todo and its agents stopped and keeps the todo | M5: Stop asks first, keeps the todo, and offers what next; Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring |
 | P6 | Leave stopped folds the todo away | Pause, Resume and Stop of a lone Agent write the todo, its agent and its open calls, and move the ring |
 | P7 | A refused TaskStop is toasted and the todo is still marked paused | a refused TaskStop says so, and the todo is still marked paused |
-| P8 | Delete is offered only before a todo has run, behind a confirmation | M6: Delete is pre-exec only and confirms first |
+| P8 | Delete asks first, behind a confirmation | M6: Delete confirms first |
+| P25 | A pending todo that has run offers ✕ Delete: the chip asks first with the ring on Cancel, its question and its answer name the branch that stays when the todo records one and none otherwise, and `/todo delete` acts at once, answering the pane's open question | a pending todo that has run can be deleted: its chip asks first, naming the branch that stays, and /todo delete acts at once |
+| P26 | A stopped, failed or done todo offers ✕ Delete, by its chip, `/todo delete` and `mcp__todo__delete`; a just-stopped row stays one row of six chips (Resume, Refine, Restart, Leave, Delete, Details); the delete writes only the list, so a branch or worktree stays | a stopped, failed or done todo can be deleted, a just-stopped one keeping one row of six chips with Delete before Details |
 | P9 | Delete removes the todo's row | Delete removes the row and puts the ring on the add input |
 | P10 | Another session's in-flight todo offers Take over, not Pause | another session's running todo offers Take over, which stops it here |
 | P11 | Take over writes the todo stopped and clears its task, run and owner | another session's running todo offers Take over, which stops it here |
@@ -172,9 +174,9 @@ Each row is one behaviour worth testing. "Covered by" names the test (by its tit
 | M4 | `mcp__todo__list` answers the backlog as JSON text | mcp__todo__update reports a change and mcp__todo__list reads the backlog |
 | M5 | `mcp__todo__update` refuses a status move hooks/transitions.json doesn't allow with an error naming the allowed moves, and writes none of the report | mcp__todo__update refuses a status move the table does not allow, naming the moves it does, and writes nothing |
 | M6 | Every internal status write passes the guard: a refused move keeps the old status, is said once, and the rest of the write stands | the guard keeps a todo's status when an internal move isn't in the table, saying so once, and the rest of the write stands |
-| M7 | The moves the code writes are exactly the table's (bar its self-loop and the expiry, which write nothing), and the guard refuses none of them | every status move the code makes is in hooks/transitions.json, and every move there is one the code makes |
+| M7 | The moves the code writes are exactly the table's (bar its self-loop, which writes nothing), and the guard refuses none of them | every status move the code makes is in hooks/transitions.json, and every move there is one the code makes |
 | M8 | `mcp__todo__add` adds a todo as `/todo add` does (its drafter queued) and answers `Added #N <title>`; an empty or missing title answers as an error and adds nothing | mcp__todo__add adds a todo and answers its number; an empty title answers as an error |
-| M9 | `mcp__todo__delete` deletes only a todo whose row offers ✕ Delete; any other answers as an error with the same refusal `/todo delete` gives, and an unknown number as an error | mcp__todo__delete removes a todo that never ran and refuses one that ran, as the chip and the command do |
+| M9 | `mcp__todo__delete` deletes only a todo whose row offers ✕ Delete: one at rest, whether or not it has run, saying which branch stays; one in flight answers as an error with the same refusal `/todo delete` gives, naming the verb to use first, after which the delete goes through; an unknown number answers as an error | mcp__todo__delete removes a todo at rest, run or not, and refuses one in flight, as the chip and the command do |
 | M10 | `mcp__todo__exec` (auto by default, `auto: false` for ▶ Exec) answers at once that the exec is queued and submits nothing inside its own hook; the exec starts from a timer, the auto one taking the first draft; a todo `/todo exec` refuses (prompting, in flight, unknown) answers as an error with the same text, and starts nothing | mcp__todo__exec queues an auto exec from a timer, as /todo exec auto does, and refuses what /todo exec refuses |
 
 ## Storage

@@ -518,7 +518,7 @@ test('M5: Stop asks first, keeps the todo, and offers what next', async ($, on) 
   await ui.unmount()
 })
 
-test('M6: Delete is pre-exec only and confirms first', async ($, on) => {
+test('M6: Delete confirms first', async ($, on) => {
   engine(on, [])
   await start($)
   await todo($, 'add Fix kitty tab titles')
@@ -1920,7 +1920,17 @@ const BY_STATE: StateRow[] = [
     chips: { exec: 'drafting', auto: 'drafting', rename: 'pending', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
   },
   { state: 'pending, confirming Delete', todo: n => aTodo(n, 'Waiting'), before: ['delete'], chips: { deleteyes: 'removed', cancel: 'pending' } },
-  { state: 'pending, has run', todo: n => aTodo(n, 'Again', { hasRun: true }), chips: { exec: 'drafting', auto: 'drafting', rename: 'pending', details: 'browser' } },
+  {
+    state: 'pending, has run',
+    todo: n => aTodo(n, 'Again', { hasRun: true }),
+    chips: { exec: 'drafting', auto: 'drafting', rename: 'pending', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+  },
+  {
+    state: 'pending, has run, confirming Delete',
+    todo: n => aTodo(n, 'Again', { hasRun: true }),
+    before: ['delete'],
+    chips: { deleteyes: 'removed', cancel: 'pending' },
+  },
   { state: 'drafting, never ran', todo: n => aTodo(n, 'Drafting', { status: 'drafting', owner: 's1' }), chips: { reset: 'pending' } },
   { state: 'drafting, has run', todo: n => aTodo(n, 'Drafting', { status: 'drafting', hasRun: true, owner: 's1' }), chips: { reset: 'stopped' } },
   { state: 'planning, never ran', todo: n => aTodo(n, 'Planning', { status: 'planning', owner: 's1' }), chips: { reset: 'pending' } },
@@ -1937,22 +1947,34 @@ const BY_STATE: StateRow[] = [
     state: 'stopped, right after a Stop',
     todo: n => running(n, 'Halted'),
     before: ['stop', 'stopyes'],
-    chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting', leave: 'stopped' },
+    chips: { refine: 'drafting', restart: 'drafting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser', resume: 'drafting', leave: 'stopped' },
   },
   {
     state: 'stopped, nothing to pick up',
     todo: n => aTodo(n, 'Halted', { status: 'stopped', hasRun: true }),
-    chips: { refine: 'drafting', restart: 'drafting', details: 'browser' },
+    chips: { refine: 'drafting', restart: 'drafting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+  },
+  {
+    state: 'stopped, confirming Delete',
+    todo: n => aTodo(n, 'Halted', { status: 'stopped', hasRun: true }),
+    before: ['delete'],
+    chips: { deleteyes: 'removed', cancel: 'stopped' },
   },
   {
     state: 'stopped, its agent kept',
     todo: n => aTodo(n, 'Halted', { status: 'stopped', hasRun: true, mode: 'agent', taskId: `ag${n}` }),
-    chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting' },
+    chips: { refine: 'drafting', restart: 'drafting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser', resume: 'drafting' },
   },
   {
     state: 'failed',
     todo: n => aTodo(n, 'Broke', { status: 'failed', hasRun: true, mode: 'agent', taskId: `ag${n}` }),
-    chips: { refine: 'drafting', restart: 'drafting', details: 'browser', resume: 'drafting' },
+    chips: { refine: 'drafting', restart: 'drafting', delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser', resume: 'drafting' },
+  },
+  {
+    state: 'failed, confirming Delete',
+    todo: n => aTodo(n, 'Broke', { status: 'failed', hasRun: true, mode: 'agent', taskId: `ag${n}` }),
+    before: ['delete'],
+    chips: { deleteyes: 'removed', cancel: 'failed' },
   },
   {
     state: 'blocked',
@@ -1966,7 +1988,17 @@ const BY_STATE: StateRow[] = [
     chips: { deleteyes: 'removed', cancel: 'blocked' },
   },
   // Done far ahead of the test clock, so it can't leave the tree mid-table.
-  { state: 'done', todo: n => aTodo(n, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }), chips: { details: 'browser' } },
+  {
+    state: 'done',
+    todo: n => aTodo(n, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }),
+    chips: { delete: { confirm: ['deleteyes', 'cancel'] }, details: 'browser' },
+  },
+  {
+    state: 'done, confirming Delete',
+    todo: n => aTodo(n, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now() }),
+    before: ['delete'],
+    chips: { deleteyes: 'removed', cancel: 'done' },
+  },
   {
     state: 'in flight in another session',
     todo: n => running(n, 'Elsewhere', { owner: 'other' }),
@@ -2311,6 +2343,72 @@ test('Delete removes the row and puts the ring on the add input', async ($, on) 
   await ui.unmount()
 })
 
+test('a pending todo that has run can be deleted: its chip asks first, naming the branch that stays, and /todo delete acts at once', async ($, on) => {
+  const toasts: string[] = []
+  const db = seeded([aTodo(1, 'Ran before', { hasRun: true, prompt: 'p', branch: 'todo-1/fix' }), aTodo(2, 'Ran too', { hasRun: true, prompt: 'p' })])
+  engine(on, [], undefined, true, { db, toasts })
+  await start($)
+  const ui = await mountAll($)
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:delete' })
+  // Nothing goes until the question is answered, and it starts on the safe choice.
+  expect(todoAt(db, 1).status).toBe('pending')
+  expect((await ui.find({ type: 'Text', text: /^Delete "#1/ }))?.text).toBe('Delete "#1 Ran before"? Its branch todo-1/fix stays.')
+  expect(await isLit(ui, 'act:1:cancel')).toBe(true)
+  await ui.press({ key: 'act:1:deleteyes' })
+  expect(db.todos['/proj']?.[1]).toBeUndefined()
+  expect(toasts).toContain('✕ #1 deleted; its branch todo-1/fix stays')
+  // With no branch on record the question and the answer name none.
+  await ui.press({ key: 'todo:2' })
+  await ui.press({ key: 'act:2:delete' })
+  expect((await ui.find({ type: 'Text', text: /^Delete "#2/ }))?.text).toBe('Delete "#2 Ran too"?')
+  expect((await todo($, 'delete 2')).text).toBe('✕ #2 deleted')
+  expect(db.todos['/proj']?.[2]).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'act:2:cancel' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a stopped, failed or done todo can be deleted, a just-stopped one keeping one row of six chips with Delete before Details', async ($, on) => {
+  const db = seeded([
+    running(1, 'Runs'),
+    aTodo(2, 'Broke', { status: 'failed', hasRun: true, prompt: 'p', branch: 'todo-2/broke' }),
+    aTodo(3, 'Finished', { status: 'done', hasRun: true, doneAt: Date.now(), branch: 'todo-3/finished' }),
+    aTodo(4, 'Halted', { status: 'stopped', hasRun: true, prompt: 'p' }),
+  ])
+  const { ops } = engine(on, [], undefined, true, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
+  await start($)
+  const ui = await mountAll($)
+  const chipsOf = async (n: number) =>
+    (await ui.findAll({ type: 'Button' })).flatMap(b => (b.key?.startsWith(`act:${n}:`) ? [b.key.slice(`act:${n}:`.length)] : []))
+  // Just stopped: the fullest row there is, in the row's order.
+  await ui.press({ key: 'todo:1' })
+  await ui.press({ key: 'act:1:stop' })
+  await ui.press({ key: 'act:1:stopyes' })
+  expect(await chipsOf(1)).toEqual(['resume', 'refine', 'restart', 'leave', 'delete', 'details'])
+  await ui.press({ key: 'act:1:delete' })
+  expect(await chipsOf(1)).toEqual(['deleteyes', 'cancel'])
+  expect(await isLit(ui, 'act:1:cancel')).toBe(true)
+  await ui.press({ key: 'act:1:deleteyes' })
+  expect(db.todos['/proj']?.[1]).toBeUndefined()
+  // Stopped earlier, by its chip.
+  await ui.press({ key: 'todo:4' })
+  expect(await chipsOf(4)).toEqual(['refine', 'restart', 'delete', 'details'])
+  await ui.press({ key: 'act:4:delete' })
+  await ui.press({ key: 'act:4:deleteyes' })
+  expect(db.todos['/proj']?.[4]).toBeUndefined()
+  // Failed, by the command; done, by the tool. Each says its branch stays.
+  expect((await todo($, 'delete 2')).text).toBe('✕ #2 deleted; its branch todo-2/broke stays')
+  expect(db.todos['/proj']?.[2]).toBeUndefined()
+  await ui.press({ key: 'todo:3' })
+  expect(await chipsOf(3)).toEqual(['delete', 'details'])
+  expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 3 } as never)).toMatchObject({ result: '✕ #3 deleted; its branch todo-3/finished stays' })
+  expect(db.todos['/proj']?.[3]).toBeUndefined()
+  // Only the todo went: each delete was one write of the list, nothing else.
+  expect(ops.filter(op => op.kind === 'todos' && op.del.length > 0).map(op => (op.kind === 'todos' ? op.del : []))).toEqual([[1], [4], [2], [3]])
+  await ui.unmount()
+})
+
 // ---------- a turn's end ----------
 
 test("an agent's turn ends it: a lone Agent's todo stays running until Claude reports, a refusal fails it, an abort stops it", async ($, on) => {
@@ -2378,18 +2476,35 @@ test('mcp__todo__add adds a todo and answers its number; an empty title answers 
   expect(missing).toMatchObject({ isError: true })
 })
 
-test('mcp__todo__delete removes a todo that never ran and refuses one that ran, as the chip and the command do', async ($, on) => {
-  const db = seeded([aTodo(1, 'Never ran'), aTodo(2, 'Ran once', { status: 'stopped', hasRun: true, prompt: 'p' })])
+test('mcp__todo__delete removes a todo at rest, run or not, and refuses one in flight, as the chip and the command do', async ($, on) => {
+  const db = seeded([
+    aTodo(1, 'Never ran'),
+    aTodo(2, 'Ran once', { status: 'stopped', hasRun: true, prompt: 'p', branch: 'todo-2/ran-once' }),
+    running(3, 'Runs'),
+    aTodo(4, 'Ran, then put back', { hasRun: true, prompt: 'p' }),
+  ])
   engine(on, [], undefined, true, { db })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => ({ result: { message: 'stopped', task_id: String(e.task_id), task_type: 'local_agent' } }))
   await start($)
   expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 1 } as never)).toMatchObject({ result: '✕ #1 deleted' })
   expect(db.todos['/proj']?.[1]).toBeUndefined()
+  // A pending todo that has run goes too, and a stopped one, whose branch stays.
+  const ran = await $.tool.call({ tool: 'mcp__todo__delete', n: 4 } as never)
+  expect(ran).toMatchObject({ result: '✕ #4 deleted' })
+  expect(ran.isError).toBeFalsy()
+  expect(db.todos['/proj']?.[4]).toBeUndefined()
+  expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 2 } as never)).toMatchObject({ result: '✕ #2 deleted; its branch todo-2/ran-once stays' })
   const listed = await $.tool.call({ tool: 'mcp__todo__list' } as never)
-  expect((JSON.parse(String(listed.result)) as { n: number }[]).map(t => t.n)).toEqual([2])
-  const ran = await $.tool.call({ tool: 'mcp__todo__delete', n: 2 } as never)
-  expect(ran).toMatchObject({ isError: true })
-  expect(String(ran.result)).toBe((await todo($, 'delete 2')).text)
-  expect(todoAt(db, 2).status).toBe('stopped')
+  expect((JSON.parse(String(listed.result)) as { n: number }[]).map(t => t.n)).toEqual([3])
+  // In flight: refused as /todo delete refuses it, naming what to do first.
+  const live = await $.tool.call({ tool: 'mcp__todo__delete', n: 3 } as never)
+  expect(live).toMatchObject({ result: "#3 is running: only a todo that isn't in flight can be deleted; /todo stop 3 first.", isError: true })
+  expect(String(live.result)).toBe((await todo($, 'delete 3')).text)
+  expect(todoAt(db, 3).status).toBe('running')
+  // That move exists, and leads somewhere Delete applies.
+  expect((await todo($, 'stop 3')).text).toBe('■ #3 stopped')
+  expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 3 } as never)).toMatchObject({ result: '✕ #3 deleted' })
+  expect(db.todos['/proj']?.[3]).toBeUndefined()
   expect(await $.tool.call({ tool: 'mcp__todo__delete', n: 9 } as never)).toMatchObject({ result: 'No todo #9.', isError: true })
 })
 
@@ -4848,7 +4963,10 @@ test('a chip verb refused names the todo, its status and the commands that do ap
   expect(await said('pause 1')).toBe('#1 is pending, so /todo pause doesn\'t apply; it takes /todo exec 1 · /todo auto 1 · /todo rename 1 · /todo delete 1 · /todo details 1.')
   expect(await said('reset 3')).toBe('#3 is running, so /todo reset doesn\'t apply; it takes /todo pause 3 · /todo stop 3 · /todo details 3.')
   expect(await said('stop 6')).toBe('#6 is drafting, so /todo stop doesn\'t apply; it takes /todo reset 6.')
-  expect(await said('delete 2')).toBe('#2 has run: only a todo that never ran can be deleted.')
+  // Delete is refused only in flight, naming the verb that takes it out first.
+  expect(await said('delete 3')).toBe("#3 is running: only a todo that isn't in flight can be deleted; /todo stop 3 first.")
+  expect(await said('delete 6')).toBe("#6 is drafting: only a todo that isn't in flight can be deleted; /todo reset 6 first.")
+  expect(await said('delete 5')).toBe("#5 is running in another session: only a todo that isn't in flight can be deleted; /todo takeover 5 first.")
   expect(await said('leave 4')).toBe("#4 wasn't just stopped: nothing to leave.")
   expect(await said('takeover 3')).toBe('#3 is running, not in flight in another session: nothing to take over.')
   expect(await said('pause 5')).toBe('#5 is running in another session.')
@@ -5020,16 +5138,22 @@ test('every status move the code makes is in hooks/transitions.json, and every m
   await report(1, 'done')
   await report(4, 'blocked')
   await run('delete 4')
+  // Todos that ran, deleted at rest: stopped, failed and done.
+  await run('delete 3')
+  await run('restart 2')
+  await report(2, 'running')
+  await report(2, 'failed')
+  await run('delete 2')
+  await run('delete 10')
   await run('reset 5')
   await run('reset 6')
   await run('reset 7')
   await run('delete 8')
   await run('delete 9')
   expect(toasts.filter(x => x.includes("can't go from"))).toEqual([])
-  // A write that keeps the status isn't a move; done → [*] is the tree
-  // hiding a done todo, never a write.
+  // A write that keeps the status isn't a move.
   const table = new Set(TABLE.transitions.map(m => `${m.from} → ${m.to}`))
-  const quiet = new Set(['prompting → prompting', 'done → [*]'])
+  const quiet = new Set(['prompting → prompting'])
   const moves = [...made].filter(m => m.split(' → ')[0] !== m.split(' → ')[1])
   expect(moves.filter(m => !table.has(m))).toEqual([])
   expect([...table].filter(m => !quiet.has(m) && !made.has(m))).toEqual([])

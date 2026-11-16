@@ -187,7 +187,19 @@ export const TABLE: { about: string; transitions: Move[] } = {
     {
       "from": "pending",
       "to": "[*]",
-      "by": "✕ Delete · /todo delete (never ran)",
+      "by": "✕ Delete · /todo delete (its branch is kept)",
+      "at": "register.tsx deleteTodo"
+    },
+    {
+      "from": "stopped",
+      "to": "[*]",
+      "by": "✕ Delete · /todo delete (its branch is kept)",
+      "at": "register.tsx deleteTodo"
+    },
+    {
+      "from": "failed",
+      "to": "[*]",
+      "by": "✕ Delete · /todo delete (its branch is kept)",
       "at": "register.tsx deleteTodo"
     },
     {
@@ -199,8 +211,8 @@ export const TABLE: { about: string; transitions: Move[] } = {
     {
       "from": "done",
       "to": "[*]",
-      "by": "expires",
-      "at": "register.tsx expire"
+      "by": "✕ Delete · /todo delete (its branch is kept) · expires",
+      "at": "register.tsx deleteTodo, expire"
     }
   ]
 }

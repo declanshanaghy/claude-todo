@@ -68,7 +68,7 @@ From the first run (2026-10-31). Todo #23 fixed every mismatch; the script now r
 | `drafting → paused` and `drafting → failed` missing from the diagram | Added to the diagram as "prompt refused · resume started nothing" |
 | `done → failed`: a lone agent's end marked its todo done before anyone knew whether the work landed | `turn.complete` now keeps the todo running (with the answer's first line as its summary) until Claude reports done or failed; a refused turn still fails it at once. The move is gone from the table |
 | `mcp__todo__update` accepted any status from any state | It refuses a move the table doesn't allow with an error naming the allowed ones, and writes nothing. Every internal write passes the same guard in `editTodos`, which keeps the old status and warns |
-| Nothing kept the table honest | A test drives every move and checks the moves written to the database are exactly the table's (bar the self-loop and the expiry, which write nothing) |
+| Nothing kept the table honest | A test drives every move and checks the moves written to the database are exactly the table's (bar the self-loop, which writes nothing) |
 
 The original findings, as found:
 

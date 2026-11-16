@@ -39,14 +39,17 @@ export type Chip =
 // put away or destroy, Details last. `justStopped` are the todos stopped
 // here a moment ago, which offer ✓ Leave. A chip is offered only where it
 // can act. Stop, Delete and Takeover ask first in the pane, while their
-// commands, already explicit, act at once.
+// commands, already explicit, act at once. ✕ Delete is on every row but an
+// in-flight one's (INFLIGHT, or held in another session), whether or not the
+// todo has run: it removes the todo only, never a branch or worktree its run
+// left.
 export function offers(t: Todo, me: string, justStopped: readonly number[]): Chip[] {
   if (isOwnedElsewhere(t, me)) return ['takeover', 'details']
   switch (t.status) {
     case 'prompting':
     case 'pending':
       // Nothing may start a prompting todo until its drafts turn it pending.
-      return [...(t.status === 'pending' ? (['exec', 'auto'] as const) : []), 'rename', ...(t.hasRun ? [] : (['delete'] as const)), 'details']
+      return [...(t.status === 'pending' ? (['exec', 'auto'] as const) : []), 'rename', 'delete', 'details']
     case 'drafting':
     case 'planning':
       return ['reset']
@@ -61,6 +64,7 @@ export function offers(t: Todo, me: string, justStopped: readonly number[]): Chi
         'refine',
         'restart',
         ...(justStopped.includes(t.n) ? (['leave'] as const) : []),
+        'delete',
         'details',
       ]
     case 'blocked':
@@ -68,7 +72,7 @@ export function offers(t: Todo, me: string, justStopped: readonly number[]): Chi
       // retry, or the todo to drop (its branch stays either way).
       return ['land', 'delete', 'details']
     case 'done':
-      return ['details']
+      return ['delete', 'details']
   }
 }
 

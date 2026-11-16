@@ -383,7 +383,7 @@ export function drawPane($: $, e: RenderInput<'Pane'>, { queued, me, fault, ring
         labels,
         rows: [
           <Text color="error" wrap="truncate-end">
-            Delete "#{t.n} {t.title}"?{t.status === 'blocked' && t.branch ? ` Its branch ${t.branch} stays.` : ''}
+            Delete "#{t.n} {t.title}"?{t.branch ? ` Its branch ${t.branch} stays.` : ''}
           </Text>,
           <Box gap={1}>
             {btn('deleteyes', 'Delete', () => deleteTodo($, t), 'danger')}

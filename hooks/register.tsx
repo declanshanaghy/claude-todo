@@ -707,7 +707,7 @@ export const VERBS: readonly { verb: string; also?: readonly string[]; use: stri
   { verb: 'refine', use: '/todo refine <n|title>', means: 'pick a new prompt, then restart' },
   { verb: 'restart', use: '/todo restart <n|title>', means: 'run again with the same prompt' },
   { verb: 'reset', use: '/todo reset <n|title>', means: 'put a stuck todo back to pending or stopped' },
-  { verb: 'delete', use: '/todo delete <n|title>', means: 'remove a todo that never ran, or a blocked one' },
+  { verb: 'delete', use: '/todo delete <n|title>', means: "remove a todo that isn't in flight; its branch stays" },
   { verb: 'takeover', use: '/todo takeover <n|title>', means: "take another session's todo over" },
   { verb: 'rename', use: '/todo rename <n> <new title>', means: 'retitle a todo, drafting again' },
   { verb: 'leave', use: '/todo leave <n|title>', means: 'leave a just-stopped todo as it is' },
@@ -1025,9 +1025,14 @@ const isChipVerb = (v: string): v is Chip => (CHIP_VERBS as readonly string[]).i
 // row does offer, so the answer names the commands that apply.
 function chipRefusal(t: Todo, verb: Chip, on: readonly Chip[]) {
   const at = `#${t.n} is ${t.status}`
+  // Delete is refused only in flight: the answer names the verb on its row
+  // that takes it out of flight, after which its row offers ✕ Delete.
+  if (verb === 'delete') {
+    const first = on.includes('takeover') ? 'takeover' : on.includes('reset') ? 'reset' : 'stop'
+    return `${at}${first === 'takeover' ? ' in another session' : ''}: only a todo that isn't in flight can be deleted; /todo ${first} ${t.n} first.`
+  }
   if (on.includes('takeover')) return `${at} in another session.`
   if (verb === 'takeover') return `${at}, not in flight in another session: nothing to take over.`
-  if (verb === 'delete' && on.includes('rename')) return `#${t.n} has run: only a todo that never ran can be deleted.`
   if (verb === 'leave' && on.includes('refine')) return `#${t.n} wasn't just stopped: nothing to leave.`
   return `${at}, so /todo ${verb} doesn't apply; it takes ${on.map(v => `/todo ${v} ${t.n}`).join(' · ')}.`
 }
@@ -1360,7 +1365,9 @@ export async function takeOver($: $, t: Todo, via: Via = 'chip') {
   return say(`#${t.n} taken over: stopped here; its run in the other session isn't stopped`)
 }
 
-// Resolves what it did, or why it didn't.
+// ✕ Delete removes the todo only: a branch its run made (and that branch's
+// worktree) stays, which its question and its answer both say. Resolves what
+// it did, or why it didn't.
 export async function deleteTodo($: $, t: Todo, via: Via = 'chip') {
   const say = (text: string) => {
     if (via === 'chip') $.ui.toast(text)
@@ -1368,11 +1375,13 @@ export async function deleteTodo($: $, t: Todo, via: Via = 'chip') {
   }
   const refused: string[] = []
   const isSaved = await editTodos($, l => l.filter(x => x.n !== t.n), refused)
-  await patchUi($, u => ({ ...u, confirm: null }))
+  const isGone = isSaved && refused.length === 0
+  // A todo stopped a moment ago is no longer one to leave once it's gone.
+  await patchUi($, u => ({ ...u, confirm: null, justStopped: isGone ? u.justStopped.filter(x => x !== t.n) : u.justStopped }))
   await syncStatus($)
-  if (!isSaved || refused.length > 0) return refused[0] ?? 'the todo list could not be saved'
+  if (!isGone) return refused[0] ?? 'the todo list could not be saved'
   if (via === 'chip') await focus($, 'add')
-  return say(`✕ #${t.n} deleted`)
+  return say(`✕ #${t.n} deleted${t.branch ? `; its branch ${t.branch} stays` : ''}`)
 }
 
 // Resolves what it did.
@@ -1655,7 +1664,7 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'delete',
       description:
-        'Delete a todo-pane todo that never ran (pending or still prompting), or a blocked one (its branch is kept). Any other todo is refused, naming what applies to it.',
+        "Delete a todo-pane todo that isn't in flight (prompting, pending, stopped, failed, blocked or done), whether or not it has run. Only the todo goes: a branch or worktree its run left is kept. One in flight (drafting, planning, running, paused, or held in another session) is refused, naming what to do first.",
       inputSchema: {
         type: 'object',
         properties: { n: { type: 'integer', description: 'Todo number' } },
